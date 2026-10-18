@@ -3073,6 +3073,41 @@ class MainActivity : Activity() {
         val english = mapOf(
             "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
             "Configurações" to "Settings", "Geral" to "General", "Interface" to "Interface",
+            "Tema escuro equilibrado para uso diário." to "Balanced dark theme for everyday use.",
+            "Fundo preto para ecrãs OLED, com menos brilho." to "Pure black for OLED displays with less glow.",
+            "Fundo claro com texto escuro e contraste elevado." to "Light background with dark text and strong contrast.",
+            "Destaque suave e confortável." to "A soft, comfortable accent.",
+            "Destaque frio e nítido." to "A crisp, cool accent.",
+            "Destaque verde natural." to "A natural green accent.",
+            "Destaque quente e vivo." to "A warm, vivid accent.",
+            "Destaque rosa suave." to "A soft pink accent.",
+            "Destaque vermelho forte." to "A strong red accent.",
+            "Destaque amarelo luminoso." to "A bright yellow accent.",
+            "Os teus ficheiros" to "Your files",
+            "selecionado(s)" to "selected", "item" to "item", "itens" to "items",
+            "Nome, parte do nome ou padrão (*.zip)" to "Name, part of a name, or pattern (*.zip)",
+            "Pastas" to "Folders", "Imagens" to "Images", "Vídeos" to "Videos", "Áudio" to "Audio",
+            "Documentos" to "Documents", "Texto e código" to "Text and code", "Arquivos comprimidos" to "Archives",
+            "Aplicações APK" to "APK applications", "Outros ficheiros" to "Other files",
+            "Incluir subpastas" to "Include subfolders", "Âmbito da pesquisa" to "Search scope",
+            "Pesquisar nesta pasta" to "Search this folder", "Resultados da pesquisa" to "Search results",
+            "A pesquisa começa nesta pasta e nunca sai dela." to "Search starts in this folder and never leaves it.",
+            "Filtrar resultados" to "Filter results", "Nenhum resultado encontrado nesta pasta." to "No results found in this folder.",
+            "A preparar pesquisa…" to "Preparing search…", "A parar a pesquisa…" to "Stopping search…",
+            "Pesquisa concluída" to "Search complete", "Pesquisa interrompida" to "Search stopped",
+            "Analisados" to "Scanned", "resultados" to "results", "itens analisados" to "items scanned",
+            "pastas sem acesso" to "folders without access", "Limite de 500 resultados; afina a pesquisa." to "500-result limit; refine your search.",
+            "Mais ações" to "More actions", "Pasta" to "Folder", "Ficheiro" to "File",
+            "Tema escuro equilibrado para uso diário." to "Balanced dark theme for everyday use.",
+            "Fundo preto para ecrãs OLED, com menos brilho." to "Pure black for OLED displays with less glow.",
+            "Fundo claro com texto escuro e contraste elevado." to "Light background with dark text and strong contrast.",
+            "Destaque suave e confortável." to "A soft, comfortable accent.",
+            "Destaque frio e nítido." to "A crisp, cool accent.",
+            "Destaque verde natural." to "A natural green accent.",
+            "Destaque quente e vivo." to "A warm, vivid accent.",
+            "Destaque rosa suave." to "A soft pink accent.",
+            "Destaque vermelho forte." to "A strong red accent.",
+            "Destaque amarelo luminoso." to "A bright yellow accent.",
             "Compressão" to "Compression", "2 idiomas" to "2 languages",
             "Idioma, notificações e informações" to "Language, notifications and app information",
             "Tema, cor de destaque e aparência" to "Theme, accent color and appearance",
@@ -3583,6 +3618,7 @@ class MainActivity : Activity() {
             row.setOnClickListener {
                 accentName = option
                 savePreferences()
+                applyPaletteToWindow()
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
             }
