@@ -2,6 +2,11 @@
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
 
+## Archiver 0.7.2
+
+- Fix release builds by including XZ for Java explicitly, allowing R8 to resolve the optional classes used by Apache Commons Compress.
+- Version code: 9.
+
 ## Highlights
 
 - Shared-storage browsing with breadcrumb navigation, favorites, sorting, hidden files, multi-selection and detailed, compact or grid views.
