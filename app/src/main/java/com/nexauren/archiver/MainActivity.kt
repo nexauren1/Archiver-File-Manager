@@ -181,10 +181,15 @@ class MainActivity : Activity() {
     private val folderColors = linkedMapOf<String, String>()
     private val folderIcons = linkedMapOf<String, String>()
     private var backgroundPreset = "Carvão"
+    private var lastDirectorySignature = ""
     private val refreshHandler = Handler(Looper.getMainLooper())
     private val autoRefreshTask = object : Runnable {
         override fun run() {
-            if (browserRendered && !settingsOpen && !editorOpen && !workActive.get() && hasStorageAccess()) refreshFiles()
+            if (browserRendered && !settingsOpen && !editorOpen && !workActive.get() && hasStorageAccess()) {
+                updateStorageSummary()
+                val signature = directorySignature()
+                if (signature != lastDirectorySignature) refreshFiles()
+            }
             refreshHandler.postDelayed(this, 5000L)
         }
     }
@@ -530,7 +535,9 @@ class MainActivity : Activity() {
             gridRows = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
             rows.addView(gridRows, LinearLayout.LayoutParams(-1, -2))
         }
-        val files = safeList(currentDir).filter { showHidden || !it.name.startsWith(".") }.toMutableList()
+        val listedFiles = safeList(currentDir)
+        lastDirectorySignature = signatureFor(listedFiles)
+        val files = listedFiles.filter { showHidden || !it.name.startsWith(".") }.toMutableList()
         visibleFileCount = files.size
         val comparator = when (sortBy) {
             "Tamanho" -> compareBy<File> { if (it.isDirectory) -1L else it.length() }
@@ -556,6 +563,12 @@ class MainActivity : Activity() {
         }
         files.forEach { addFileRow(it) }
         updateSelectionBar()
+    }
+
+    private fun directorySignature(): String = signatureFor(safeList(currentDir))
+
+    private fun signatureFor(files: List<File>): String = files.joinToString("|") {
+        it.name + ":" + if (it.isDirectory) "d" else it.length().toString() + ":" + it.lastModified().toString()
     }
 
     private fun renderBreadcrumbs() {
@@ -3909,7 +3922,12 @@ class MainActivity : Activity() {
             "itens" to "items",
             "Tamanho calculado" to "Calculated size",
             "Seleciona uma pasta." to "Choose a folder.",
-            "A calcular tamanho da pasta…" to "Calculating folder size…"
+            "A calcular tamanho da pasta…" to "Calculating folder size…",
+            "Fundo da interface" to "Interface background", "Personaliza o fundo sem alterar os ficheiros" to "Customize the background without changing files",
+            "Ícones das pastas" to "Folder icons", "Ícone da pasta" to "Folder icon", "Escolhe um ícone para cada pasta" to "Choose an icon for each folder",
+            "Normal" to "Classic", "Câmara" to "Camera", "Transferências" to "Downloads", "Música" to "Music", "Floresta" to "Forest", "Oceano" to "Ocean", "Ameixa" to "Plum", "Carvão" to "Charcoal",
+            "Armazenamento" to "Storage", "usados" to "used", "livres" to "free", "Ícone da pasta alterado." to "Folder icon changed.",
+            "Não existem pastas nesta localização." to "There are no folders in this location.", "Personaliza o fundo sem alterar os ficheiros" to "Customize the background without changing files"
         )
         if (appLanguage == "en") return english[text] ?: text
         val localized = when (appLanguage) {
@@ -3983,7 +4001,11 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "Oscuro (recomendado)",
             "Preto OLED (ecrãs OLED)" to "Negro OLED (pantallas OLED)",
             "Claro (boa visibilidade à luz do dia)" to "Claro (mejor con mucha luz)",
-            "12 idiomas" to "12 idiomas"
+            "12 idiomas" to "12 idiomas",
+            "Fundo da interface" to "Fondo de la interfaz", "Personaliza o fundo sem alterar os ficheiros" to "Personaliza el fondo sin cambiar los archivos",
+            "Ícones das pastas" to "Iconos de carpetas", "Ícone da pasta" to "Icono de carpeta", "Escolhe um ícone para cada pasta" to "Elige un icono para cada carpeta",
+            "Normal" to "Clásico", "Câmara" to "Cámara", "Transferências" to "Descargas", "Música" to "Música", "Floresta" to "Bosque", "Oceano" to "Océano", "Ameixa" to "Ciruela", "Carvão" to "Carbón",
+            "Armazenamento" to "Almacenamiento", "usados" to "usados", "livres" to "libres", "Ícone da pasta alterado." to "Icono de carpeta cambiado.", "Não existem pastas nesta localização." to "No hay carpetas en esta ubicación."
             )
             "fr" -> mapOf(
             "Explorador" to "Explorateur",
@@ -4055,7 +4077,11 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "Sombre (recommandé)",
             "Preto OLED (ecrãs OLED)" to "Noir OLED (écrans OLED)",
             "Claro (boa visibilidade à luz do dia)" to "Clair (lisible en plein jour)",
-            "12 idiomas" to "12 langues"
+            "12 idiomas" to "12 langues",
+            "Fundo da interface" to "Arrière-plan de l’interface", "Personaliza o fundo sem alterar os ficheiros" to "Personnalisez le fond sans modifier les fichiers",
+            "Ícones das pastas" to "Icônes des dossiers", "Ícone da pasta" to "Icône du dossier", "Escolhe um ícone para cada pasta" to "Choisissez une icône pour chaque dossier",
+            "Normal" to "Classique", "Câmara" to "Appareil photo", "Transferências" to "Téléchargements", "Música" to "Musique", "Floresta" to "Forêt", "Oceano" to "Océan", "Ameixa" to "Prune", "Carvão" to "Charbon",
+            "Armazenamento" to "Stockage", "usados" to "utilisés", "livres" to "libres", "Ícone da pasta alterado." to "Icône du dossier modifiée.", "Não existem pastas nesta localização." to "Aucun dossier dans cet emplacement."
             )
             "de" -> mapOf(
             "Explorador" to "Dateimanager",
@@ -4127,7 +4153,11 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "Dunkel (empfohlen)",
             "Preto OLED (ecrãs OLED)" to "OLED-Schwarz (OLED-Displays)",
             "Claro (boa visibilidade à luz do dia)" to "Hell (gut bei Tageslicht)",
-            "12 idiomas" to "12 Sprachen"
+            "12 idiomas" to "12 Sprachen",
+            "Fundo da interface" to "Oberflächenhintergrund", "Personaliza o fundo sem alterar os ficheiros" to "Passe den Hintergrund an, ohne Dateien zu ändern",
+            "Ícones das pastas" to "Ordnersymbole", "Ícone da pasta" to "Ordnersymbol", "Escolhe um ícone para cada pasta" to "Wähle ein Symbol für jeden Ordner",
+            "Normal" to "Klassisch", "Câmara" to "Kamera", "Transferências" to "Downloads", "Música" to "Musik", "Floresta" to "Wald", "Oceano" to "Ozean", "Ameixa" to "Pflaume", "Carvão" to "Kohle",
+            "Armazenamento" to "Speicher", "usados" to "belegt", "livres" to "frei", "Ícone da pasta alterado." to "Ordnersymbol geändert.", "Não existem pastas nesta localização." to "Keine Ordner an diesem Speicherort."
             )
             "zh" -> mapOf(
             "Explorador" to "文件管理器",
