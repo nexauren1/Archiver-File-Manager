@@ -570,10 +570,8 @@ class MainActivity : Activity() {
         else item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { rightMargin = dp(8) })
         if (shouldLoadThumbnail(file)) loadThumbnailAsync(file, icon)
 
-        val details = if (file.isDirectory) {
-            val count = safeList(file).size
-            count.toString() + if (count == 1) " item" else " itens"
-        } else formatSize(file.length())
+        // Do not enumerate every child folder while drawing the list; that blocks scrolling on large directories.
+        val details = if (file.isDirectory) tr("Pasta") else formatSize(file.length())
         val modified = if (file.lastModified() > 0L) DateFormat.getDateInstance(DateFormat.SHORT).format(Date(file.lastModified())) else ""
         val middle = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1068,11 +1066,13 @@ class MainActivity : Activity() {
         options += listOf("Partilhar", "Copiar caminho", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
         if (file.isFile) options += "Calcular SHA-256"
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
+        if (file.isDirectory) options += "Calcular tamanho total"
         if (file.isDirectory) options += "Cor da pasta"
         AlertDialog.Builder(this).setTitle(file.name).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (options[which]) {
                 "Abrir pasta" -> { currentDir = file; selected.clear(); refreshFiles() }
                 "Cor da pasta" -> showFolderColorMenu(file)
+                "Calcular tamanho total" -> calculateFolderSize(file)
                 "Abrir" -> openFile(file)
                 "Inspecionar modelo 3D" -> showModelInspector(file)
                 "Comprimir para ZIP" -> promptArchive(chosenOrSingle(file), "zip")
@@ -3613,6 +3613,25 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility = if (uiTheme == "Claro") {
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         } else 0
+    }
+
+    private fun calculateFolderSize(folder: File) {
+        if (!folder.isDirectory) { toast("Seleciona uma pasta."); return }
+        runTask("A calcular tamanho da pasta…", 0L, 1L) { meter ->
+            val totals = measureFiles(listOf(folder)) { file -> meter.show(file) }
+            meter.setTotals(totals.bytes, totals.entries)
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle(folder.name)
+                    .setMessage(
+                        tr("Tamanho total") + ": " + formatSize(totals.bytes) + "\n" +
+                            tr("Itens") + ": " + totals.entries
+                    )
+                    .setPositiveButton(tr("Fechar"), null)
+                    .show()
+            }
+            tr("Tamanho calculado") + ": " + formatSize(totals.bytes) + " • " + totals.entries + " " + tr("itens")
+        }
     }
 
     private fun copyPath(file: File) {
