@@ -257,6 +257,22 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    private fun defaultAppLanguage(): String = when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
+        "pt" -> "pt"
+        "en" -> "en"
+        "es" -> "es"
+        "fr" -> "fr"
+        "de" -> "de"
+        "zh" -> "zh"
+        "hi" -> "hi"
+        "ar" -> "ar"
+        "ja" -> "ja"
+        "ru" -> "ru"
+        "bn" -> "bn"
+        "id" -> "id"
+        else -> "en"
+    }
+
     private fun loadPreferences() {
         showAnimations = prefs.getBoolean("animations", true)
         showHidden = prefs.getBoolean("hidden", false)
@@ -274,7 +290,7 @@ class MainActivity : Activity() {
         sortBy = prefs.getString("sort", "Nome") ?: "Nome"
         viewMode = prefs.getString("view_mode", "Detalhado") ?: "Detalhado"
         compressionLevel = prefs.getInt("compression", 2)
-        appLanguage = prefs.getString("app_language", "pt") ?: "pt"
+        appLanguage = prefs.getString("app_language", defaultAppLanguage()) ?: defaultAppLanguage()
         uiTheme = prefs.getString("ui_theme", "Escuro") ?: "Escuro"
         accentName = prefs.getString("accent_color", "Lavanda") ?: "Lavanda"
         folderColors.clear()
