@@ -1,41 +1,42 @@
-# Archiver – File Manager
+# Archiver — Gestor de ficheiros Android
 
-A lightweight Android file manager project focused on practical file operations and dependable archive handling.
+Archiver is a **native Android application written in Kotlin**. It is not a website, web page, or embedded web app. The interface uses Android views and the app runs directly on the device.
 
-## First milestone
+## Storage access
 
-- Browse folders chosen by the user with Android's Storage Access Framework.
-- Navigate folders and sort by name, size, date, or type.
-- Search recursively by filename, including wildcard patterns such as `*.zip`.
-- Show or hide dot-prefixed files; optionally show size and modification date.
-- Choose detailed, compact, or grid views, including an optional `..` row to move to the parent directory.
-- Optional on-device thumbnails for images, PDF pages, video frames, music album art, and APK icons.
-- Create folders and empty files, open/share files, and inspect item information.
-- Rename, recursively delete, copy, move, and paste files/folders, with safeguards against recursive copies and name collisions.
-- Save persistent file/folder favorites and navigate to them later, including favorites from other selected folders.
-- Create ZIP archives with store, fast, normal, or ultra compression.
-- Create and extract 7z archives; test ZIP and 7z contents for common read/CRC errors.
-- Browse ZIP/7z archive entries inside the app and extract an individual file without unpacking the entire archive.
-- Optionally delete source items only after archive creation succeeds.
-- Extract supported archives here or into a new folder while blocking unsafe parent-directory paths.
-- Remember the selected folder and preferences.
+- On Android 11 and newer, Archiver declares `MANAGE_EXTERNAL_STORAGE` and sends the user to Android's special **Allow access to manage all files** settings page.
+- On older Android versions, it requests the necessary shared-storage runtime permissions.
+- Once access is granted, the initial location is the device's shared internal storage; the user is not limited to selecting one folder at every launch.
+- Android still restricts certain private directories such as other apps' `Android/data` folders. All-files access does not override those operating-system restrictions.
+- Distribution through Google Play is subject to Google's all-files-access policy for file managers.
 
-## Known limitations
+## Implemented functionality in this preview
 
-- This preview focuses on ZIP and 7z. RAR, TAR and other formats are not yet implemented.
-- Password-protected archive creation and password prompts are not yet wired into the UI.
-- Split volumes and Android/data or Android/obb access are not implemented.
-- PDF/video previews are disabled by default because they can use additional CPU and memory.
-- Large archive operations currently use app-cache temporary files; ensure the device has sufficient free storage.
-- The app has been compiled and released via GitHub Actions, but still requires hands-on testing on real Android devices. Test with disposable sample files before using it on important data.
+- Browse shared storage and navigate into/above folders.
+- Multi-select files and folders.
+- Create folders and empty files; rename, delete, copy, move, and paste.
+- Open and share files through Android's content-URI provider.
+- Sort by name, size, date, or type; hide/show dot-prefixed files.
+- Detailed, compact, and grid views, with configurable image, PDF, video, album-art, and APK thumbnails.
+- Recursive name search and persistent favorites.
+- Create and extract ZIP archives; choose store/fast/normal/ultra compression.
+- Create and extract 7z archives and test ZIP/7z contents.
+- Browse ZIP/7z entries in-app and extract an individual file.
+- Guard against common unsafe archive paths and avoid overwriting existing files in copy/extraction operations.
+- Show progress feedback for long-running work.
+- Custom Archiver launcher icon.
 
-## Build and release
+## Current limitations
 
-GitHub Actions builds the debug APK with JDK 17, Gradle 8.13 and Android Gradle Plugin 8.13.2. Pushes to `main` upload an Actions artifact and publish a GitHub prerelease.
+- RAR, TAR, split-volume archives, and password-protected archive workflows are not yet implemented.
+- Access to protected Android system/app directories remains subject to Android restrictions.
+- This is a preview build. It has passed automated compilation, but its file operations and permission flow still need hands-on testing on multiple Android devices. Test with copies of non-critical files first.
 
-## Roadmap
+## Build
 
-1. Validate ZIP and 7z creation/extraction on device, including large files and low storage.
-2. Add archive listing/preview and improve progress, cancellation, and overwrite handling.
-3. Evaluate RAR extraction and TAR/GZIP support, including licensing and APK-size cost.
-4. Add automated tests and only then consider stable release status.
+- Android Gradle Plugin: 8.13.2
+- Kotlin Gradle Plugin: 2.3.20
+- JDK: 17
+- Gradle: 8.13
+
+GitHub Actions builds the debug APK and publishes an automated preview release from pushes to `main`.
