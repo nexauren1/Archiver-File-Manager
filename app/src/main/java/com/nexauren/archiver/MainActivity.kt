@@ -23,6 +23,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import android.util.LruCache
@@ -110,8 +112,14 @@ class MainActivity : Activity() {
     private var clipboard = emptyList<File>()
     private var clipboardIsCut = false
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+    private val searchWorker: ExecutorService = Executors.newSingleThreadExecutor()
     private val thumbnailWorker: ExecutorService = Executors.newFixedThreadPool(2)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val workActive = AtomicBoolean(false)
+    private val searchActive = AtomicBoolean(false)
+    private val fileRowViews = linkedMapOf<String, View>()
+    private val fileNameViews = linkedMapOf<String, TextView>()
+    private var visibleFileCount = 0
     private val notificationChannelId = "archiver_file_operations"
     private val operationNotificationId = 7410
     private val thumbnailCache = object : LruCache<String, Bitmap>(2 * 1024) {
@@ -396,6 +404,8 @@ class MainActivity : Activity() {
     private fun refreshFiles() {
         if (!browserRendered || settingsOpen || editorOpen || !hasStorageAccess()) return
         rows.removeAllViews()
+        fileRowViews.clear()
+        fileNameViews.clear()
         gridRows = null
         pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
         selectionView.text = currentDir.absolutePath
@@ -407,6 +417,7 @@ class MainActivity : Activity() {
             rows.addView(gridRows, LinearLayout.LayoutParams(-1, -2))
         }
         val files = safeList(currentDir).filter { showHidden || !it.name.startsWith(".") }.toMutableList()
+        visibleFileCount = files.size
         val comparator = when (sortBy) {
             "Tamanho" -> compareBy<File> { if (it.isDirectory) -1L else it.length() }
             "Data" -> compareBy<File> { it.lastModified() }
@@ -613,6 +624,8 @@ class MainActivity : Activity() {
             rows.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(2) })
             if (viewMode != "Compacto") addDivider()
         }
+        fileRowViews[key] = item
+        fileNameViews[key] = name
         item.setOnClickListener {
             if (selected.isNotEmpty()) toggleSelection(file)
             else if (file.isDirectory) {
@@ -679,7 +692,25 @@ class MainActivity : Activity() {
     private fun toggleSelection(file: File) {
         val key = pathKey(file)
         if (!selected.add(key)) selected.remove(key)
-        refreshFiles()
+        val isSelected = selected.contains(key)
+        fileRowViews[key]?.apply {
+            background = roundedBackground(
+                if (isSelected) selectedRowColor() else if (gridRows != null) rowSurfaceColor() else pageBackgroundColor(),
+                if (gridRows != null) 10 else 4
+            )
+        }
+        fileNameViews[key]?.apply {
+            setTextColor(if (isSelected) accentColor() else primaryTextColor())
+            typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        }
+        countView.text = if (selected.isNotEmpty()) {
+            "${selected.size} ${tr("selecionado(s)")} • $visibleFileCount ${tr("itens")}"
+        } else if (visibleFileCount == 0) {
+            tr("Pasta vazia")
+        } else {
+            "$visibleFileCount ${tr(if (visibleFileCount == 1) "item" else "itens")}"
+        }
+        updateSelectionBar()
     }
 
     private fun goUp() {
