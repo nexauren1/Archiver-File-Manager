@@ -12,6 +12,7 @@
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@drawable/ic_archiver"
         android:supportsRtl="true"
+        android:localeConfig="@xml/locale_config"
         android:theme="@style/ArchiverTheme"
         android:usesCleartextTraffic="false">
         <provider

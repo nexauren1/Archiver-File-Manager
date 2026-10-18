@@ -8,6 +8,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.ProgressDialog
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
@@ -70,6 +72,7 @@ import java.text.DateFormat
 import java.util.Collections
 import java.util.Date
 import java.util.Locale
+import java.security.MessageDigest
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -106,6 +109,9 @@ class MainActivity : Activity() {
     private val folderColors = linkedMapOf<String, String>()
 
     private val selected = linkedSetOf<String>()
+    private val rowViews = linkedMapOf<String, View>()
+    private val rowNameViews = linkedMapOf<String, TextView>()
+    private var visibleFileCount = 0
     private val favorites = linkedSetOf<String>()
     private var clipboard = emptyList<File>()
     private var clipboardIsCut = false
@@ -143,6 +149,11 @@ class MainActivity : Activity() {
         rootDir = Environment.getExternalStorageDirectory().canonicalFile
         currentDir = rootDir
         if (hasStorageAccess()) renderBrowser() else showPermissionScreen()
+        val launches = prefs.getInt("launch_count", 0) + 1
+        prefs.edit().putInt("launch_count", launches).apply()
+        if (browserRendered && launches >= 3 && !prefs.getBoolean("share_prompt_dismissed", false)) {
+            page.postDelayed({ maybeAskToShareApp() }, 1600L)
+        }
     }
 
     override fun onResume() {
@@ -288,6 +299,7 @@ class MainActivity : Activity() {
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(pageBackgroundColor())
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -396,6 +408,8 @@ class MainActivity : Activity() {
     private fun refreshFiles() {
         if (!browserRendered || settingsOpen || editorOpen || !hasStorageAccess()) return
         rows.removeAllViews()
+        rowViews.clear()
+        rowNameViews.clear()
         gridRows = null
         pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
         selectionView.text = currentDir.absolutePath
@@ -407,6 +421,7 @@ class MainActivity : Activity() {
             rows.addView(gridRows, LinearLayout.LayoutParams(-1, -2))
         }
         val files = safeList(currentDir).filter { showHidden || !it.name.startsWith(".") }.toMutableList()
+        visibleFileCount = files.size
         val comparator = when (sortBy) {
             "Tamanho" -> compareBy<File> { if (it.isDirectory) -1L else it.length() }
             "Data" -> compareBy<File> { it.lastModified() }
@@ -555,10 +570,8 @@ class MainActivity : Activity() {
         else item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { rightMargin = dp(8) })
         if (shouldLoadThumbnail(file)) loadThumbnailAsync(file, icon)
 
-        val details = if (file.isDirectory) {
-            val count = safeList(file).size
-            count.toString() + if (count == 1) " item" else " itens"
-        } else formatSize(file.length())
+        // Do not enumerate every child folder while drawing the list; that blocks scrolling on large directories.
+        val details = if (file.isDirectory) tr("Pasta") else formatSize(file.length())
         val modified = if (file.lastModified() > 0L) DateFormat.getDateInstance(DateFormat.SHORT).format(Date(file.lastModified())) else ""
         val middle = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -591,6 +604,8 @@ class MainActivity : Activity() {
             gravity = if (inGrid) Gravity.CENTER else Gravity.START
             setPadding(0, dp(4), 0, 0)
         }, LinearLayout.LayoutParams(-1, -2))
+        rowViews[key] = item
+        rowNameViews[key] = name
         if (inGrid) {
             item.addView(middle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
             val params = GridLayout.LayoutParams(
@@ -679,7 +694,20 @@ class MainActivity : Activity() {
     private fun toggleSelection(file: File) {
         val key = pathKey(file)
         if (!selected.add(key)) selected.remove(key)
-        refreshFiles()
+        rowViews[key]?.background = roundedBackground(
+            if (selected.contains(key)) selectedRowColor() else if (gridRows != null) rowSurfaceColor() else pageBackgroundColor(),
+            if (gridRows != null) 10 else 4
+        )
+        rowNameViews[key]?.apply {
+            setTextColor(if (selected.contains(key)) accentColor() else primaryTextColor())
+            typeface = if (selected.contains(key)) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        }
+        countView.text = when {
+            selected.isNotEmpty() -> "${selected.size} selecionado(s) • ${visibleFileCount} itens"
+            visibleFileCount == 0 -> tr("Pasta vazia")
+            else -> visibleFileCount.toString() + if (visibleFileCount == 1) " item" else " itens"
+        }
+        updateSelectionBar()
     }
 
     private fun goUp() {
@@ -712,8 +740,8 @@ class MainActivity : Activity() {
     private fun showMainMenu() {
         val options = arrayOf(
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
-            "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisar em subpastas", "Favoritos",
-            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início"
+            "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisa avançada", "Favoritos",
+            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar o Archiver"
         )
         AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
@@ -735,6 +763,7 @@ class MainActivity : Activity() {
                 11 -> showExplorerSettings()
                 12 -> refreshFiles()
                 13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
+                14 -> shareApplication()
             }
         }.show()
     }
@@ -776,6 +805,7 @@ class MainActivity : Activity() {
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(pageBackgroundColor())
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -808,7 +838,7 @@ class MainActivity : Activity() {
 
         when (category) {
             null -> {
-                addSettingChoice(content, "Geral", "2 idiomas", "Idioma, notificações e informações") {
+                addSettingChoice(content, "Geral", "9 idiomas", "Idioma, notificações e informações") {
                     settingsCategory = "Geral"; renderSettingsScreen()
                 }
                 addSettingChoice(content, "Interface", uiTheme, "Tema, cor de destaque e aparência") {
@@ -840,15 +870,18 @@ class MainActivity : Activity() {
                         toast(if (notificationsEnabled) "As notificações estão disponíveis." else "Ativa as notificações nas definições do Android.")
                     }
                 }
-                addSettingChoice(content, "Sobre o Archiver", "0.4.0", "Gestor de ficheiros Android nativo em Kotlin") {
-                    AlertDialog.Builder(this).setTitle("Archiver 0.4.0")
-                        .setMessage("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso.")
+                addSettingChoice(content, "Partilhar o Archiver", "Ajudar o projeto", "Convida alguém a experimentar o Archiver") {
+                    shareApplication()
+                }
+                addSettingChoice(content, "Sobre o Archiver", "0.5.0", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver 0.5.0")
+                        .setMessage(tr("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso."))
                         .setPositiveButton(tr("Fechar"), null).show()
                 }
             }
             "Interface" -> {
-                addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escuro, preto OLED ou claro") { showThemeMenu() }
-                addSettingChoice(content, "Cor de destaque", tr(accentName), "Personaliza os controlos e realces") { showAccentMenu() }
+                addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escolhe entre escuro, preto OLED e claro") { showThemeMenu() }
+                addSettingChoice(content, "Cor de destaque", tr(accentName), "Cor dos botões, seleção e indicadores") { showAccentMenu() }
                 addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor no menu de cada pasta") {
                     toast("Abre o menu de uma pasta e escolhe Cor da pasta.")
                 }
@@ -1030,13 +1063,16 @@ class MainActivity : Activity() {
         }
         if (ext in setOf("glb", "gltf")) options += "Inspecionar modelo 3D"
         options += listOf("Comprimir para ZIP", "Comprimir para 7Z", "Comprimir…")
-        options += listOf("Partilhar", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
+        options += listOf("Partilhar", "Copiar caminho", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
+        if (file.isFile) options += "Calcular SHA-256"
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
+        if (file.isDirectory) options += "Calcular tamanho total"
         if (file.isDirectory) options += "Cor da pasta"
         AlertDialog.Builder(this).setTitle(file.name).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (options[which]) {
                 "Abrir pasta" -> { currentDir = file; selected.clear(); refreshFiles() }
                 "Cor da pasta" -> showFolderColorMenu(file)
+                "Calcular tamanho total" -> calculateFolderSize(file)
                 "Abrir" -> openFile(file)
                 "Inspecionar modelo 3D" -> showModelInspector(file)
                 "Comprimir para ZIP" -> promptArchive(chosenOrSingle(file), "zip")
@@ -1047,6 +1083,8 @@ class MainActivity : Activity() {
                 "Extrair aqui" -> if (ext == "7z") extractSevenZip(file, currentDir, false) else extractZip(file, currentDir, false)
                 "Extrair para nova pasta" -> if (ext == "7z") extractSevenZip(file, currentDir, true) else extractZip(file, currentDir, true)
                 "Partilhar" -> shareFile(file)
+                "Copiar caminho" -> copyPath(file)
+                "Calcular SHA-256" -> calculateSha256(file)
                 "Copiar" -> { clipboard = chosenOrSingle(file); clipboardIsCut = false; selected.clear(); toast("Preparado para copiar."); refreshFiles() }
                 "Recortar" -> { clipboard = chosenOrSingle(file); clipboardIsCut = true; selected.clear(); toast("Preparado para mover."); refreshFiles() }
                 "Renomear" -> promptRename(file)
@@ -1195,6 +1233,7 @@ class MainActivity : Activity() {
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(pageBackgroundColor())
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1489,50 +1528,204 @@ class MainActivity : Activity() {
     }
 
     private fun promptSearch() {
-        val input = EditText(this).apply { hint = "Nome ou padrão, por exemplo *.zip"; setSingleLine(true) }
-        AlertDialog.Builder(this).setTitle("Pesquisar ficheiros").setView(input)
-            .setNegativeButton("Cancelar", null).setPositiveButton("Pesquisar") { _, _ ->
-                val query = input.text.toString().trim().lowercase(Locale.ROOT)
-                if (query.isBlank()) { toast("Escreve um nome para pesquisar."); return@setPositiveButton }
-                val start = currentDir
-                runTask("A pesquisar…", 0L, 1L) { meter ->
-                    val entries = countFilesForSearch(start) { meter.show(it) }
-                    meter.setTotals(0L, entries)
+        val input = EditText(this).apply {
+            hint = tr("Nome ou padrão, por exemplo *.zip")
+            setSingleLine(true)
+            textSize = 16f
+        }
+        val recurse = CheckBox(this).apply {
+            text = tr("Incluir subpastas")
+            isChecked = false
+        }
+        val typeLabels = arrayOf(
+            tr("Todos os tipos"), tr("Pastas"), tr("Documentos"), tr("Imagens"),
+            tr("Vídeo"), tr("Áudio"), tr("Arquivos"), tr("Aplicações")
+        )
+        val typeSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, typeLabels)
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(4))
+            addView(input, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(typeSpinner, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(recurse, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(label(tr("A pesquisa começa na pasta atual e não procura fora dela."), 12, mutedTextColor(), false)
+                .apply { setPadding(0, dp(5), 0, dp(8)) }, LinearLayout.LayoutParams(-1, -2))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(tr("Pesquisa avançada"))
+            .setView(body)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(tr("Pesquisar")) { _, _ ->
+                val query = input.text.toString().trim()
+                if (query.isBlank()) {
+                    toast("Escreve um nome para pesquisar.")
+                    return@setPositiveButton
+                }
+                val start = try { currentDir.canonicalFile } catch (_: Exception) { currentDir }
+                val includeSubfolders = recurse.isChecked
+                val typeFilter = arrayOf("all", "folder", "document", "image", "video", "audio", "archive", "app")
+                    .getOrElse(typeSpinner.selectedItemPosition) { "all" }
+                runTask("A pesquisar…", 0L, 100L) { meter ->
                     val hits = mutableListOf<File>()
-                    searchTree(start, query, hits, 0, meter)
-                    runOnUiThread { showSearchResults(hits) }
+                    val processed = longArrayOf(0L)
+                    val matcher = if (query.contains('*') || query.contains('?')) {
+                        val pattern = buildString {
+                            query.forEach { ch ->
+                                when (ch) {
+                                    '*' -> append(".*")
+                                    '?' -> append('.')
+                                    else -> append(Regex.escape(ch.toString()))
+                                }
+                            }
+                        }
+                        runCatching { Regex("^$pattern$", RegexOption.IGNORE_CASE) }.getOrNull()
+                    } else null
+                    searchTree(start, start, query, matcher, typeFilter, includeSubfolders, hits, 0, processed, meter)
+                    runOnUiThread { showSearchResults(hits, start) }
                     "Pesquisa concluída: " + hits.size + " resultado(s)."
                 }
-            }.show()
+            }
+            .show()
     }
 
-    private fun searchTree(directory: File, query: String, hits: MutableList<File>, depth: Int, meter: TaskProgress? = null) {
+    private fun searchTree(
+        directory: File,
+        scope: File,
+        query: String,
+        matcher: Regex?,
+        typeFilter: String,
+        recursive: Boolean,
+        hits: MutableList<File>,
+        depth: Int,
+        processed: LongArray,
+        meter: TaskProgress? = null
+    ) {
         if (depth > 60 || hits.size >= 300) return
-        val children = try { directory.listFiles() } catch (_: Exception) { null } ?: return
+        val children = safeList(directory)
         for (child in children) {
             if (hits.size >= 300) return
             if (!showHidden && child.name.startsWith(".")) continue
-            val name = child.name.lowercase(Locale.ROOT)
-            val matches = if (query.contains('*') || query.contains('?')) {
-                val regex = query.replace(".", "\\.").replace("*", ".*").replace("?", ".")
-                name.matches(Regex("^" + regex + "$"))
-            } else name.contains(query)
-            if (matches) hits.add(child)
-            if (child.isDirectory) searchTree(child, query, hits, depth + 1, meter)
-            meter?.itemDone(child)
+            val matchesName = if (matcher != null) matcher.matches(child.name) else child.name.contains(query, ignoreCase = true)
+            if (matchesName && matchesSearchType(child, typeFilter)) hits.add(child)
+            processed[0]++
+            if (processed[0] % 20L == 0L) {
+                meter?.report(0, tr("Analisados") + ": " + processed[0] + " • " + child.name)
+            }
+            if (recursive && child.isDirectory && isWithinRoot(child) && isWithinScope(child, scope)) {
+                searchTree(child, scope, query, matcher, typeFilter, true, hits, depth + 1, processed, meter)
+            }
         }
     }
 
-    private fun showSearchResults(hits: List<File>) {
+    private fun isWithinScope(file: File, scope: File): Boolean {
+        val base = pathKey(scope).trimEnd(File.separatorChar)
+        val path = pathKey(file)
+        return path == base || path.startsWith(base + File.separator)
+    }
+
+    private fun matchesSearchType(file: File, filter: String): Boolean {
+        if (filter == "all") return true
+        if (filter == "folder") return file.isDirectory
+        if (file.isDirectory) return false
+        val ext = extension(file.name)
+        return when (filter) {
+            "document" -> ext in setOf("pdf", "txt", "md", "rtf", "doc", "docx", "odt", "xls", "xlsx", "ppt", "pptx", "csv")
+            "image" -> ext in setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "heic", "avif")
+            "video" -> ext in setOf("mp4", "mkv", "mov", "webm", "avi", "3gp", "m4v")
+            "audio" -> ext in setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "opus", "wma")
+            "archive" -> ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "tgz")
+            "app" -> ext in setOf("apk", "apks", "xapk", "aab")
+            else -> true
+        }
+    }
+
+    private fun showSearchResults(hits: List<File>, searchedFolder: File) {
         if (isFinishing) return
-        if (hits.isEmpty()) { toast("Nenhum resultado encontrado."); return }
-        val labels = hits.map { it.absolutePath.removePrefix(rootDir.absolutePath).trimStart(File.separatorChar) }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Resultados (" + hits.size + ")").setItems(labels) { _, which ->
-            val found = hits[which]
-            currentDir = if (found.isDirectory) found else found.parentFile ?: rootDir
-            refreshFiles()
-            if (!found.isDirectory) showFileActions(found)
-        }.setPositiveButton("Fechar", null).show()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+        }
+        val summary = if (hits.isEmpty()) {
+            tr("Nenhum resultado encontrado.")
+        } else {
+            tr("Pasta pesquisada") + ": " + searchedFolder.name + " • " + hits.size + " " + tr("resultados")
+        }
+        content.addView(label(summary, 13, mutedTextColor(), false)
+            .apply { setPadding(dp(5), dp(5), dp(5), dp(10)) }, LinearLayout.LayoutParams(-1, -2))
+        val scroll = ScrollView(this).apply { isFillViewport = false }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val visibleHits = hits.take(100)
+        var resultsDialog: AlertDialog? = null
+        visibleHits.forEach { found ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(6), dp(7), dp(4), dp(7))
+                background = roundedBackground(rowSurfaceColor(), 8)
+                isClickable = true
+                isFocusable = true
+            }
+            val icon = ImageView(this).apply {
+                setImageResource(iconForFile(found))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = if (found.isDirectory) tr("Pasta") else tr("Ficheiro")
+            }
+            row.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(8) })
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            details.addView(label(found.name, 14, primaryTextColor(), true).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            })
+            details.addView(label(found.parentFile?.absolutePath ?: found.absolutePath, 11, mutedTextColor(), false).apply {
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                setPadding(0, dp(3), 0, 0)
+            })
+            val meta = if (found.isFile) formatSize(found.length()) else tr("Pasta")
+            details.addView(label(meta, 11, accentColor(), false).apply { setPadding(0, dp(3), 0, 0) })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            val more = TextView(this).apply {
+                text = "⋮"
+                textSize = 26f
+                gravity = Gravity.CENTER
+                setTextColor(accentColor())
+                contentDescription = tr("Mais ações")
+                setPadding(dp(8), 0, dp(8), 0)
+                setOnClickListener { showFileActions(found) }
+            }
+            row.addView(more, LinearLayout.LayoutParams(dp(42), dp(52)))
+            row.setOnClickListener {
+                resultsDialog?.dismiss()
+                if (found.isDirectory) {
+                    currentDir = found
+                    selected.clear()
+                    refreshFiles()
+                } else {
+                    currentDir = found.parentFile ?: rootDir
+                    selected.clear()
+                    refreshFiles()
+                    showFileActions(found)
+                }
+            }
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        }
+        if (hits.size > visibleHits.size) {
+            list.addView(label(tr("Mostrando os primeiros 100 resultados."), 12, mutedTextColor(), false)
+                .apply { setPadding(dp(8), dp(8), dp(8), dp(8)) }, LinearLayout.LayoutParams(-1, -2))
+        }
+        scroll.addView(list)
+        content.addView(scroll, LinearLayout.LayoutParams(-1, dp(420)))
+        resultsDialog = AlertDialog.Builder(this)
+            .setTitle(tr("Resultados da pesquisa") + " (" + hits.size + ")")
+            .setView(content)
+            .setPositiveButton(tr("Fechar"), null)
+            .create()
+        resultsDialog?.show()
     }
 
     private fun showFavorites() {
@@ -2263,11 +2456,8 @@ class MainActivity : Activity() {
 
     private fun shouldLoadThumbnail(file: File): Boolean {
         if (!showThumbnails) return false
-        if (file.isDirectory) {
-            return safeList(file).any { child ->
-                !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff")
-            }
-        }
+        // Directory contents are inspected in thumbnailWorker, never while building the visible list.
+        if (file.isDirectory) return true
         return when (extension(file.name)) {
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff" -> true
             "pdf" -> showPdfThumbnails
@@ -2568,11 +2758,13 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 742)
         }
 
+        val searching = message.contains("pesquis", ignoreCase = true)
         val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
+            isIndeterminate = searching
         }
-        val percentView = label("0%", 14, 0xFFD8D3FF.toInt(), true).apply { gravity = Gravity.END }
+        val percentView = label(if (searching) "…" else "0%", 14, 0xFFD8D3FF.toInt(), true).apply { gravity = Gravity.END }
         val detailView = label(message, 12, 0xFFB9B9C3.toInt(), false).apply {
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
@@ -2602,8 +2794,8 @@ class MainActivity : Activity() {
             latestPercent = percent.coerceIn(0, 99)
             runOnUiThread {
                 if (!isFinishing && dialog.isShowing) {
-                    progressBar.progress = percent
-                    percentView.text = "$percent%"
+                    if (!searching) progressBar.progress = percent
+                    percentView.text = if (searching) "…" else "$percent%"
                     detailView.text = detail
                 }
             }
@@ -2639,25 +2831,11 @@ class MainActivity : Activity() {
                     closeEditorAfterSave = false
                 }
                 if (!isFinishing) {
-                    if (failed) {
-                        progressBar.progress = latestPercent
-                        percentView.text = "$latestPercent%"
-                    } else {
-                        progressBar.progress = 100
-                        percentView.text = "100%"
-                    }
-                    detailView.text = finalResult
-                    dialog.setTitle(if (failed) tr("Falha na operação") else tr("Operação concluída"))
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
-                        text = tr("Fechar")
-                        isEnabled = true
-                    }
                     Toast.makeText(this, tr(finalResult), Toast.LENGTH_LONG).show()
                     if (hasStorageAccess() && browserRendered && !settingsOpen && !editorOpen) refreshFiles()
-                } else {
-                    dialog.dismiss()
                 }
-                showOperationNotification(message, tr(finalResult), null, finished = true, failed = failed)
+                dialog.dismiss()
+                runCatching { getSystemService(NotificationManager::class.java).cancel(operationNotificationId) }
             }
         }
     }
@@ -2738,8 +2916,8 @@ class MainActivity : Activity() {
 
 
     private fun tr(text: String): String {
-        if (appLanguage != "en") return text
-        return mapOf(
+        if (appLanguage == "pt") return text
+        val english = mapOf(
             "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
             "Configurações" to "Settings", "Geral" to "General", "Interface" to "Interface",
             "Compressão" to "Compression", "2 idiomas" to "2 languages",
@@ -2820,7 +2998,574 @@ class MainActivity : Activity() {
             "Queres guardar as alterações antes de sair do editor?" to "Would you like to save changes before leaving the editor?",
             "Já existe uma operação em curso. Aguarda que termine." to "Another operation is running. Please wait.",
             "A operação está em curso. Acompanha o progresso na janela ou na notificação." to "An operation is running. Follow progress in the dialog or notification."
-        )[text] ?: text
+        ) + mapOf(
+            "9 idiomas" to "9 languages",
+            "Pesquisa avançada" to "Advanced search",
+            "Incluir subpastas" to "Include subfolders",
+            "Todos os tipos" to "All types",
+            "Pastas" to "Folders",
+            "Documentos" to "Documents",
+            "Imagens" to "Images",
+            "Vídeo" to "Video",
+            "Áudio" to "Audio",
+            "Arquivos" to "Archives",
+            "Aplicações" to "Apps",
+            "A pesquisa começa na pasta atual e não procura fora dela." to "Search starts in the current folder and never searches outside it.",
+            "Pasta pesquisada" to "Searched folder",
+            "resultados" to "results",
+            "Pasta" to "Folder",
+            "Ficheiro" to "File",
+            "Mais ações" to "More actions",
+            "Mostrando os primeiros 100 resultados." to "Showing the first 100 results.",
+            "Analisados" to "Scanned",
+            "Copiar caminho" to "Copy path",
+            "Calcular SHA-256" to "Calculate SHA-256",
+            "Caminho copiado." to "Path copied.",
+            "SHA-256 copiado." to "SHA-256 copied.",
+            "Seleciona um ficheiro para calcular o SHA-256." to "Choose a file to calculate SHA-256.",
+            "Partilhar o Archiver" to "Share Archiver",
+            "Ajudar o projeto" to "Support the project",
+            "Convida alguém a experimentar o Archiver" to "Invite someone to try Archiver",
+            "Experimenta o Archiver, um gestor de ficheiros Android independente:" to "Try Archiver, an independent Android file manager:",
+            "Gostas do Archiver?" to "Enjoying Archiver?",
+            "Estamos a melhorar a aplicação. Partilhar o projeto ajuda mais pessoas a conhecê-lo." to "We're improving the app. Sharing the project helps more people discover it.",
+            "Agora não" to "Not now",
+            "Escuro (recomendado)" to "Dark (recommended)",
+            "Preto OLED (ecrãs OLED)" to "OLED black (OLED displays)",
+            "Claro (boa visibilidade à luz do dia)" to "Light (best in bright conditions)",
+            "O tema altera o fundo e o contraste. A cor de destaque controla os botões e a seleção." to "The theme changes background and contrast. The accent color controls buttons and selection.",
+            "Escolhe um idioma. Os nomes são apresentados na própria língua." to "Choose a language. Language names are shown in their native form.",
+            "Escolhe entre escuro, preto OLED e claro" to "Choose dark, OLED black or light",
+            "Cor dos botões, seleção e indicadores" to "Color for buttons, selection and indicators",
+            "Cópia de caminho" to "Copy path",
+            "SHA-256" to "SHA-256",
+            "Tamanho total" to "Total size",
+            "Itens" to "Items",
+            "itens" to "items",
+            "Tamanho calculado" to "Calculated size",
+            "Seleciona uma pasta." to "Choose a folder.",
+            "A calcular tamanho da pasta…" to "Calculating folder size…"
+        )
+        if (appLanguage == "en") return english[text] ?: text
+        val localized = when (appLanguage) {
+            "es" -> mapOf(
+            "Explorador" to "Explorador",
+            "Gestor de ficheiros para Android" to "Gestor de archivos para Android",
+            "Configurações" to "Ajustes",
+            "Geral" to "General",
+            "Interface" to "Interfaz",
+            "Compressão" to "Compresión",
+            "Idioma" to "Idioma",
+            "Tema da interface" to "Tema de la interfaz",
+            "Cor de destaque" to "Color de acento",
+            "Cores das pastas" to "Colores de carpetas",
+            "Ordenar ficheiros" to "Ordenar archivos",
+            "Nome" to "Nombre",
+            "Tamanho" to "Tamaño",
+            "Data" to "Fecha",
+            "Tipo" to "Tipo",
+            "Detalhado" to "Detallado",
+            "Compacto" to "Compacto",
+            "Grelha" to "Cuadrícula",
+            "Copiar" to "Copiar",
+            "Mover" to "Mover",
+            "Eliminar" to "Eliminar",
+            "Renomear" to "Renombrar",
+            "Informações" to "Información",
+            "Abrir" to "Abrir",
+            "Abrir pasta" to "Abrir carpeta",
+            "Partilhar" to "Compartir",
+            "Extrair aqui" to "Extraer aquí",
+            "Extrair para nova pasta" to "Extraer en una carpeta nueva",
+            "Ver conteúdo" to "Ver contenido",
+            "Testar arquivo" to "Probar archivo",
+            "Adicionar aos Favoritos" to "Añadir a favoritos",
+            "Remover dos Favoritos" to "Quitar de favoritos",
+            "Cancelar" to "Cancelar",
+            "Guardar" to "Guardar",
+            "Fechar" to "Cerrar",
+            "Pasta vazia" to "Carpeta vacía",
+            "Armazenamento interno" to "Almacenamiento interno",
+            "Selecionar tudo" to "Seleccionar todo",
+            "Limpar seleção" to "Quitar selección",
+            "Colar" to "Pegar",
+            "Favoritos" to "Favoritos",
+            "Ordenar" to "Ordenar",
+            "Atualizar" to "Actualizar",
+            "Pasta de início" to "Carpeta inicial",
+            "Pesquisa avançada" to "Búsqueda avanzada",
+            "Incluir subpastas" to "Incluir subcarpetas",
+            "Todos os tipos" to "Todos los tipos",
+            "Pastas" to "Carpetas",
+            "Documentos" to "Documentos",
+            "Imagens" to "Imágenes",
+            "Vídeo" to "Vídeo",
+            "Áudio" to "Audio",
+            "Arquivos" to "Archivos",
+            "Aplicações" to "Aplicaciones",
+            "Pasta pesquisada" to "Carpeta buscada",
+            "resultados" to "resultados",
+            "Nenhum resultado encontrado." to "No se encontraron resultados.",
+            "Mais ações" to "Más acciones",
+            "Copiar caminho" to "Copiar ruta",
+            "Calcular SHA-256" to "Calcular SHA-256",
+            "Caminho copiado." to "Ruta copiada.",
+            "Partilhar o Archiver" to "Compartir Archiver",
+            "Ajudar o projeto" to "Apoyar el proyecto",
+            "Convida alguém a experimentar o Archiver" to "Invita a alguien a probar Archiver",
+            "Gostas do Archiver?" to "¿Te gusta Archiver?",
+            "Agora não" to "Ahora no",
+            "Escuro (recomendado)" to "Oscuro (recomendado)",
+            "Preto OLED (ecrãs OLED)" to "Negro OLED (pantallas OLED)",
+            "Claro (boa visibilidade à luz do dia)" to "Claro (mejor con mucha luz)",
+            "9 idiomas" to "9 idiomas"
+            )
+            "fr" -> mapOf(
+            "Explorador" to "Explorateur",
+            "Gestor de ficheiros para Android" to "Gestionnaire de fichiers Android",
+            "Configurações" to "Paramètres",
+            "Geral" to "Général",
+            "Interface" to "Interface",
+            "Compressão" to "Compression",
+            "Idioma" to "Langue",
+            "Tema da interface" to "Thème de l’interface",
+            "Cor de destaque" to "Couleur d’accentuation",
+            "Cores das pastas" to "Couleurs des dossiers",
+            "Ordenar ficheiros" to "Trier les fichiers",
+            "Nome" to "Nom",
+            "Tamanho" to "Taille",
+            "Data" to "Date",
+            "Tipo" to "Type",
+            "Detalhado" to "Détaillé",
+            "Compacto" to "Compact",
+            "Grelha" to "Grille",
+            "Copiar" to "Copier",
+            "Mover" to "Déplacer",
+            "Eliminar" to "Supprimer",
+            "Renomear" to "Renommer",
+            "Informações" to "Informations",
+            "Abrir" to "Ouvrir",
+            "Abrir pasta" to "Ouvrir le dossier",
+            "Partilhar" to "Partager",
+            "Extrair aqui" to "Extraire ici",
+            "Extrair para nova pasta" to "Extraire dans un nouveau dossier",
+            "Ver conteúdo" to "Parcourir l’archive",
+            "Testar arquivo" to "Tester l’archive",
+            "Adicionar aos Favoritos" to "Ajouter aux favoris",
+            "Remover dos Favoritos" to "Retirer des favoris",
+            "Cancelar" to "Annuler",
+            "Guardar" to "Enregistrer",
+            "Fechar" to "Fermer",
+            "Pasta vazia" to "Dossier vide",
+            "Armazenamento interno" to "Stockage interne",
+            "Selecionar tudo" to "Tout sélectionner",
+            "Limpar seleção" to "Effacer la sélection",
+            "Colar" to "Coller",
+            "Favoritos" to "Favoris",
+            "Ordenar" to "Trier",
+            "Atualizar" to "Actualiser",
+            "Pasta de início" to "Dossier de départ",
+            "Pesquisa avançada" to "Recherche avancée",
+            "Incluir subpastas" to "Inclure les sous-dossiers",
+            "Todos os tipos" to "Tous les types",
+            "Pastas" to "Dossiers",
+            "Documentos" to "Documents",
+            "Imagens" to "Images",
+            "Vídeo" to "Vidéo",
+            "Áudio" to "Audio",
+            "Arquivos" to "Archives",
+            "Aplicações" to "Applications",
+            "Pasta pesquisada" to "Dossier recherché",
+            "resultados" to "résultats",
+            "Nenhum resultado encontrado." to "Aucun résultat trouvé.",
+            "Mais ações" to "Plus d’actions",
+            "Copiar caminho" to "Copier le chemin",
+            "Calcular SHA-256" to "Calculer SHA-256",
+            "Caminho copiado." to "Chemin copié.",
+            "Partilhar o Archiver" to "Partager Archiver",
+            "Ajudar o projeto" to "Soutenir le projet",
+            "Convida alguém a experimentar o Archiver" to "Invitez quelqu’un à essayer Archiver",
+            "Gostas do Archiver?" to "Archiver vous plaît-il ?",
+            "Agora não" to "Pas maintenant",
+            "Escuro (recomendado)" to "Sombre (recommandé)",
+            "Preto OLED (ecrãs OLED)" to "Noir OLED (écrans OLED)",
+            "Claro (boa visibilidade à luz do dia)" to "Clair (lisible en plein jour)",
+            "9 idiomas" to "9 langues"
+            )
+            "de" -> mapOf(
+            "Explorador" to "Dateimanager",
+            "Gestor de ficheiros para Android" to "Android-Dateimanager",
+            "Configurações" to "Einstellungen",
+            "Geral" to "Allgemein",
+            "Interface" to "Oberfläche",
+            "Compressão" to "Komprimierung",
+            "Idioma" to "Sprache",
+            "Tema da interface" to "Oberflächenthema",
+            "Cor de destaque" to "Akzentfarbe",
+            "Cores das pastas" to "Ordnerfarben",
+            "Ordenar ficheiros" to "Dateien sortieren",
+            "Nome" to "Name",
+            "Tamanho" to "Größe",
+            "Data" to "Datum",
+            "Tipo" to "Typ",
+            "Detalhado" to "Detailliert",
+            "Compacto" to "Kompakt",
+            "Grelha" to "Raster",
+            "Copiar" to "Kopieren",
+            "Mover" to "Verschieben",
+            "Eliminar" to "Löschen",
+            "Renomear" to "Umbenennen",
+            "Informações" to "Informationen",
+            "Abrir" to "Öffnen",
+            "Abrir pasta" to "Ordner öffnen",
+            "Partilhar" to "Teilen",
+            "Extrair aqui" to "Hier entpacken",
+            "Extrair para nova pasta" to "In neuen Ordner entpacken",
+            "Ver conteúdo" to "Archiv durchsuchen",
+            "Testar arquivo" to "Archiv testen",
+            "Adicionar aos Favoritos" to "Zu Favoriten hinzufügen",
+            "Remover dos Favoritos" to "Aus Favoriten entfernen",
+            "Cancelar" to "Abbrechen",
+            "Guardar" to "Speichern",
+            "Fechar" to "Schließen",
+            "Pasta vazia" to "Ordner ist leer",
+            "Armazenamento interno" to "Interner Speicher",
+            "Selecionar tudo" to "Alles auswählen",
+            "Limpar seleção" to "Auswahl aufheben",
+            "Colar" to "Einfügen",
+            "Favoritos" to "Favoriten",
+            "Ordenar" to "Sortieren",
+            "Atualizar" to "Aktualisieren",
+            "Pasta de início" to "Startordner",
+            "Pesquisa avançada" to "Erweiterte Suche",
+            "Incluir subpastas" to "Unterordner einschließen",
+            "Todos os tipos" to "Alle Dateitypen",
+            "Pastas" to "Ordner",
+            "Documentos" to "Dokumente",
+            "Imagens" to "Bilder",
+            "Vídeo" to "Video",
+            "Áudio" to "Audio",
+            "Arquivos" to "Archive",
+            "Aplicações" to "Apps",
+            "Pasta pesquisada" to "Durchsuchter Ordner",
+            "resultados" to "Ergebnisse",
+            "Nenhum resultado encontrado." to "Keine Ergebnisse gefunden.",
+            "Mais ações" to "Weitere Aktionen",
+            "Copiar caminho" to "Pfad kopieren",
+            "Calcular SHA-256" to "SHA-256 berechnen",
+            "Caminho copiado." to "Pfad kopiert.",
+            "Partilhar o Archiver" to "Archiver teilen",
+            "Ajudar o projeto" to "Projekt unterstützen",
+            "Convida alguém a experimentar o Archiver" to "Lade jemanden ein, Archiver auszuprobieren",
+            "Gostas do Archiver?" to "Gefällt dir Archiver?",
+            "Agora não" to "Jetzt nicht",
+            "Escuro (recomendado)" to "Dunkel (empfohlen)",
+            "Preto OLED (ecrãs OLED)" to "OLED-Schwarz (OLED-Displays)",
+            "Claro (boa visibilidade à luz do dia)" to "Hell (gut bei Tageslicht)",
+            "9 idiomas" to "9 Sprachen"
+            )
+            "zh" -> mapOf(
+            "Explorador" to "文件管理器",
+            "Gestor de ficheiros para Android" to "Android 文件管理器",
+            "Configurações" to "设置",
+            "Geral" to "常规",
+            "Interface" to "界面",
+            "Compressão" to "压缩",
+            "Idioma" to "语言",
+            "Tema da interface" to "界面主题",
+            "Cor de destaque" to "强调色",
+            "Cores das pastas" to "文件夹颜色",
+            "Ordenar ficheiros" to "文件排序",
+            "Nome" to "名称",
+            "Tamanho" to "大小",
+            "Data" to "日期",
+            "Tipo" to "类型",
+            "Detalhado" to "详细列表",
+            "Compacto" to "紧凑列表",
+            "Grelha" to "网格",
+            "Copiar" to "复制",
+            "Mover" to "移动",
+            "Eliminar" to "删除",
+            "Renomear" to "重命名",
+            "Informações" to "信息",
+            "Abrir" to "打开",
+            "Abrir pasta" to "打开文件夹",
+            "Partilhar" to "分享",
+            "Extrair aqui" to "解压到此处",
+            "Extrair para nova pasta" to "解压到新文件夹",
+            "Ver conteúdo" to "浏览压缩包",
+            "Testar arquivo" to "测试压缩包",
+            "Adicionar aos Favoritos" to "添加到收藏夹",
+            "Remover dos Favoritos" to "从收藏夹移除",
+            "Cancelar" to "取消",
+            "Guardar" to "保存",
+            "Fechar" to "关闭",
+            "Pasta vazia" to "文件夹为空",
+            "Armazenamento interno" to "内部存储",
+            "Selecionar tudo" to "全选",
+            "Limpar seleção" to "清除选择",
+            "Colar" to "粘贴",
+            "Favoritos" to "收藏夹",
+            "Ordenar" to "排序",
+            "Atualizar" to "刷新",
+            "Pasta de início" to "起始文件夹",
+            "Pesquisa avançada" to "高级搜索",
+            "Incluir subpastas" to "搜索子文件夹",
+            "Todos os tipos" to "所有类型",
+            "Pastas" to "文件夹",
+            "Documentos" to "文档",
+            "Imagens" to "图片",
+            "Vídeo" to "视频",
+            "Áudio" to "音频",
+            "Arquivos" to "压缩包",
+            "Aplicações" to "应用",
+            "Pasta pesquisada" to "搜索范围",
+            "resultados" to "个结果",
+            "Nenhum resultado encontrado." to "没有找到结果。",
+            "Mais ações" to "更多操作",
+            "Copiar caminho" to "复制路径",
+            "Calcular SHA-256" to "计算 SHA-256",
+            "Caminho copiado." to "路径已复制。",
+            "Partilhar o Archiver" to "分享 Archiver",
+            "Ajudar o projeto" to "支持项目",
+            "Convida alguém a experimentar o Archiver" to "邀请他人试用 Archiver",
+            "Gostas do Archiver?" to "喜欢 Archiver 吗？",
+            "Agora não" to "暂时不了",
+            "Escuro (recomendado)" to "深色（推荐）",
+            "Preto OLED (ecrãs OLED)" to "OLED 纯黑（OLED 屏幕）",
+            "Claro (boa visibilidade à luz do dia)" to "浅色（适合明亮环境）",
+            "9 idiomas" to "9 种语言"
+            )
+            "hi" -> mapOf(
+            "Explorador" to "फ़ाइल प्रबंधक",
+            "Gestor de ficheiros para Android" to "Android फ़ाइल प्रबंधक",
+            "Configurações" to "सेटिंग",
+            "Geral" to "सामान्य",
+            "Interface" to "इंटरफ़ेस",
+            "Compressão" to "संपीड़न",
+            "Idioma" to "भाषा",
+            "Tema da interface" to "इंटरफ़ेस थीम",
+            "Cor de destaque" to "मुख्य रंग",
+            "Cores das pastas" to "फ़ोल्डर के रंग",
+            "Ordenar ficheiros" to "फ़ाइलें क्रमबद्ध करें",
+            "Nome" to "नाम",
+            "Tamanho" to "आकार",
+            "Data" to "तारीख",
+            "Tipo" to "प्रकार",
+            "Detalhado" to "विस्तृत",
+            "Compacto" to "कॉम्पैक्ट",
+            "Grelha" to "ग्रिड",
+            "Copiar" to "कॉपी करें",
+            "Mover" to "स्थानांतरित करें",
+            "Eliminar" to "हटाएँ",
+            "Renomear" to "नाम बदलें",
+            "Informações" to "जानकारी",
+            "Abrir" to "खोलें",
+            "Abrir pasta" to "फ़ोल्डर खोलें",
+            "Partilhar" to "साझा करें",
+            "Extrair aqui" to "यहाँ निकालें",
+            "Extrair para nova pasta" to "नए फ़ोल्डर में निकालें",
+            "Ver conteúdo" to "आर्काइव देखें",
+            "Testar arquivo" to "आर्काइव जाँचें",
+            "Adicionar aos Favoritos" to "पसंदीदा में जोड़ें",
+            "Remover dos Favoritos" to "पसंदीदा से हटाएँ",
+            "Cancelar" to "रद्द करें",
+            "Guardar" to "सहेजें",
+            "Fechar" to "बंद करें",
+            "Pasta vazia" to "फ़ोल्डर खाली है",
+            "Armazenamento interno" to "आंतरिक स्टोरेज",
+            "Selecionar tudo" to "सभी चुनें",
+            "Limpar seleção" to "चयन हटाएँ",
+            "Colar" to "पेस्ट करें",
+            "Favoritos" to "पसंदीदा",
+            "Ordenar" to "क्रमबद्ध करें",
+            "Atualizar" to "रीफ़्रेश",
+            "Pasta de início" to "होम फ़ोल्डर",
+            "Pesquisa avançada" to "उन्नत खोज",
+            "Incluir subpastas" to "सबफ़ोल्डर शामिल करें",
+            "Todos os tipos" to "सभी प्रकार",
+            "Pastas" to "फ़ोल्डर",
+            "Documentos" to "दस्तावेज़",
+            "Imagens" to "चित्र",
+            "Vídeo" to "वीडियो",
+            "Áudio" to "ऑडियो",
+            "Arquivos" to "आर्काइव",
+            "Aplicações" to "ऐप",
+            "Pasta pesquisada" to "खोजा गया फ़ोल्डर",
+            "resultados" to "परिणाम",
+            "Nenhum resultado encontrado." to "कोई परिणाम नहीं मिला।",
+            "Mais ações" to "और कार्रवाइयाँ",
+            "Copiar caminho" to "पथ कॉपी करें",
+            "Calcular SHA-256" to "SHA-256 निकालें",
+            "Caminho copiado." to "पथ कॉपी हो गया।",
+            "Partilhar o Archiver" to "Archiver साझा करें",
+            "Ajudar o projeto" to "प्रोजेक्ट का समर्थन करें",
+            "Convida alguém a experimentar o Archiver" to "किसी को Archiver आज़माने के लिए आमंत्रित करें",
+            "Gostas do Archiver?" to "क्या आपको Archiver पसंद है?",
+            "Agora não" to "अभी नहीं",
+            "Escuro (recomendado)" to "डार्क (अनुशंसित)",
+            "Preto OLED (ecrãs OLED)" to "OLED ब्लैक (OLED डिस्प्ले)",
+            "Claro (boa visibilidade à luz do dia)" to "लाइट (दिन के उजाले में बेहतर)",
+            "9 idiomas" to "9 भाषाएँ"
+            )
+            "ar" -> mapOf(
+            "Explorador" to "مدير الملفات",
+            "Gestor de ficheiros para Android" to "مدير ملفات أندرويد",
+            "Configurações" to "الإعدادات",
+            "Geral" to "عام",
+            "Interface" to "الواجهة",
+            "Compressão" to "الضغط",
+            "Idioma" to "اللغة",
+            "Tema da interface" to "مظهر الواجهة",
+            "Cor de destaque" to "لون التمييز",
+            "Cores das pastas" to "ألوان المجلدات",
+            "Ordenar ficheiros" to "ترتيب الملفات",
+            "Nome" to "الاسم",
+            "Tamanho" to "الحجم",
+            "Data" to "التاريخ",
+            "Tipo" to "النوع",
+            "Detalhado" to "تفصيلي",
+            "Compacto" to "مضغوط",
+            "Grelha" to "شبكة",
+            "Copiar" to "نسخ",
+            "Mover" to "نقل",
+            "Eliminar" to "حذف",
+            "Renomear" to "إعادة تسمية",
+            "Informações" to "معلومات",
+            "Abrir" to "فتح",
+            "Abrir pasta" to "فتح المجلد",
+            "Partilhar" to "مشاركة",
+            "Extrair aqui" to "استخراج هنا",
+            "Extrair para nova pasta" to "استخراج إلى مجلد جديد",
+            "Ver conteúdo" to "استعراض الأرشيف",
+            "Testar arquivo" to "اختبار الأرشيف",
+            "Adicionar aos Favoritos" to "إضافة إلى المفضلة",
+            "Remover dos Favoritos" to "إزالة من المفضلة",
+            "Cancelar" to "إلغاء",
+            "Guardar" to "حفظ",
+            "Fechar" to "إغلاق",
+            "Pasta vazia" to "المجلد فارغ",
+            "Armazenamento interno" to "التخزين الداخلي",
+            "Selecionar tudo" to "تحديد الكل",
+            "Limpar seleção" to "مسح التحديد",
+            "Colar" to "لصق",
+            "Favoritos" to "المفضلة",
+            "Ordenar" to "ترتيب",
+            "Atualizar" to "تحديث",
+            "Pasta de início" to "مجلد البداية",
+            "Pesquisa avançada" to "بحث متقدم",
+            "Incluir subpastas" to "تضمين المجلدات الفرعية",
+            "Todos os tipos" to "كل الأنواع",
+            "Pastas" to "مجلدات",
+            "Documentos" to "مستندات",
+            "Imagens" to "صور",
+            "Vídeo" to "فيديو",
+            "Áudio" to "صوت",
+            "Arquivos" to "أرشيف",
+            "Aplicações" to "تطبيقات",
+            "Pasta pesquisada" to "المجلد الذي تم البحث فيه",
+            "resultados" to "نتائج",
+            "Nenhum resultado encontrado." to "لم يتم العثور على نتائج.",
+            "Mais ações" to "مزيد من الإجراءات",
+            "Copiar caminho" to "نسخ المسار",
+            "Calcular SHA-256" to "حساب SHA-256",
+            "Caminho copiado." to "تم نسخ المسار.",
+            "Partilhar o Archiver" to "مشاركة Archiver",
+            "Ajudar o projeto" to "دعم المشروع",
+            "Convida alguém a experimentar o Archiver" to "ادعُ شخصًا لتجربة Archiver",
+            "Gostas do Archiver?" to "هل أعجبك Archiver؟",
+            "Agora não" to "ليس الآن",
+            "Escuro (recomendado)" to "داكن (موصى به)",
+            "Preto OLED (ecrãs OLED)" to "أسود OLED (شاشات OLED)",
+            "Claro (boa visibilidade à luz do dia)" to "فاتح (أفضل في ضوء النهار)",
+            "9 idiomas" to "9 لغات"
+            )
+            "ja" -> mapOf(
+            "Explorador" to "ファイル管理",
+            "Gestor de ficheiros para Android" to "Android ファイルマネージャー",
+            "Configurações" to "設定",
+            "Geral" to "一般",
+            "Interface" to "インターフェース",
+            "Compressão" to "圧縮",
+            "Idioma" to "言語",
+            "Tema da interface" to "テーマ",
+            "Cor de destaque" to "アクセントカラー",
+            "Cores das pastas" to "フォルダーの色",
+            "Ordenar ficheiros" to "ファイルを並べ替え",
+            "Nome" to "名前",
+            "Tamanho" to "サイズ",
+            "Data" to "日付",
+            "Tipo" to "種類",
+            "Detalhado" to "詳細",
+            "Compacto" to "コンパクト",
+            "Grelha" to "グリッド",
+            "Copiar" to "コピー",
+            "Mover" to "移動",
+            "Eliminar" to "削除",
+            "Renomear" to "名前を変更",
+            "Informações" to "情報",
+            "Abrir" to "開く",
+            "Abrir pasta" to "フォルダーを開く",
+            "Partilhar" to "共有",
+            "Extrair aqui" to "ここに展開",
+            "Extrair para nova pasta" to "新しいフォルダーに展開",
+            "Ver conteúdo" to "アーカイブを表示",
+            "Testar arquivo" to "アーカイブを検査",
+            "Adicionar aos Favoritos" to "お気に入りに追加",
+            "Remover dos Favoritos" to "お気に入りから削除",
+            "Cancelar" to "キャンセル",
+            "Guardar" to "保存",
+            "Fechar" to "閉じる",
+            "Pasta vazia" to "空のフォルダー",
+            "Armazenamento interno" to "内部ストレージ",
+            "Selecionar tudo" to "すべて選択",
+            "Limpar seleção" to "選択を解除",
+            "Colar" to "貼り付け",
+            "Favoritos" to "お気に入り",
+            "Ordenar" to "並べ替え",
+            "Atualizar" to "更新",
+            "Pasta de início" to "ホームフォルダー",
+            "Pesquisa avançada" to "詳細検索",
+            "Incluir subpastas" to "サブフォルダーも検索",
+            "Todos os tipos" to "すべての種類",
+            "Pastas" to "フォルダー",
+            "Documentos" to "ドキュメント",
+            "Imagens" to "画像",
+            "Vídeo" to "動画",
+            "Áudio" to "音声",
+            "Arquivos" to "アーカイブ",
+            "Aplicações" to "アプリ",
+            "Pasta pesquisada" to "検索対象フォルダー",
+            "resultados" to "件",
+            "Nenhum resultado encontrado." to "結果が見つかりません。",
+            "Mais ações" to "その他の操作",
+            "Copiar caminho" to "パスをコピー",
+            "Calcular SHA-256" to "SHA-256を計算",
+            "Caminho copiado." to "パスをコピーしました。",
+            "Partilhar o Archiver" to "Archiverを共有",
+            "Ajudar o projeto" to "プロジェクトを応援",
+            "Convida alguém a experimentar o Archiver" to "Archiverを誰かに紹介してください",
+            "Gostas do Archiver?" to "Archiverを気に入りましたか？",
+            "Agora não" to "あとで",
+            "Escuro (recomendado)" to "ダーク（おすすめ）",
+            "Preto OLED (ecrãs OLED)" to "OLEDブラック（OLED画面）",
+            "Claro (boa visibilidade à luz do dia)" to "ライト（明るい場所向け）",
+            "9 idiomas" to "9言語"
+            )
+            else -> emptyMap()
+        }
+        val localizedExtras = when (appLanguage) {
+            "es" -> mapOf("Tamanho total" to "Tamaño total", "Itens" to "Elementos", "itens" to "elementos", "Tamanho calculado" to "Tamaño calculado", "Seleciona uma pasta." to "Selecciona una carpeta.", "A calcular tamanho da pasta…" to "Calculando el tamaño de la carpeta…")
+            "fr" -> mapOf("Tamanho total" to "Taille totale", "Itens" to "Éléments", "itens" to "éléments", "Tamanho calculado" to "Taille calculée", "Seleciona uma pasta." to "Choisissez un dossier.", "A calcular tamanho da pasta…" to "Calcul de la taille du dossier…")
+            "de" -> mapOf("Tamanho total" to "Gesamtgröße", "Itens" to "Elemente", "itens" to "Elemente", "Tamanho calculado" to "Berechnete Größe", "Seleciona uma pasta." to "Wähle einen Ordner.", "A calcular tamanho da pasta…" to "Ordnergröße wird berechnet…")
+            "zh" -> mapOf("Tamanho total" to "总大小", "Itens" to "项目", "itens" to "个项目", "Tamanho calculado" to "已计算大小", "Seleciona uma pasta." to "请选择文件夹。", "A calcular tamanho da pasta…" to "正在计算文件夹大小…")
+            "hi" -> mapOf("Tamanho total" to "कुल आकार", "Itens" to "आइटम", "itens" to "आइटम", "Tamanho calculado" to "गणना किया गया आकार", "Seleciona uma pasta." to "एक फ़ोल्डर चुनें।", "A calcular tamanho da pasta…" to "फ़ोल्डर का आकार गणना हो रहा है…")
+            "ar" -> mapOf("Tamanho total" to "الحجم الإجمالي", "Itens" to "العناصر", "itens" to "عناصر", "Tamanho calculado" to "الحجم المحسوب", "Seleciona uma pasta." to "اختر مجلدًا.", "A calcular tamanho da pasta…" to "جارٍ حساب حجم المجلد…")
+            "ja" -> mapOf("Tamanho total" to "合計サイズ", "Itens" to "項目", "itens" to "項目", "Tamanho calculado" to "計算済みサイズ", "Seleciona uma pasta." to "フォルダーを選択してください。", "A calcular tamanho da pasta…" to "フォルダーサイズを計算中…")
+            else -> emptyMap()
+        }
+        // Long-tail labels use English until their dedicated translation is added.
+        return localized[text] ?: localizedExtras[text] ?: english[text] ?: text
     }
 
     private fun accentColor(): Int = when (accentName) {
@@ -2883,12 +3628,99 @@ class MainActivity : Activity() {
         } else 0
     }
 
+    private fun calculateFolderSize(folder: File) {
+        if (!folder.isDirectory) { toast("Seleciona uma pasta."); return }
+        runTask("A calcular tamanho da pasta…", 0L, 1L) { meter ->
+            val totals = measureFiles(listOf(folder)) { file -> meter.show(file) }
+            meter.setTotals(totals.bytes, totals.entries)
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle(folder.name)
+                    .setMessage(
+                        tr("Tamanho total") + ": " + formatSize(totals.bytes) + "\n" +
+                            tr("Itens") + ": " + totals.entries
+                    )
+                    .setPositiveButton(tr("Fechar"), null)
+                    .show()
+            }
+            tr("Tamanho calculado") + ": " + formatSize(totals.bytes) + " • " + totals.entries + " " + tr("itens")
+        }
+    }
+
+    private fun copyPath(file: File) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Archiver path", file.absolutePath))
+        toast("Caminho copiado.")
+    }
+
+    private fun calculateSha256(file: File) {
+        if (!file.isFile) { toast("Seleciona um ficheiro para calcular o SHA-256."); return }
+        runTask("A calcular SHA-256…", file.length(), 1L) { meter ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { stream ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = stream.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                    meter.bytesRead(count.toLong(), file)
+                }
+            }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle("SHA-256")
+                    .setMessage(file.name + "\n\n" + hash)
+                    .setPositiveButton(tr("Copiar")) { _, _ ->
+                        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("SHA-256", hash))
+                        toast("SHA-256 copiado.")
+                    }
+                    .setNegativeButton(tr("Fechar"), null)
+                    .show()
+            }
+            "SHA-256: " + hash
+        }
+    }
+
+    private fun shareApplication() {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Archiver — gestor de ficheiros Android")
+            putExtra(
+                Intent.EXTRA_TEXT,
+                tr("Experimenta o Archiver, um gestor de ficheiros Android independente:") +
+                    "\nhttps://github.com/nexauren1/Archiver-File-Manager"
+            )
+        }
+        startActivity(Intent.createChooser(intent, tr("Partilhar o Archiver")))
+    }
+
+    private fun maybeAskToShareApp() {
+        if (isFinishing || !browserRendered || prefs.getBoolean("share_prompt_dismissed", false)) return
+        prefs.edit().putBoolean("share_prompt_dismissed", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle(tr("Gostas do Archiver?"))
+            .setMessage(tr("Estamos a melhorar a aplicação. Partilhar o projeto ajuda mais pessoas a conhecê-lo."))
+            .setPositiveButton(tr("Partilhar")) { _, _ -> shareApplication() }
+            .setNegativeButton(tr("Agora não"), null)
+            .show()
+    }
+
     private fun showLanguageMenu() {
-        val options = arrayOf("Português", "English")
+        val codes = arrayOf("pt", "en", "es", "fr", "de", "zh", "hi", "ar", "ja")
+        val options = arrayOf("Português", "English", "Español", "Français", "Deutsch", "中文（简体）", "हिन्दी", "العربية", "日本語")
         AlertDialog.Builder(this).setTitle(tr("Idioma"))
-            .setSingleChoiceItems(options, if (appLanguage == "en") 1 else 0) { dialog, which ->
-                appLanguage = if (which == 1) "en" else "pt"
+            .setMessage(tr("Escolhe um idioma. Os nomes são apresentados na própria língua."))
+            .setSingleChoiceItems(options, codes.indexOf(appLanguage).coerceAtLeast(0)) { dialog, which ->
+                appLanguage = codes[which]
                 savePreferences()
+                if (Build.VERSION.SDK_INT >= 33) {
+                    runCatching {
+                        getSystemService(android.app.LocaleManager::class.java).applicationLocales =
+                            android.os.LocaleList.forLanguageTags(codes[which])
+                    }
+                }
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
             }.setNegativeButton(tr("Cancelar"), null).show()
@@ -2896,25 +3728,115 @@ class MainActivity : Activity() {
 
     private fun showThemeMenu() {
         val options = arrayOf("Escuro", "Preto OLED", "Claro")
-        AlertDialog.Builder(this).setTitle(tr("Tema da interface"))
-            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(uiTheme).coerceAtLeast(0)) { dialog, which ->
-                uiTheme = options[which]
+        val descriptions = arrayOf(
+            tr("Escuro (recomendado)"),
+            tr("Preto OLED (ecrãs OLED)"),
+            tr("Claro (boa visibilidade à luz do dia)")
+        )
+        val previewBackgrounds = intArrayOf(0xFF19191D.toInt(), 0xFF000000.toInt(), 0xFFF5F6FA.toInt())
+        val previewPanels = intArrayOf(0xFF292D40.toInt(), 0xFF08080A.toInt(), 0xFFE0E3F0.toInt())
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(6))
+        }
+        var themeDialog: AlertDialog? = null
+        options.forEachIndexed { index, option ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(10), dp(8), dp(10))
+                background = roundedBackground(
+                    if (uiTheme == option) selectedRowColor() else rowSurfaceColor(), 12
+                )
+                isClickable = true
+                isFocusable = true
+            }
+            val sample = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+                background = roundedBackground(previewBackgrounds[index], 7)
+            }
+            sample.addView(View(this).apply {
+                setBackgroundColor(previewPanels[index])
+            }, LinearLayout.LayoutParams(dp(42), dp(5)).apply { bottomMargin = dp(4) })
+            sample.addView(View(this).apply {
+                setBackgroundColor(if (option == "Claro") 0xFFB5B8C6.toInt() else 0xFF454551.toInt())
+            }, LinearLayout.LayoutParams(dp(29), dp(4)))
+            row.addView(sample, LinearLayout.LayoutParams(dp(54), dp(42)).apply { rightMargin = dp(12) })
+            val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            copy.addView(label(tr(option), 15, primaryTextColor(), true))
+            copy.addView(label(descriptions[index], 12, mutedTextColor(), false).apply {
+                setPadding(0, dp(3), 0, 0)
+            })
+            row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label(if (uiTheme == option) "✓" else "›", 20, accentColor(), true),
+                LinearLayout.LayoutParams(dp(24), dp(34)))
+            row.setOnClickListener {
+                uiTheme = option
                 savePreferences()
                 applyPaletteToWindow()
-                dialog.dismiss()
+                themeDialog?.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+            }
+            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
+        }
+        themeDialog = AlertDialog.Builder(this)
+            .setTitle(tr("Tema da interface"))
+            .setMessage(tr("O tema altera o fundo e o contraste. A cor de destaque controla os botões e a seleção."))
+            .setView(content)
+            .setNegativeButton(tr("Fechar"), null)
+            .create()
+        themeDialog?.show()
     }
 
     private fun showAccentMenu() {
         val options = arrayOf("Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
-        AlertDialog.Builder(this).setTitle(tr("Cor de destaque"))
-            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(accentName).coerceAtLeast(0)) { dialog, which ->
-                accentName = options[which]
+        val colorValues = intArrayOf(
+            0xFFB8B5FF.toInt(), 0xFF64B5F6.toInt(), 0xFF81C784.toInt(),
+            0xFFFFB74D.toInt(), 0xFFF48FB1.toInt(), 0xFFE57373.toInt(), 0xFFFFD54F.toInt()
+        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(6))
+        }
+        var accentDialog: AlertDialog? = null
+        options.forEachIndexed { index, option ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(9), dp(8), dp(9))
+                background = roundedBackground(
+                    if (accentName == option) selectedRowColor() else rowSurfaceColor(), 10
+                )
+                isClickable = true
+                isFocusable = true
+            }
+            val chip = View(this).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(colorValues[index])
+                    setStroke(dp(1), if (uiTheme == "Claro") 0x55000000 else 0x55FFFFFF)
+                }
+            }
+            row.addView(chip, LinearLayout.LayoutParams(dp(28), dp(28)).apply { rightMargin = dp(12) })
+            row.addView(label(tr(option), 15, primaryTextColor(), accentName == option),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            if (accentName == option) row.addView(label("✓", 18, colorValues[index], true))
+            row.setOnClickListener {
+                accentName = option
                 savePreferences()
-                dialog.dismiss()
+                accentDialog?.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+            }
+            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(5) })
+        }
+        accentDialog = AlertDialog.Builder(this)
+            .setTitle(tr("Cor de destaque"))
+            .setMessage(tr("Cor dos botões, seleção e indicadores"))
+            .setView(content)
+            .setNegativeButton(tr("Fechar"), null)
+            .create()
+        accentDialog?.show()
     }
 
     private fun showFolderColorMenu(file: File) {

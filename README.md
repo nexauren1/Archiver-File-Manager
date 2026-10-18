@@ -1,31 +1,34 @@
-# Archiver 0.4.0 — Android File Manager
+# Archiver 0.5.0 — Android File Manager
 
-**Archiver** is a native Android file manager written in Kotlin, inspired by classic archive managers such as ZArchiver. It is not a website wrapped in an app. Website and app are separate: the Android app runs on-device, while the website is published from `docs/`.
+Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
 
-## Features
+## Highlights
 
-- Shared-storage explorer with Android's special **Allow access to manage all files** permission, breadcrumb navigation, parent-folder entry, search, favorites, sorting, hidden-file toggle, multi-selection, and detailed/compact/grid views.
-- File actions: open/share, create, rename, copy, move, paste, delete, information, and per-folder color choices.
-- Type-aware icons for folders, text/code, documents, spreadsheets, archives, images, audio, video, APKs, PDFs and 3D-model files.
-- Image thumbnails, optional PDF/video/music/APK previews, and folder thumbnails when a folder contains an image.
-- ZIP and 7Z create, browse, test and extract; ZIP supports ZipCrypto/AES-256 passwords and split volumes. Compression levels are configurable.
-- Operation feedback: percentage, horizontal progress bar, current path/item, counts where available, in-app completion/error state and an ongoing/final notification when Android notification permission is allowed.
-- Built-in UTF-8 text editor for common text/code files up to 4 MiB, with save confirmation for unsaved changes.
-- GLB/GLTF metadata inspector for scene/node/mesh/material/texture/animation counts; interactive 3D rendering is delegated to a compatible external viewer.
-- UI preferences: Portuguese/English, dark/OLED-black/light themes, seven accent colors, custom folder colors, thumbnails and sorting preferences.
-- Two-language public project site under `docs/`, with a privacy page.
+- Shared-storage browsing with breadcrumb navigation, favorites, sorting, hidden files, multi-selection and detailed, compact or grid views.
+- Fast in-place selection: selecting an item no longer redraws the entire visible file list.
+- Scoped search starts in the current folder and never searches outside it. Searching subfolders is optional. Filters cover folders, documents, images, video, audio, archives and apps; wildcard patterns such as `*.zip` are supported.
+- Search results show the file/folder name, parent path and size, with tap-to-open and contextual actions.
+- File actions include create, open/share, rename, copy, move, delete, information, copy path, favorites and SHA-256 checksum calculation.
+- ZIP and 7Z creation, browsing, testing and extraction. ZIP supports ZipCrypto/AES-256 password protection and split volumes; compression levels are configurable.
+- Operation progress with percentage, current path/item and status. The completion dialog and operation notification are removed automatically when the operation ends.
+- File-type icons, image thumbnails and optional PDF/video/music/APK previews.
+- Built-in UTF-8 text editor for common files up to 4 MiB.
+- GLB/GLTF metadata inspector; interactive 3D rendering is handed off to a compatible external viewer.
+- Nine selectable interface languages: Portuguese, English, Spanish, French, German, Simplified Chinese, Hindi, Arabic and Japanese. Arabic uses a right-to-left layout. Translation coverage is being expanded screen by screen.
+- Theme presets with a visual preview (Dark, OLED black and Light), clearer accent-color selection, custom folder colors and thumbnail preferences.
+- Optional one-time invitation asking the user to share the app.
 
-## Supported archive formats and limits
+## Archive formats and current limits
 
-The current archive engine focuses on ZIP and 7Z. ZIP creation supports encryption and split volumes; these options are not implemented for 7Z. RAR, TAR-family formats, root/Shizuku access, a plugin system, and embedded interactive 3D rendering are not implemented in this release. Android can still restrict private app directories such as `Android/data`, even when all-files access is granted.
+The built-in archive engine focuses on ZIP and 7Z. ZIP supports encryption and split volumes; those features are not implemented for 7Z. RAR/TAR-family operations, root/Shizuku access, a plugin system, and embedded interactive 3D rendering are not implemented in this preview.
+
+Android may restrict access to private app directories such as `Android/data`, even when broad shared-storage access is granted.
 
 ## Website
 
-The GitHub Pages deployment workflow publishes `docs/` from `main`. If Pages is enabled for this repository, the site is available at:
+The website is separate from the app and is published from `docs/` through GitHub Pages when repository Pages settings enable the deployment:
 
 https://nexauren1.github.io/Archiver-File-Manager/
-
-The site is independent from the APK; it is not used as the app UI.
 
 ## Build
 
@@ -35,14 +38,14 @@ The site is independent from the APK; it is not used as the app UI.
 - Kotlin
 - `gradle --no-daemon assembleDebug`
 
-GitHub Actions builds a debug APK and uploads it as the `Archiver-debug-APK` workflow artifact. A successful build validates compilation only; it does not replace physical-device testing.
+GitHub Actions builds a debug APK and publishes it as a workflow artifact. A successful build validates compilation, not physical-device behavior; test destructive and archive operations with disposable sample files first.
 
-## Storage permission and privacy
+## Signing
 
-Android 11+ opens Android's special all-files-access settings page. The user must grant it explicitly. The permission does **not** grant root and does not bypass operating-system restrictions on other apps' private storage. Google Play also reviews broad storage access and requires an appropriate policy justification for distribution.
+No keystore or signing secrets belong in the repository. For permanent release signing, keep the keystore outside version control and configure the signing passwords, key alias and keystore file through protected release secrets or a secure local environment.
 
-Files are processed locally by the app. Before destructive actions or encryption/extraction, test with disposable sample files and verify that the selected paths and password are correct.
+## Storage and privacy
 
-## License and project status
+The user must grant Android's special all-files-access permission when requested. This does not grant root and does not bypass OS restrictions on other apps' private storage. Files are processed locally by the app.
 
-Archiver is an independent project and is not affiliated with ZArchiver. This is an early preview release; feature coverage and device behavior should be tested before important data is used.
+Archiver is an independent project and is not affiliated with ZArchiver.
