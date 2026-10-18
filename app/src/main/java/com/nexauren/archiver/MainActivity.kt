@@ -299,6 +299,7 @@ class MainActivity : Activity() {
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(pageBackgroundColor())
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -806,6 +807,7 @@ class MainActivity : Activity() {
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(pageBackgroundColor())
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1231,6 +1233,7 @@ class MainActivity : Activity() {
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(pageBackgroundColor())
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
