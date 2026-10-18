@@ -1185,7 +1185,6 @@ class MainActivity : Activity() {
             }
         }
         dialog.setOnCancelListener { cancelled.set(true) }
-        dialog.setOnDismissListener { cancelled.set(true) }
         dialog.show()
         searchWorker.execute {
             var fileCount = 0L
@@ -3143,12 +3142,16 @@ class MainActivity : Activity() {
                 }
                 showOperationNotification(message, tr(finalResult), null, finished = true, failed = failed)
                 val shouldAskToShare = !failed && recordSuccessfulOperation()
+                val completedChecksum = if (!failed && finalResult.contains("SHA-256")) {
+                    finalResult.substringAfterLast("\n").trim().takeIf { it.matches(Regex("[a-f0-9]{64}")) }
+                } else null
                 mainHandler.postDelayed({
                     if (dialog.isShowing) dialog.dismiss()
                     try {
                         getSystemService(NotificationManager::class.java).cancel(operationNotificationId)
                     } catch (_: Exception) { }
-                    if (shouldAskToShare && !isFinishing) showSharePrompt()
+                    if (completedChecksum != null && !isFinishing) showChecksumResult(finalResult)
+                    else if (shouldAskToShare && !isFinishing) showSharePrompt()
                 }, if (failed) 2400L else 1300L)
             }
         }
@@ -3188,6 +3191,27 @@ class MainActivity : Activity() {
         } catch (_: ActivityNotFoundException) {
             toast("Não foi possível abrir o menu de partilha.")
         }
+    }
+
+    private fun showChecksumResult(result: String) {
+        val textView = TextView(this).apply {
+            text = result
+            textSize = 14f
+            setTextColor(primaryTextColor())
+            setTextIsSelectable(true)
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(tr("Checksum SHA-256"))
+            .setView(ScrollView(this).apply { addView(textView) })
+            .setPositiveButton(tr("Copiar hash")) { _, _ ->
+                val hash = result.substringAfterLast("\n").trim()
+                getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("SHA-256", hash))
+                toast("Hash copiado.")
+            }
+            .setNegativeButton(tr("Fechar"), null)
+            .show()
     }
 
     private fun toolbarIcon(resource: Int, description: String, click: () -> Unit): ImageButton =
@@ -3341,6 +3365,7 @@ class MainActivity : Activity() {
             "Colar" to "Paste", "Criar novo…" to "Create new…", "Comprimir em ZIP" to "Compress to ZIP",
             "Comprimir em 7Z" to "Compress to 7Z", "Pesquisar em subpastas" to "Search subfolders",
             "Modificado" to "Modified", "Pode ler" to "Can read", "Pode escrever" to "Can write",
+            "Checksum SHA-256" to "SHA-256 checksum", "Copiar hash" to "Copy hash", "Hash copiado." to "Hash copied.",
             "selecionado(s)" to "selected", "item" to "item", "itens" to "items",
             "Pasta" to "Folder", "Ficheiro" to "File", "Dados do ficheiro" to "File details",
             "Cenas" to "Scenes", "Objetos/nós" to "Objects/nodes", "Materiais" to "Materials",
