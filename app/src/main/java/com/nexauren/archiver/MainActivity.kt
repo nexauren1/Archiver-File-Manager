@@ -3010,7 +3010,7 @@ class MainActivity : Activity() {
             val builder = NotificationCompat.Builder(this, notificationChannelId)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentIntent(pendingIntent)
-                .setContentTitle(if (finished) if (failed) "Archiver — erro" else "Archiver — concluído" else title)
+                .setContentTitle(if (finished) tr(if (failed) "Archiver — erro" else "Archiver — concluído") else tr(title))
                 .setContentText(detail)
                 .setOnlyAlertOnce(true)
                 .setOngoing(!finished)
@@ -3763,12 +3763,104 @@ class MainActivity : Activity() {
             else -> emptyMap()
         }
 
+    private fun translateDynamicMessage(text: String, language: String): String? {
+        val deletion = Regex("^Eliminação concluída: (\\d+) itens\\.$").matchEntire(text)
+        if (deletion != null) {
+            val count = deletion.groupValues[1]
+            return when (language) {
+                "en" -> "Deletion complete: $count items."
+                "es" -> "Eliminación completada: $count elementos."
+                "fr" -> "Suppression terminée : $count éléments."
+                "zh" -> "删除完成：$count 项。"
+                "hi" -> "हटाना पूरा हुआ: $count आइटम।"
+                "ar" -> "اكتمل الحذف: $count عناصر."
+                "ru" -> "Удаление завершено: $count элементов."
+                else -> text
+            }
+        }
+        val archiveResult = Regex("^(Extração ZIP concluída|Extração 7Z concluída|Teste ZIP concluído|Teste 7Z concluído): (\\d+) entradas\\.$").matchEntire(text)
+        if (archiveResult != null) {
+            val action = archiveResult.groupValues[1]
+            val count = archiveResult.groupValues[2]
+            return when (language) {
+                "en" -> when {
+                    action.startsWith("Extração ZIP") -> "ZIP extraction complete: $count entries."
+                    action.startsWith("Extração 7Z") -> "7Z extraction complete: $count entries."
+                    action.startsWith("Teste ZIP") -> "ZIP test complete: $count entries."
+                    else -> "7Z test complete: $count entries."
+                }
+                "es" -> when {
+                    action.startsWith("Extração ZIP") -> "Extracción ZIP completada: $count entradas."
+                    action.startsWith("Extração 7Z") -> "Extracción 7Z completada: $count entradas."
+                    action.startsWith("Teste ZIP") -> "Prueba ZIP completada: $count entradas."
+                    else -> "Prueba 7Z completada: $count entradas."
+                }
+                "fr" -> when {
+                    action.startsWith("Extração ZIP") -> "Extraction ZIP terminée : $count entrées."
+                    action.startsWith("Extração 7Z") -> "Extraction 7Z terminée : $count entrées."
+                    action.startsWith("Teste ZIP") -> "Test ZIP terminé : $count entrées."
+                    else -> "Test 7Z terminé : $count entrées."
+                }
+                "zh" -> when {
+                    action.startsWith("Extração ZIP") -> "ZIP 解压完成：$count 个条目。"
+                    action.startsWith("Extração 7Z") -> "7Z 解压完成：$count 个条目。"
+                    action.startsWith("Teste ZIP") -> "ZIP 测试完成：$count 个条目。"
+                    else -> "7Z 测试完成：$count 个条目。"
+                }
+                "hi" -> when {
+                    action.startsWith("Extração ZIP") -> "ZIP निष्कर्षण पूरा: $count आइटम।"
+                    action.startsWith("Extração 7Z") -> "7Z निष्कर्षण पूरा: $count आइटम।"
+                    action.startsWith("Teste ZIP") -> "ZIP जाँच पूरी: $count आइटम।"
+                    else -> "7Z जाँच पूरी: $count आइटम।"
+                }
+                "ar" -> when {
+                    action.startsWith("Extração ZIP") -> "اكتمل استخراج ZIP: $count عناصر."
+                    action.startsWith("Extração 7Z") -> "اكتمل استخراج 7Z: $count عناصر."
+                    action.startsWith("Teste ZIP") -> "اكتمل اختبار ZIP: $count عناصر."
+                    else -> "اكتمل اختبار 7Z: $count عناصر."
+                }
+                "ru" -> when {
+                    action.startsWith("Extração ZIP") -> "Извлечение ZIP завершено: $count элементов."
+                    action.startsWith("Extração 7Z") -> "Извлечение 7Z завершено: $count элементов."
+                    action.startsWith("Teste ZIP") -> "Проверка ZIP завершена: $count элементов."
+                    else -> "Проверка 7Z завершена: $count элементов."
+                }
+                else -> text
+            }
+        }
+        val prefixes = when (language) {
+            "en" -> listOf("Erro: " to "Error: ", "Não foi possível eliminar " to "Could not delete ",
+                "Falha ao comprimir " to "Failed to compress ", "Copiado, mas não foi possível remover a origem: " to "Copied, but could not remove source: ",
+                "Ficheiro guardado: " to "File saved: ", "Conteúdo lido: " to "Entries read: ", "Item extraído: " to "Item extracted: ")
+            "es" -> listOf("Erro: " to "Error: ", "Não foi possível eliminar " to "No se pudo eliminar ",
+                "Falha ao comprimir " to "No se pudo comprimir ", "Ficheiro guardado: " to "Archivo guardado: ",
+                "Conteúdo lido: " to "Entradas leídas: ", "Item extraído: " to "Elemento extraído: ")
+            "fr" -> listOf("Erro: " to "Erreur : ", "Não foi possível eliminar " to "Impossible de supprimer ",
+                "Falha ao comprimir " to "Échec de la compression de ", "Ficheiro guardado: " to "Fichier enregistré : ",
+                "Conteúdo lido: " to "Entrées lues : ", "Item extraído: " to "Élément extrait : ")
+            "zh" -> listOf("Erro: " to "错误：", "Não foi possível eliminar " to "无法删除", "Falha ao comprimir " to "压缩失败：",
+                "Ficheiro guardado: " to "文件已保存：", "Conteúdo lido: " to "已读取条目：", "Item extraído: " to "已解压项目：")
+            "hi" -> listOf("Erro: " to "त्रुटि: ", "Não foi possível eliminar " to "हटाया नहीं जा सका: ",
+                "Falha ao comprimir " to "संपीड़न विफल: ", "Ficheiro guardado: " to "फ़ाइल सहेजी गई: ",
+                "Conteúdo lido: " to "पढ़े गए आइटम: ", "Item extraído: " to "निकाला गया आइटम: ")
+            "ar" -> listOf("Erro: " to "خطأ: ", "Não foi possível eliminar " to "تعذر حذف ",
+                "Falha ao comprimir " to "فشل ضغط ", "Ficheiro guardado: " to "تم حفظ الملف: ",
+                "Conteúdo lido: " to "العناصر المقروءة: ", "Item extraído: " to "العنصر المستخرج: ")
+            "ru" -> listOf("Erro: " to "Ошибка: ", "Não foi possível eliminar " to "Не удалось удалить ",
+                "Falha ao comprimir " to "Не удалось сжать ", "Ficheiro guardado: " to "Файл сохранён: ",
+                "Conteúdo lido: " to "Прочитано элементов: ", "Item extraído: " to "Извлечён элемент: ")
+            else -> emptyList()
+        }
+        prefixes.firstOrNull { text.startsWith(it.first) }?.let { return it.second + text.removePrefix(it.first) }
+        return null
+    }
+
     private fun tr(text: String): String {
         if (appLanguage == "pt") return text
-        val english = englishTranslations[text] ?: text
+        val english = englishTranslations[text] ?: translateDynamicMessage(text, "en") ?: text
         if (appLanguage == "en") return english
         val localized = localizedTranslations(appLanguage)
-        return localized[text] ?: localized[english] ?: english
+        return localized[text] ?: localized[english] ?: translateDynamicMessage(text, appLanguage) ?: english
     }
 
     private fun accentColor(): Int = colorForAccent(accentName)
