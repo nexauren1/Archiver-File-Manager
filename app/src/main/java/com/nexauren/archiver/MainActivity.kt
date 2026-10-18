@@ -296,7 +296,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), dp(4), dp(8), dp(88))
         }
-        scroll.addView(rows, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(rows)
         body.addView(scroll, FrameLayout.LayoutParams(-1, -1))
 
         val fab = ImageButton(this).apply {
@@ -613,7 +613,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(6), dp(16), dp(18))
         }
-        scroll.addView(content, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(content)
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         addSettingChoice(content, "Ordenar arquivos", sortBy, "Escolher a ordem dos ficheiros") { showSortMenu() }
@@ -634,7 +634,7 @@ class MainActivity : Activity() {
         setContentView(page)
     }
 
-    private fun addSettingChoice(container: LinearLayout, title: String, summary: String, click: () -> Unit) {
+    private fun addSettingChoice(container: LinearLayout, title: String, value: String, summary: String, click: () -> Unit) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -648,7 +648,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         copy.addView(label(title, 16, 0xFFF0F0F3.toInt(), false))
-        copy.addView(label(summary, 13, 0xFFABABB5.toInt(), false).apply { setPadding(0, dp(4), 0, 0) })
+        copy.addView(label(value, 14, 0xFFD0CBFF.toInt(), false).apply { setPadding(0, dp(4), 0, 0) })
+        copy.addView(label(summary, 12, 0xFF9D9DA8.toInt(), false).apply { setPadding(0, dp(3), 0, 0) })
         row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(TextView(this).apply {
             text = "›"
