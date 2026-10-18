@@ -71,6 +71,7 @@ public class MainActivity extends Activity {
     private final Set<String> favorites = new HashSet<>();
     private final List<DocumentFile> clipboard = new ArrayList<>();
     private boolean clipboardIsCut = false;
+    private boolean useParentEntry = true;
     private boolean showHidden = false, showSize = true, showDate = true, showTime = false, descending = false;
     private boolean showThumbnails = true, showPdfThumbnails = false, showVideoThumbnails = false;
     private boolean showAlbumCovers = true, showApkIcons = true, squareThumbnails = false;
@@ -94,6 +95,7 @@ public class MainActivity extends Activity {
         showHidden = prefs.getBoolean("hidden", false);
         showSize = prefs.getBoolean("size", true);
         showDate = prefs.getBoolean("date", true);
+        useParentEntry = prefs.getBoolean("use_parent_entry", true);
         showTime = prefs.getBoolean("time", false);
         showThumbnails = prefs.getBoolean("thumbnails", true);
         showPdfThumbnails = prefs.getBoolean("thumbnails_pdf", false);
@@ -198,6 +200,7 @@ public class MainActivity extends Activity {
             return;
         }
         pathView.setText(dir.getName() == null ? "Ficheiros" : dir.getName());
+        if (useParentEntry && stack.size() > 1) addParentRow();
         gridRows = null;
         if ("Grelha".equals(viewMode)) {
             gridRows = new GridLayout(this);
@@ -223,6 +226,20 @@ public class MainActivity extends Activity {
         });
         for (DocumentFile file : files) addRow(file);
         selectionView.setText(files.size() + " itens" + (selected.isEmpty() ? "" : " • " + selected.size() + " selecionado(s)"));
+    }
+
+    private void addParentRow() {
+        TextView row = new TextView(this);
+        row.setText("📁  ..\\nSubir um diretório");
+        row.setTextSize(16);
+        row.setTextColor(0xFFF2F2F2);
+        row.setPadding(dp(8), dp(12), dp(8), dp(12));
+        row.setMinHeight(dp(58));
+        row.setOnClickListener(v -> goUp());
+        rows.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        View divider = new View(this);
+        divider.setBackgroundColor(0xFF333333);
+        rows.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
     private void addRow(DocumentFile file) {
@@ -659,7 +676,8 @@ public class MainActivity extends Activity {
             "Capa do álbum: " + onOff(showAlbumCovers),
             "Ícones do APK: " + onOff(showApkIcons),
             "Miniaturas quadradas: " + onOff(squareThumbnails),
-            "Mostrar hora: " + onOff(showTime) + (showDate ? "" : " (ative Mostrar data primeiro)")
+            "Mostrar hora: " + onOff(showTime) + (showDate ? "" : " (ative Mostrar data primeiro)"),
+            "Usar item .. para subir: " + onOff(useParentEntry)
         };
         new AlertDialog.Builder(this).setTitle("Definições do explorador")
             .setItems(options, (dialog, which) -> {
@@ -674,6 +692,7 @@ public class MainActivity extends Activity {
                     case 7:
                         if (!showDate) { toast("Ative primeiro a opção Mostrar data no menu principal."); return; }
                         showTime = !showTime; prefs.edit().putBoolean("time", showTime).apply(); break;
+                    case 8: useParentEntry = !useParentEntry; prefs.edit().putBoolean("use_parent_entry", useParentEntry).apply(); break;
                 }
                 refresh();
                 showExplorerSettings();
