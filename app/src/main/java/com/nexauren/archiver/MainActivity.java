@@ -248,22 +248,56 @@ public class MainActivity extends Activity {
     }
 
     private void showMainMenu() {
-        String[] options = {"Selecionar tudo", "Ordenar", "Mostrar/ocultar ficheiros ocultos",
-            "Mostrar/ocultar tamanho", "Mostrar/ocultar data", "Compressão ZIP", "Atualizar"};
+        String[] options = {"Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Excluir seleção", "Ordenar", "Mostrar/ocultar ficheiros ocultos", "Mostrar/ocultar tamanho", "Mostrar/ocultar data", "Compressão ZIP", "Atualizar"};
         new AlertDialog.Builder(this).setTitle("Opções").setItems(options, (d, which) -> {
             switch (which) {
                 case 0:
                     selected.clear();
                     if (current() != null) { DocumentFile[] all = current().listFiles(); if (all != null) for (DocumentFile f : all) selected.add(f.getUri().toString()); }
                     refresh(); break;
-                case 1: showSortMenu(); break;
-                case 2: showHidden = !showHidden; prefs.edit().putBoolean("hidden", showHidden).apply(); refresh(); break;
-                case 3: showSize = !showSize; prefs.edit().putBoolean("size", showSize).apply(); refresh(); break;
-                case 4: showDate = !showDate; prefs.edit().putBoolean("date", showDate).apply(); refresh(); break;
-                case 5: showCompressionMenu(); break;
-                case 6: refresh(); break;
+                case 1: selected.clear(); refresh(); break;
+                case 2: stageClipboard(false); break;
+                case 3: stageClipboard(true); break;
+                case 4: confirmDeleteSelection(); break;
+                case 5: showSortMenu(); break;
+                case 6: showHidden = !showHidden; prefs.edit().putBoolean("hidden", showHidden).apply(); refresh(); break;
+                case 7: showSize = !showSize; prefs.edit().putBoolean("size", showSize).apply(); refresh(); break;
+                case 8: showDate = !showDate; prefs.edit().putBoolean("date", showDate).apply(); refresh(); break;
+                case 9: showCompressionMenu(); break;
+                case 10: refresh(); break;
             }
         }).show();
+    }
+
+    private void stageClipboard(boolean cut) {
+        List<DocumentFile> items = chosen();
+        if (items.isEmpty()) { toast("Selecione pelo menos um item primeiro."); return; }
+        clipboard.clear();
+        clipboard.addAll(items);
+        clipboardIsCut = cut;
+        selected.clear();
+        refresh();
+        toast(cut ? items.size() + " item(ns) preparados para mover. Abra o destino e toque em Colar."
+                  : items.size() + " item(ns) preparados para copiar. Abra o destino e toque em Colar.");
+    }
+
+    private void confirmDeleteSelection() {
+        List<DocumentFile> items = chosen();
+        if (items.isEmpty()) { toast("Selecione pelo menos um item primeiro."); return; }
+        new AlertDialog.Builder(this).setTitle("Excluir seleção")
+            .setMessage("Eliminar " + items.size() + " item(ns)? Esta ação não pode ser anulada.")
+            .setNegativeButton("Cancelar", null).setPositiveButton("Excluir", (d, w) -> {
+                selected.clear();
+                runWork(() -> {
+                    for (DocumentFile item : items) {
+                        if (!deleteRecursively(item)) {
+                            postResult("A eliminação parou em: " + item.getName(), false);
+                            return;
+                        }
+                    }
+                    postResult("Seleção eliminada.", true);
+                });
+            }).show();
     }
 
     private void showSortMenu() {
@@ -318,8 +352,11 @@ public class MainActivity extends Activity {
             else if ("Extrair aqui".equals(op)) extract(file, current(), false);
             else if ("Extrair para nova pasta".equals(op)) extract(file, current(), true);
             else if ("Copiar".equals(op) || "Recortar".equals(op)) {
-                clipboard.clear(); clipboard.add(file); clipboardIsCut = "Recortar".equals(op);
-                toast(clipboardIsCut ? "Pronto para mover. Abra a pasta de destino e toque em Colar." : "Copiado. Abra a pasta de destino e toque em Colar.");
+                List<DocumentFile> items = chosen();
+                if (items.isEmpty()) items.add(file);
+                clipboard.clear(); clipboard.addAll(items); clipboardIsCut = "Recortar".equals(op);
+                selected.clear(); refresh();
+                toast(clipboardIsCut ? items.size() + " item(ns) preparados para mover." : items.size() + " item(ns) preparados para copiar.");
             } else if ("Renomear".equals(op)) promptRename(file);
             else if ("Excluir".equals(op)) confirmDelete(file);
             else showInfo(file);
