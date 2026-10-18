@@ -3150,7 +3150,7 @@ class MainActivity : Activity() {
                     try {
                         getSystemService(NotificationManager::class.java).cancel(operationNotificationId)
                     } catch (_: Exception) { }
-                    if (completedChecksum != null && !isFinishing) showChecksumResult(finalResult)
+                    if (completedChecksum != null && !isFinishing) showChecksumResult(finalResult, shouldAskToShare)
                     else if (shouldAskToShare && !isFinishing) showSharePrompt()
                 }, if (failed) 2400L else 1300L)
             }
@@ -3193,7 +3193,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showChecksumResult(result: String) {
+    private fun showChecksumResult(result: String, showShareAfter: Boolean = false) {
         val textView = TextView(this).apply {
             text = result
             textSize = 14f
@@ -3201,7 +3201,7 @@ class MainActivity : Activity() {
             setTextIsSelectable(true)
             setPadding(dp(20), dp(12), dp(20), dp(12))
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(tr("Checksum SHA-256"))
             .setView(ScrollView(this).apply { addView(textView) })
             .setPositiveButton(tr("Copiar hash")) { _, _ ->
@@ -3211,7 +3211,11 @@ class MainActivity : Activity() {
                 toast("Hash copiado.")
             }
             .setNegativeButton(tr("Fechar"), null)
-            .show()
+            .create()
+        dialog.setOnDismissListener {
+            if (showShareAfter && !isFinishing) mainHandler.postDelayed({ showSharePrompt() }, 250L)
+        }
+        dialog.show()
     }
 
     private fun toolbarIcon(resource: Int, description: String, click: () -> Unit): ImageButton =
