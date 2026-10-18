@@ -2456,11 +2456,8 @@ class MainActivity : Activity() {
 
     private fun shouldLoadThumbnail(file: File): Boolean {
         if (!showThumbnails) return false
-        if (file.isDirectory) {
-            return safeList(file).any { child ->
-                !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff")
-            }
-        }
+        // Directory contents are inspected in thumbnailWorker, never while building the visible list.
+        if (file.isDirectory) return true
         return when (extension(file.name)) {
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff" -> true
             "pdf" -> showPdfThumbnails
