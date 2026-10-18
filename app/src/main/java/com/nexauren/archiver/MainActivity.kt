@@ -3,6 +3,9 @@ package com.nexauren.archiver
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.ProgressDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -37,9 +40,11 @@ import android.widget.FrameLayout
 import android.graphics.drawable.GradientDrawable
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
@@ -87,7 +92,10 @@ class MainActivity : Activity() {
     private var clipboard = emptyList<File>()
     private var clipboardIsCut = false
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+    private val thumbnailWorker: ExecutorService = Executors.newFixedThreadPool(2)
     private val workActive = AtomicBoolean(false)
+    private val notificationChannelId = "archiver_file_operations"
+    private val operationNotificationId = 7410
     private val thumbnailCache = object : LruCache<String, Bitmap>(2 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = maxOf(1, value.byteCount / 1024)
     }
@@ -954,22 +962,28 @@ class MainActivity : Activity() {
             .setMessage("Eliminar " + files.size + if (files.size == 1) " item? Esta ação não pode ser anulada." else " itens? Esta ação não pode ser anulada.")
             .setNegativeButton("Cancelar", null).setPositiveButton("Eliminar") { _, _ ->
                 selected.clear()
-                runTask("A eliminar ficheiros…") {
+                val totals = measureFiles(files)
+                runTask("A eliminar ficheiros…", 0L, totals.entries) { meter ->
                     files.forEach { file ->
-                        if (!deleteRecursively(file)) throw IOException("Não foi possível eliminar " + file.name)
+                        meter.show(file)
+                        if (!deleteRecursively(file) { deleted -> meter.itemDone(deleted) }) {
+                            throw IOException("Não foi possível eliminar " + file.name)
+                        }
                     }
-                    "Eliminação concluída."
+                    "Eliminação concluída: " + totals.entries + " itens."
                 }
             }.show()
     }
 
-    private fun deleteRecursively(file: File): Boolean {
+    private fun deleteRecursively(file: File, onDeleted: ((File) -> Unit)? = null): Boolean {
         return try {
             if (file.isDirectory) {
                 val children = file.listFiles() ?: return false
-                for (child in children) if (!deleteRecursively(child)) return false
+                for (child in children) if (!deleteRecursively(child, onDeleted)) return false
             }
-            file.delete()
+            val deleted = file.delete()
+            if (deleted) onDeleted?.invoke(file)
+            deleted
         } catch (_: Exception) { false }
     }
 
@@ -1012,14 +1026,19 @@ class MainActivity : Activity() {
                 return
             }
         }
-        runTask(if (cut) "A mover…" else "A copiar…") {
+        val effectiveSources = sources.filterNot { cut && it.parentFile?.canonicalFile == target.canonicalFile }
+        if (effectiveSources.isEmpty()) { toast("Os itens já estão nesta pasta."); return }
+        val totals = measureFiles(effectiveSources)
+        val totalItems = totals.entries * if (cut) 2L else 1L
+        runTask(if (cut) "A mover…" else "A copiar…", totals.bytes, totalItems) { meter ->
             var count = 0
-            for (source in sources) {
-                val targetName = uniqueName(target, source.name)
-                val destination = File(target, targetName)
-                if (cut && source.parentFile?.canonicalFile == target.canonicalFile) continue
-                copyFileTree(source, destination)
-                if (cut && !deleteRecursively(source)) throw IOException("Copiado, mas não foi possível remover a origem: " + source.name)
+            for (source in effectiveSources) {
+                val destination = File(target, uniqueName(target, source.name))
+                meter.show(source)
+                copyFileTree(source, destination, meter)
+                if (cut && !deleteRecursively(source) { deleted -> meter.itemDone(deleted) }) {
+                    throw IOException("Copiado, mas não foi possível remover a origem: " + source.name)
+                }
                 count++
             }
             clipboard = emptyList()
@@ -1028,6 +1047,8 @@ class MainActivity : Activity() {
             (if (cut) "Movidos " else "Copiados ") + count + " item(ns)."
         }
     }
+
+    private fun isDescendant(child: File, parent: File): Boolean {
 
     private fun isDescendant(child: File, parent: File): Boolean {
         val p = pathKey(parent)
@@ -1049,26 +1070,28 @@ class MainActivity : Activity() {
         throw IOException("Não foi possível gerar um nome único.")
     }
 
-    private fun copyFileTree(source: File, dest: File) {
+    private fun copyFileTree(source: File, dest: File, meter: TaskProgress? = null) {
         if (source.isDirectory) {
             if (!dest.mkdirs()) throw IOException("Não foi possível criar " + dest.name)
+            meter?.show(source)
+            meter?.itemDone(source)
             source.listFiles()?.forEach { child ->
-                copyFileTree(child, File(dest, child.name))
+                copyFileTree(child, File(dest, child.name), meter)
             } ?: throw IOException("Não foi possível ler a pasta " + source.name)
         } else {
             if (dest.exists()) throw IOException("O destino já existe: " + dest.name)
-            val input = BufferedInputStream(FileInputStream(source))
-            try {
-                val output = BufferedOutputStream(FileOutputStream(dest))
-                try {
+            BufferedInputStream(FileInputStream(source)).use { input ->
+                BufferedOutputStream(FileOutputStream(dest)).use { output ->
                     val buffer = ByteArray(32 * 1024)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
                         output.write(buffer, 0, count)
+                        meter?.bytesRead(count.toLong(), source)
                     }
-                } finally { output.close() }
-            } finally { input.close() }
+                }
+            }
+            meter?.itemDone(source)
         }
     }
 
@@ -1079,16 +1102,17 @@ class MainActivity : Activity() {
                 val query = input.text.toString().trim().lowercase(Locale.ROOT)
                 if (query.isBlank()) { toast("Escreve um nome para pesquisar."); return@setPositiveButton }
                 val start = currentDir
-                runTask("A pesquisar…") { 
+                val entries = countFilesForSearch(start).coerceAtLeast(1L)
+                runTask("A pesquisar…", 0L, entries) { meter ->
                     val hits = mutableListOf<File>()
-                    searchTree(start, query, hits, 0)
+                    searchTree(start, query, hits, 0, meter)
                     runOnUiThread { showSearchResults(hits) }
                     "Pesquisa concluída: " + hits.size + " resultado(s)."
                 }
             }.show()
     }
 
-    private fun searchTree(directory: File, query: String, hits: MutableList<File>, depth: Int) {
+    private fun searchTree(directory: File, query: String, hits: MutableList<File>, depth: Int, meter: TaskProgress? = null) {
         if (depth > 60 || hits.size >= 300) return
         val children = try { directory.listFiles() } catch (_: Exception) { null } ?: return
         for (child in children) {
@@ -1096,11 +1120,12 @@ class MainActivity : Activity() {
             if (!showHidden && child.name.startsWith(".")) continue
             val name = child.name.lowercase(Locale.ROOT)
             val matches = if (query.contains('*') || query.contains('?')) {
-                val regex = query.replace(".", "\\\\.").replace("*", ".*").replace("?", ".")
+                val regex = query.replace(".", "\\.").replace("*", ".*").replace("?", ".")
                 name.matches(Regex("^" + regex + "$"))
             } else name.contains(query)
             if (matches) hits.add(child)
-            if (child.isDirectory) searchTree(child, query, hits, depth + 1)
+            if (child.isDirectory) searchTree(child, query, hits, depth + 1, meter)
+            meter?.itemDone(child)
         }
     }
 
@@ -1145,18 +1170,31 @@ class MainActivity : Activity() {
                 var name = input.text.toString().trim()
                 if (name.isBlank() || !validName(name)) { toast("Nome inválido."); return@setPositiveButton }
                 if (!name.lowercase(Locale.ROOT).endsWith(suffix)) name += suffix
-                try { name = uniqueName(currentDir, name) } catch (e: Exception) { toast("Nome de destino inválido."); return@setPositiveButton }
+                try { name = uniqueName(currentDir, name) } catch (_: Exception) { toast("Nome de destino inválido."); return@setPositiveButton }
                 val destination = File(currentDir, name)
                 val removeSources = deleteOriginals.isChecked
                 val sources = files.toList()
-                runTask("A criar " + suffix + "…") {
-                    if (format == "7z") createSevenZip(sources, destination) else createZip(sources, destination)
-                    if (removeSources) sources.forEach { if (!deleteRecursively(it)) throw IOException("Arquivo criado, mas não foi possível eliminar " + it.name) }
+                val totals = measureFiles(sources)
+                runTask("A criar " + suffix + "…", totals.bytes, totals.entries * if (removeSources) 2L else 1L) { meter ->
+                    try {
+                        if (format == "7z") createSevenZip(sources, destination, meter) else createZip(sources, destination, meter)
+                        if (removeSources) sources.forEach { source ->
+                            meter.show(source)
+                            if (!deleteRecursively(source) { deleted -> meter.itemDone(deleted) }) {
+                                throw IOException("Arquivo criado, mas não foi possível eliminar " + source.name)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        destination.delete()
+                        throw e
+                    }
                     selected.clear()
                     if (removeSources) "Arquivo criado; originais eliminados." else "Arquivo criado: " + destination.name
                 }
             }.show()
     }
+
+    private fun compressionName(): String = when
 
     private fun compressionName(): String = when (compressionLevel) {
         0 -> "sem compressão"
@@ -1165,7 +1203,7 @@ class MainActivity : Activity() {
         else -> "normal"
     }
 
-    private fun createZip(sources: List<File>, destination: File) {
+    private fun createZip(sources: List<File>, destination: File, meter: TaskProgress) {
         ZipOutputStream(BufferedOutputStream(FileOutputStream(destination))).use { zip ->
             zip.setLevel(when (compressionLevel) {
                 0 -> java.util.zip.Deflater.NO_COMPRESSION
@@ -1174,19 +1212,21 @@ class MainActivity : Activity() {
                 else -> java.util.zip.Deflater.DEFAULT_COMPRESSION
             })
             sources.forEach { source ->
-                if (source.canonicalFile != destination.canonicalFile) addToZip(zip, source, source.name, destination)
+                if (source.canonicalFile != destination.canonicalFile) addToZip(zip, source, source.name, destination, meter)
             }
         }
     }
 
-    private fun addToZip(zip: ZipOutputStream, source: File, entryName: String, destination: File) {
+    private fun addToZip(zip: ZipOutputStream, source: File, entryName: String, destination: File, meter: TaskProgress) {
         if (source.canonicalFile == destination.canonicalFile) return
+        meter.show(source)
         if (source.isDirectory) {
             val name = if (entryName.endsWith("/")) entryName else entryName + "/"
             zip.putNextEntry(ZipEntry(name))
             zip.closeEntry()
+            meter.itemDone(source)
             val children = source.listFiles() ?: throw IOException("Não foi possível ler " + source.name)
-            children.forEach { addToZip(zip, it, name + it.name, destination) }
+            children.forEach { addToZip(zip, it, name + it.name, destination, meter) }
         } else {
             zip.putNextEntry(ZipEntry(entryName))
             BufferedInputStream(FileInputStream(source)).use { input ->
@@ -1195,13 +1235,15 @@ class MainActivity : Activity() {
                     val n = input.read(buffer)
                     if (n < 0) break
                     zip.write(buffer, 0, n)
+                    meter.bytesRead(n.toLong(), source)
                 }
             }
             zip.closeEntry()
+            meter.itemDone(source)
         }
     }
 
-    private fun createSevenZip(sources: List<File>, destination: File) {
+    private fun createSevenZip(sources: List<File>, destination: File, meter: TaskProgress) {
         SevenZOutputFile(destination).use { seven ->
             when (compressionLevel) {
                 0 -> seven.setContentCompression(SevenZMethod.COPY)
@@ -1210,13 +1252,14 @@ class MainActivity : Activity() {
                 else -> seven.setContentCompression(SevenZMethod.LZMA2)
             }
             sources.forEach { source ->
-                if (source.canonicalFile != destination.canonicalFile) addToSevenZip(seven, source, source.name, destination)
+                if (source.canonicalFile != destination.canonicalFile) addToSevenZip(seven, source, source.name, destination, meter)
             }
         }
     }
 
-    private fun addToSevenZip(seven: SevenZOutputFile, source: File, entryName: String, destination: File) {
+    private fun addToSevenZip(seven: SevenZOutputFile, source: File, entryName: String, destination: File, meter: TaskProgress) {
         if (source.canonicalFile == destination.canonicalFile) return
+        meter.show(source)
         val entry = SevenZArchiveEntry()
         entry.name = entryName
         entry.lastModifiedDate = Date(maxOf(0L, source.lastModified()))
@@ -1225,8 +1268,9 @@ class MainActivity : Activity() {
             entry.setHasStream(false)
             seven.putArchiveEntry(entry)
             seven.closeArchiveEntry()
+            meter.itemDone(source)
             val children = source.listFiles() ?: throw IOException("Não foi possível ler " + source.name)
-            children.forEach { addToSevenZip(seven, it, entryName + "/" + it.name, destination) }
+            children.forEach { addToSevenZip(seven, it, entryName + "/" + it.name, destination, meter) }
         } else {
             entry.isDirectory = false
             entry.setHasStream(true)
@@ -1238,14 +1282,20 @@ class MainActivity : Activity() {
                     val n = input.read(buffer)
                     if (n < 0) break
                     seven.write(buffer, 0, n)
+                    meter.bytesRead(n.toLong(), source)
                 }
             }
             seven.closeArchiveEntry()
+            meter.itemDone(source)
         }
     }
 
     private fun extractZip(archive: File, destinationDir: File, makeSubfolder: Boolean) {
-        runTask("A extrair ZIP…") {
+        runTrackedTask("A extrair ZIP…", {
+            try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+        }().bytes, {
+            try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+        }().entries) { meter ->
             val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension)) else destinationDir
             if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
             var count = 0
@@ -1254,6 +1304,7 @@ class MainActivity : Activity() {
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     val output = safeArchiveTarget(destination, entry.name, entry.isDirectory)
+                    meter.show(output)
                     if (entry.isDirectory) {
                         if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
                     } else {
@@ -1264,10 +1315,12 @@ class MainActivity : Activity() {
                                 val n = zip.read(buffer)
                                 if (n <= 0) break
                                 stream.write(buffer, 0, n)
+                                meter.bytesRead(n.toLong(), finalOut)
                             }
                         }
                     }
                     zip.closeEntry()
+                    meter.itemDone(output)
                     count++
                 }
             }
@@ -1276,7 +1329,8 @@ class MainActivity : Activity() {
     }
 
     private fun extractSevenZip(archive: File, destinationDir: File, makeSubfolder: Boolean) {
-        runTask("A extrair 7Z…") {
+        val totals = try { measureSevenZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+        runTrackedTask("A extrair 7Z…", totals.bytes, totals.entries) { meter ->
             val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension)) else destinationDir
             if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
             var count = 0
@@ -1285,6 +1339,7 @@ class MainActivity : Activity() {
                 while (true) {
                     val entry = seven.nextEntry ?: break
                     val output = safeArchiveTarget(destination, entry.name, entry.isDirectory)
+                    meter.show(output)
                     if (entry.isDirectory) {
                         if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
                     } else {
@@ -1295,9 +1350,11 @@ class MainActivity : Activity() {
                                 val n = seven.read(buffer, 0, buffer.size)
                                 if (n < 0) break
                                 stream.write(buffer, 0, n)
+                                meter.bytesRead(n.toLong(), finalOut)
                             }
                         }
                     }
+                    meter.itemDone(output)
                     count++
                 }
             }
@@ -1320,14 +1377,22 @@ class MainActivity : Activity() {
     }
 
     private fun testZip(archive: File) {
-        runTask("A testar ZIP…") {
+        val totals = try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+        runTrackedTask("A testar ZIP…", totals.bytes, totals.entries) { meter ->
             var count = 0
             ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
                 val buffer = ByteArray(32 * 1024)
                 while (true) {
                     val entry = zip.nextEntry ?: break
-                    while (zip.read(buffer) >= 0) { }
+                    val current = File(archive.parentFile, entry.name)
+                    meter.show(current)
+                    while (true) {
+                        val n = zip.read(buffer)
+                        if (n < 0) break
+                        if (n > 0) meter.bytesRead(n.toLong(), current)
+                    }
                     zip.closeEntry()
+                    meter.itemDone(current)
                     count++
                 }
             }
@@ -1336,19 +1401,29 @@ class MainActivity : Activity() {
     }
 
     private fun testSevenZip(archive: File) {
-        runTask("A testar 7Z…") {
+        val totals = try { measureSevenZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+        runTrackedTask("A testar 7Z…", totals.bytes, totals.entries) { meter ->
             var count = 0
             SevenZFile(archive).use { seven ->
                 val buffer = ByteArray(32 * 1024)
                 while (true) {
                     val entry = seven.nextEntry ?: break
-                    while (seven.read(buffer, 0, buffer.size) >= 0) { }
+                    val current = File(archive.parentFile, entry.name)
+                    meter.show(current)
+                    while (true) {
+                        val n = seven.read(buffer, 0, buffer.size)
+                        if (n < 0) break
+                        if (n > 0) meter.bytesRead(n.toLong(), current)
+                    }
+                    meter.itemDone(current)
                     count++
                 }
             }
             "Teste 7Z concluído: " + count + " entradas."
         }
     }
+
+    private data class ArchiveItem
 
     private data class ArchiveItem(val index: Int, val name: String, val directory: Boolean, val size: Long)
 
@@ -1399,50 +1474,62 @@ class MainActivity : Activity() {
     }
 
     private fun extractArchiveEntry(archive: File, item: ArchiveItem) {
-        runTask("A extrair item…") {
+        runTrackedTask("A extrair item…", item.size.coerceAtLeast(0L), 1L) { meter ->
             val destination = safeArchiveTarget(currentDir, item.name, item.directory)
             if (item.directory) {
                 if (!destination.exists() && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta.")
             } else {
-                destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.") }
-                val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
                 when (extension(archive.name)) {
                     "zip" -> ZipFile(archive).use { zip ->
-                        val en = zip.entries()
-                        var index = 0
-                        var entry: ZipEntry? = null
-                        while (en.hasMoreElements()) {
-                            val candidate = en.nextElement()
-                            if (index++ == item.index) { entry = candidate; break }
-                        }
-                        val chosenEntry = entry ?: throw IOException("A entrada já não existe.")
-                        zip.getInputStream(chosenEntry).use { input -> BufferedOutputStream(FileOutputStream(target)).use { input.copyTo(it) } }
-                    }
-                    "7z" -> SevenZFile(archive).use { seven ->
-                        val buffer = ByteArray(32 * 1024)
-                        var index = 0
-                        var found = false
-                        while (true) {
-                            val e = seven.nextEntry ?: break
-                            if (index++ != item.index) {
-                                while (seven.read(buffer, 0, buffer.size) >= 0) { }
-                                continue
-                            }
-                            found = true
-                            BufferedOutputStream(FileOutputStream(target)).use { out ->
+                        val entry = zip.getEntry(item.name) ?: throw IOException("A entrada já não existe.")
+                        val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
+                        target.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
+                        BufferedInputStream(zip.getInputStream(entry)).use { input ->
+                            BufferedOutputStream(FileOutputStream(target)).use { output ->
+                                val buffer = ByteArray(32 * 1024)
                                 while (true) {
-                                    val n = seven.read(buffer, 0, buffer.size)
+                                    val n = input.read(buffer)
                                     if (n < 0) break
-                                    out.write(buffer, 0, n)
+                                    output.write(buffer, 0, n)
+                                    meter.bytesRead(n.toLong(), target)
                                 }
                             }
-                            break
+                        }
+                    }
+                    "7z" -> {
+                        var found = false
+                        SevenZFile(archive).use { seven ->
+                            var index = 0
+                            while (true) {
+                                val entry = seven.nextEntry ?: break
+                                if (index++ != item.index) {
+                                    if (!entry.isDirectory) {
+                                        val buffer = ByteArray(32 * 1024)
+                                        while (seven.read(buffer, 0, buffer.size) >= 0) { }
+                                    }
+                                    continue
+                                }
+                                found = true
+                                val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
+                                target.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
+                                BufferedOutputStream(FileOutputStream(target)).use { out ->
+                                    val buffer = ByteArray(32 * 1024)
+                                    while (true) {
+                                        val n = seven.read(buffer, 0, buffer.size)
+                                        if (n < 0) break
+                                        out.write(buffer, 0, n)
+                                        meter.bytesRead(n.toLong(), target)
+                                    }
+                                }
+                                break
+                            }
                         }
                         if (!found) throw IOException("A entrada já não existe.")
                     }
                     else -> throw IOException("Formato não suportado.")
                 }
             }
+            meter.itemDone(destination)
             "Item extraído: " + item.name
         }
     }
@@ -1467,7 +1554,7 @@ class MainActivity : Activity() {
         val key = thumbnailKey(file)
         view.tag = key
         thumbnailCache.get(key)?.let { view.setImageBitmap(it); return }
-        worker.execute {
+        thumbnailWorker.execute {
             val bitmap = try { loadThumbnail(file) } catch (_: Exception) { null }
             if (bitmap != null) thumbnailCache.put(key, bitmap)
             runOnUiThread { if (!isFinishing && view.tag == key && bitmap != null) view.setImageBitmap(bitmap) }
@@ -1557,32 +1644,211 @@ class MainActivity : Activity() {
         return bitmap
     }
 
+    private data class TaskTotals(val bytes: Long, val entries: Long)
+
+    private inner class TaskProgress(
+        private val totalBytes: Long,
+        private val totalEntries: Long,
+        private val publish: (Int, String) -> Unit
+    ) {
+        private var completedBytes = 0L
+        private var completedEntries = 0L
+        private val totalUnits = (totalBytes.coerceAtLeast(0L) + totalEntries.coerceAtLeast(1L)).coerceAtLeast(1L)
+
+        @Synchronized
+        fun show(file: File) = publish(progressPercent(), file.absolutePath)
+
+        @Synchronized
+        fun bytesRead(count: Long, file: File) {
+            if (count > 0L) completedBytes = (completedBytes + count).coerceAtMost(totalBytes.coerceAtLeast(0L))
+            publish(progressPercent(), file.absolutePath)
+        }
+
+        @Synchronized
+        fun itemDone(file: File) {
+            completedEntries = (completedEntries + 1L).coerceAtMost(totalEntries.coerceAtLeast(1L))
+            publish(progressPercent(), file.absolutePath)
+        }
+
+        private fun progressPercent(): Int {
+            val done = completedBytes + completedEntries
+            return ((done.toDouble() / totalUnits.toDouble()) * 100.0).toInt().coerceIn(0, 99)
+        }
+
+        fun finish(detail: String) = publish(100, detail)
+    }
+
+    private fun measureFiles(files: List<File>): TaskTotals {
+        var bytes = 0L
+        var entries = 0L
+        val visited = HashSet<String>()
+        fun walk(file: File, depth: Int) {
+            if (depth > 80 || entries >= 200000L) return
+            val key = pathKey(file)
+            if (!visited.add(key)) return
+            entries++
+            if (file.isFile) {
+                bytes += file.length().coerceAtLeast(0L)
+            } else if (file.isDirectory) {
+                safeList(file).forEach { walk(it, depth + 1) }
+            }
+        }
+        files.forEach { walk(it, 0) }
+        return TaskTotals(bytes, entries.coerceAtLeast(1L))
+    }
+
+    private fun countFilesForSearch(directory: File): Long = measureFiles(listOf(directory)).entries
+
+    private fun measureZipArchive(archive: File): TaskTotals {
+        var bytes = 0L
+        var entries = 0L
+        ZipFile(archive).use { zip ->
+            val all = zip.entries()
+            while (all.hasMoreElements()) {
+                val entry = all.nextElement()
+                entries++
+                if (!entry.isDirectory && entry.size > 0L) bytes += entry.size
+            }
+        }
+        return TaskTotals(bytes, entries.coerceAtLeast(1L))
+    }
+
+    private fun measureSevenZipArchive(archive: File): TaskTotals {
+        var bytes = 0L
+        var entries = 0L
+        SevenZFile(archive).use { seven ->
+            while (true) {
+                val entry = seven.nextEntry ?: break
+                entries++
+                if (!entry.isDirectory && entry.size > 0L) bytes += entry.size
+            }
+        }
+        return TaskTotals(bytes, entries.coerceAtLeast(1L))
+    }
+
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                notificationChannelId,
+                "Operações de ficheiros",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Progresso e conclusão das operações do Archiver." }
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+    }
+
+    private fun showOperationNotification(title: String, detail: String, percent: Int?, finished: Boolean = false, failed: Boolean = false) {
+        try {
+            ensureNotificationChannel()
+            val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            val pendingIntent = PendingIntent.getActivity(
+                this, operationNotificationId, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val builder = NotificationCompat.Builder(this, notificationChannelId)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentIntent(pendingIntent)
+                .setContentTitle(if (finished) if (failed) "Archiver — erro" else "Archiver — concluído" else title)
+                .setContentText(detail)
+                .setOnlyAlertOnce(true)
+                .setOngoing(!finished)
+                .setAutoCancel(finished)
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            if (finished || percent == null) builder.setProgress(0, 0, false)
+            else builder.setProgress(100, percent.coerceIn(0, 100), false)
+            getSystemService(NotificationManager::class.java).notify(operationNotificationId, builder.build())
+        } catch (_: SecurityException) {
+            // Android 13+: notifications may be denied; in-app progress still works.
+        } catch (_: Exception) { }
+    }
+
     private fun runTask(message: String, action: () -> String) {
+        runTrackedTask(message, 0L, 1L) { meter ->
+            meter.show(currentDir)
+            val result = action()
+            meter.itemDone(currentDir)
+            result
+        }
+    }
+
+    private fun runTask(message: String, totalBytes: Long, totalEntries: Long, action: (TaskProgress) -> String) {
+        runTrackedTask(message, totalBytes, totalEntries, action)
+    }
+
+    private fun runTrackedTask(message: String, totalBytes: Long, totalEntries: Long, action: (TaskProgress) -> String) {
         if (!workActive.compareAndSet(false, true)) {
             toast("Já existe uma operação em curso. Aguarda que termine.")
             return
         }
-        val progress = ProgressDialog(this).apply {
-            setMessage(message)
-            setIndeterminate(true)
-            setCancelable(false)
-            show()
+        ensureNotificationChannel()
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 742)
         }
+
+        val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+        }
+        val percentView = label("0%", 14, 0xFFD8D3FF.toInt(), true).apply { gravity = Gravity.END }
+        val detailView = label(message, 12, 0xFFB9B9C3.toInt(), false).apply {
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            setPadding(0, dp(10), 0, 0)
+        }
+        val dialogContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(12), dp(22), dp(12))
+            minimumWidth = dp(280)
+            addView(progressBar, LinearLayout.LayoutParams(-1, dp(8)))
+            addView(percentView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            addView(detailView, LinearLayout.LayoutParams(-1, -2))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle(message).setView(dialogContent).setCancelable(false).create()
+        dialog.show()
+        var lastPercent = -1
+        var lastDetail = ""
+        var lastNoticeAt = 0L
+        val meter = TaskProgress(totalBytes, totalEntries) { percent, detail ->
+            runOnUiThread {
+                if (!isFinishing && dialog.isShowing) {
+                    progressBar.progress = percent
+                    percentView.text = "$percent%"
+                    detailView.text = detail
+                }
+            }
+            val now = android.os.SystemClock.elapsedRealtime()
+            val notificationDue = synchronized(this) {
+                val due = percent != lastPercent || (detail != lastDetail && now - lastNoticeAt >= 800L)
+                if (due) {
+                    lastPercent = percent
+                    lastDetail = detail
+                    lastNoticeAt = now
+                }
+                due
+            }
+            if (notificationDue) showOperationNotification(message, detail, percent)
+        }
+        showOperationNotification(message, currentDir.absolutePath, 0)
         worker.execute {
             var result: String
             try {
-                result = action()
+                result = action(meter)
             } catch (e: Exception) {
                 result = "Erro: " + (e.message ?: e.javaClass.simpleName)
             } finally {
                 workActive.set(false)
             }
+            val finalResult = result
             runOnUiThread {
+                if (dialog.isShowing) dialog.dismiss()
                 if (!isFinishing) {
-                    if (progress.isShowing) progress.dismiss()
-                    toast(result)
-                    if (hasStorageAccess() && browserRendered) refreshFiles()
+                    percentView.text = "100%"
+                    progressBar.progress = 100
+                    detailView.text = finalResult
+                    Toast.makeText(this, finalResult, Toast.LENGTH_LONG).show()
+                    if (hasStorageAccess() && browserRendered && !settingsOpen) refreshFiles()
                 }
+                showOperationNotification(message, finalResult, null, finished = true, failed = finalResult.startsWith("Erro:"))
             }
         }
     }
@@ -1696,6 +1962,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         worker.shutdown()
+        thumbnailWorker.shutdown()
         super.onDestroy()
     }
 }
