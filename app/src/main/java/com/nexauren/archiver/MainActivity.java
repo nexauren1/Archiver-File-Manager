@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -342,15 +343,17 @@ public class MainActivity extends Activity {
     private void showFileActions(DocumentFile file) {
         String[] options;
         if (file.isDirectory()) options = new String[]{"Abrir pasta", "Comprimir em ZIP", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
-        else if ("zip".equals(extension(file.getName()))) options = new String[]{"Abrir", "Extrair aqui", "Extrair para nova pasta", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
-        else options = new String[]{"Abrir", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
+        else if ("zip".equals(extension(file.getName()))) options = new String[]{"Abrir", "Testar arquivo", "Extrair aqui", "Extrair para nova pasta", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
+        else options = new String[]{"Abrir", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
         new AlertDialog.Builder(this).setTitle(file.getName()).setItems(options, (d,which) -> {
             String op = options[which];
             if ("Abrir pasta".equals(op)) { stack.add(file); selected.clear(); refresh(); }
             else if ("Abrir".equals(op)) openFile(file);
             else if ("Comprimir em ZIP".equals(op)) promptZip(Collections.singletonList(file));
+            else if ("Testar arquivo".equals(op)) testZip(file);
             else if ("Extrair aqui".equals(op)) extract(file, current(), false);
             else if ("Extrair para nova pasta".equals(op)) extract(file, current(), true);
+            else if ("Partilhar".equals(op)) shareFile(file);
             else if ("Copiar".equals(op) || "Recortar".equals(op)) {
                 List<DocumentFile> items = chosen();
                 if (items.isEmpty()) items.add(file);
@@ -419,8 +422,14 @@ public class MainActivity extends Activity {
         if (suggested == null) suggested = "Arquivo";
         if (!suggested.toLowerCase(java.util.Locale.ROOT).endsWith(".zip")) suggested += ".zip";
         input.setText(suggested);
+        CheckBox deleteOriginals = new CheckBox(this);
+        deleteOriginals.setText("Excluir originais depois de comprimir com sucesso");
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.addView(input);
+        form.addView(deleteOriginals);
         new AlertDialog.Builder(this).setTitle("Criar arquivo ZIP")
-            .setMessage("Formato ZIP • Compressão: " + compressionName()).setView(input)
+            .setMessage("Formato ZIP • Compressão: " + compressionName()).setView(form)
             .setNegativeButton("Cancelar", null).setPositiveButton("Criar", (d,w) -> {
                 String name = input.getText().toString().trim();
                 if (name.isEmpty()) { toast("Indique um nome."); return; }
@@ -429,22 +438,74 @@ public class MainActivity extends Activity {
                 if (out == null) { toast("Não foi possível criar o ZIP. Confirme o nome e as permissões."); return; }
                 final List<DocumentFile> sources = new ArrayList<>(files);
                 final DocumentFile target = out;
+                final boolean removeOriginals = deleteOriginals.isChecked();
                 selected.clear();
                 runWork(() -> {
-                    try (OutputStream stream = getContentResolver().openOutputStream(target.getUri());
-                         ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(stream))) {
+                    try {
+                        OutputStream stream = getContentResolver().openOutputStream(target.getUri());
                         if (stream == null) throw new IOException("Não foi possível abrir o destino.");
-                        if (compressionLevel == 0) zip.setLevel(java.util.zip.Deflater.NO_COMPRESSION);
-                        else if (compressionLevel == 1) zip.setLevel(java.util.zip.Deflater.BEST_SPEED);
-                        else if (compressionLevel == 3) zip.setLevel(java.util.zip.Deflater.BEST_COMPRESSION);
-                        else zip.setLevel(java.util.zip.Deflater.DEFAULT_COMPRESSION);
-                        for (DocumentFile src : sources) addToZip(zip, src, src.getName() == null ? "item" : src.getName(), target.getUri());
+                        try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(stream))) {
+                            if (compressionLevel == 0) zip.setLevel(java.util.zip.Deflater.NO_COMPRESSION);
+                            else if (compressionLevel == 1) zip.setLevel(java.util.zip.Deflater.BEST_SPEED);
+                            else if (compressionLevel == 3) zip.setLevel(java.util.zip.Deflater.BEST_COMPRESSION);
+                            else zip.setLevel(java.util.zip.Deflater.DEFAULT_COMPRESSION);
+                            for (DocumentFile src : sources) addToZip(zip, src, src.getName() == null ? "item" : src.getName(), target.getUri());
+                        }
                     } catch (Exception e) {
-                        deleteRecursively(target); postResult("Erro ao comprimir: " + safeMessage(e), false); return;
+                        deleteRecursively(target);
+                        postResult("Erro ao comprimir: " + safeMessage(e), false);
+                        return;
                     }
-                    postResult("ZIP criado: " + target.getName(), true);
+                    if (removeOriginals) {
+                        for (DocumentFile src : sources) {
+                            if (!deleteRecursively(src)) {
+                                postResult("ZIP criado, mas não foi possível eliminar a origem " + src.getName() + ".", false);
+                                return;
+                            }
+                        }
+                        postResult("ZIP criado e originais eliminados.", true);
+                    } else {
+                        postResult("ZIP criado: " + target.getName(), true);
+                    }
                 });
             }).show();
+    }
+
+    private void testZip(DocumentFile archive) {
+        runWork(() -> {
+            int count = 0;
+            try {
+                InputStream raw = getContentResolver().openInputStream(archive.getUri());
+                if (raw == null) throw new IOException("Não foi possível abrir o arquivo.");
+                try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(raw))) {
+                    ZipEntry entry;
+                    byte[] buffer = new byte[32768];
+                    while ((entry = zip.getNextEntry()) != null) {
+                        int n;
+                        while ((n = zip.read(buffer)) != -1) { }
+                        zip.closeEntry();
+                        count++;
+                    }
+                }
+            } catch (Exception e) {
+                postResult("O ZIP falhou no teste: " + safeMessage(e), false);
+                return;
+            }
+            postResult("Teste ZIP concluído. Entradas verificadas: " + count + ".", true);
+        });
+    }
+
+    private void shareFile(DocumentFile file) {
+        try {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            String mime = getContentResolver().getType(file.getUri());
+            send.setType(mime == null ? "*/*" : mime);
+            send.putExtra(Intent.EXTRA_STREAM, file.getUri());
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(send, "Partilhar ficheiro"));
+        } catch (Exception e) {
+            toast("Não foi possível partilhar: " + safeMessage(e));
+        }
     }
 
     private String compressionName() {
