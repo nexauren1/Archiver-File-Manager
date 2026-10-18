@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final List<DocumentFile> stack = new ArrayList<>();
     private final Set<String> selected = new HashSet<>();
+    private final Set<String> favorites = new HashSet<>();
     private final List<DocumentFile> clipboard = new ArrayList<>();
     private boolean clipboardIsCut = false;
     private boolean showHidden = false, showSize = true, showDate = true, showTime = false, descending = false;
@@ -84,6 +85,8 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        Set<String> savedFavorites = prefs.getStringSet("favorites", null);
+        if (savedFavorites != null) favorites.addAll(savedFavorites);
         showHidden = prefs.getBoolean("hidden", false);
         showSize = prefs.getBoolean("size", true);
         showDate = prefs.getBoolean("date", true);
@@ -504,7 +507,7 @@ public class MainActivity extends Activity {
     }
 
     private void showMainMenu() {
-        String[] options = {"Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Excluir seleção", "Ordenar", "Mostrar/ocultar ficheiros ocultos", "Mostrar/ocultar tamanho", "Mostrar/ocultar data", "Compressão ZIP", "Atualizar", "Pesquisar em subpastas", "Definições do explorador"};
+        String[] options = {"Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Excluir seleção", "Ordenar", "Mostrar/ocultar ficheiros ocultos", "Mostrar/ocultar tamanho", "Mostrar/ocultar data", "Compressão ZIP", "Atualizar", "Pesquisar em subpastas", "Definições do explorador", "Favoritos"};
         new AlertDialog.Builder(this).setTitle("Opções").setItems(options, (d, which) -> {
             switch (which) {
                 case 0:
@@ -523,6 +526,7 @@ public class MainActivity extends Activity {
                 case 10: refresh(); break;
                 case 11: promptSearch(); break;
                 case 12: showExplorerSettings(); break;
+                case 13: showFavorites(); break;
             }
         }).show();
     }
@@ -730,13 +734,104 @@ public class MainActivity extends Activity {
             }).show();
     }
 
+    private String relativeFavoritePath(DocumentFile file) {
+        StringBuilder path = new StringBuilder();
+        for (int i = 1; i < stack.size(); i++) {
+            String segment = stack.get(i).getName();
+            if (segment != null && !segment.isEmpty()) {
+                if (path.length() > 0) path.append('/');
+                path.append(segment);
+            }
+        }
+        if (file != null && file.getName() != null) {
+            if (path.length() > 0) path.append('/');
+            path.append(file.getName());
+        }
+        return path.toString();
+    }
+
+    private String favoriteKey(DocumentFile file) {
+        String tree = prefs.getString(KEY_TREE, "");
+        return tree + "\n" + relativeFavoritePath(file);
+    }
+
+    private void addFavorite(DocumentFile file) {
+        favorites.add(favoriteKey(file));
+        prefs.edit().putStringSet("favorites", new HashSet<>(favorites)).apply();
+        toast("Adicionado aos Favoritos.");
+    }
+
+    private void removeFavorite(DocumentFile file) {
+        favorites.remove(favoriteKey(file));
+        prefs.edit().putStringSet("favorites", new HashSet<>(favorites)).apply();
+        toast("Removido dos Favoritos.");
+    }
+
+    private void showFavorites() {
+        if (favorites.isEmpty()) { toast("Ainda não existem Favoritos."); return; }
+        List<String> items = new ArrayList<>(favorites);
+        Collections.sort(items, String.CASE_INSENSITIVE_ORDER);
+        String[] labels = new String[items.size()];
+        for (int i = 0; i < items.size(); i++) {
+            String[] parts = items.get(i).split("\\n", 2);
+            String path = parts.length > 1 ? parts[1] : parts[0];
+            String rootName = "Armazenamento";
+            if (parts.length > 1) {
+                try {
+                    DocumentFile root = DocumentFile.fromTreeUri(this, Uri.parse(parts[0]));
+                    if (root != null && root.getName() != null) rootName = root.getName();
+                } catch (Exception ignored) { }
+            }
+            labels[i] = rootName + (path.isEmpty() ? "" : "/" + path);
+        }
+        new AlertDialog.Builder(this).setTitle("Favoritos").setItems(labels, (dialog, which) -> openFavorite(items.get(which)))
+            .setNegativeButton("Fechar", null).show();
+    }
+
+    private void openFavorite(String key) {
+        String[] parts = key.split("\\n", 2);
+        if (parts.length != 2 || parts[0].isEmpty()) { toast("Este Favorito já não está disponível."); return; }
+        DocumentFile root;
+        try { root = DocumentFile.fromTreeUri(this, Uri.parse(parts[0])); }
+        catch (Exception e) { root = null; }
+        if (root == null || !root.canRead()) { toast("A pasta guardada já não está acessível."); return; }
+        stack.clear();
+        stack.add(root);
+        selected.clear();
+        if (parts[1].isEmpty()) { refresh(); return; }
+        String[] segments = parts[1].split("/");
+        for (int i = 0; i < segments.length; i++) {
+            DocumentFile parent = current();
+            DocumentFile found = null;
+            DocumentFile[] children = parent.listFiles();
+            if (children != null) for (DocumentFile child : children) {
+                if (segments[i].equals(child.getName())) { found = child; break; }
+            }
+            if (found == null) { toast("Não foi encontrado: " + segments[i]); refresh(); return; }
+            boolean last = i == segments.length - 1;
+            if (last && !found.isDirectory()) {
+                refresh();
+                showFileActions(found);
+                return;
+            }
+            if (!found.isDirectory()) { toast("O percurso guardado já não corresponde a uma pasta."); refresh(); return; }
+            stack.add(found);
+        }
+        refresh();
+    }
+
     private void showFileActions(DocumentFile file) {
         String[] options;
         if (file.isDirectory()) options = new String[]{"Abrir pasta", "Comprimir em ZIP", "Comprimir em 7Z", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
         else if ("zip".equals(extension(file.getName())) || "7z".equals(extension(file.getName()))) options = new String[]{"Abrir", "Testar arquivo", "Extrair aqui", "Extrair para nova pasta", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
         else options = new String[]{"Abrir", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
-        new AlertDialog.Builder(this).setTitle(file.getName()).setItems(options, (d,which) -> {
-            String op = options[which];
+        List<String> allOptions = new ArrayList<>();
+        Collections.addAll(allOptions, options);
+        String favoriteKey = favoriteKey(file);
+        allOptions.add(favorites.contains(favoriteKey) ? "Remover dos Favoritos" : "Adicionar aos Favoritos");
+        final String[] actionOptions = allOptions.toArray(new String[0]);
+        new AlertDialog.Builder(this).setTitle(file.getName()).setItems(actionOptions, (d,which) -> {
+            String op = actionOptions[which];
             if ("Abrir pasta".equals(op)) { stack.add(file); selected.clear(); refresh(); }
             else if ("Abrir".equals(op)) openFile(file);
             else if ("Comprimir em ZIP".equals(op)) promptZip(chosenOrSingle(file));
@@ -745,6 +840,8 @@ public class MainActivity extends Activity {
             else if ("Extrair aqui".equals(op)) { if ("7z".equals(extension(file.getName()))) extractSevenZip(file, current(), false); else extract(file, current(), false); }
             else if ("Extrair para nova pasta".equals(op)) { if ("7z".equals(extension(file.getName()))) extractSevenZip(file, current(), true); else extract(file, current(), true); }
             else if ("Partilhar".equals(op)) shareFile(file);
+            else if ("Adicionar aos Favoritos".equals(op)) addFavorite(file);
+            else if ("Remover dos Favoritos".equals(op)) removeFavorite(file);
             else if ("Copiar".equals(op) || "Recortar".equals(op)) {
                 List<DocumentFile> items = chosen();
                 if (items.isEmpty()) items.add(file);
