@@ -760,7 +760,7 @@ class MainActivity : Activity() {
                 5 -> showCreateMenu()
                 6 -> promptArchive(chosenOrVisible(), "zip")
                 7 -> promptArchive(chosenOrVisible(), "7z")
-                8 -> promptSearch()
+                8 -> promptSearch(true)
                 9 -> showFavorites()
                 10 -> showSortMenu()
                 11 -> showExplorerSettings()
@@ -1519,51 +1519,303 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun promptSearch() {
-        val input = EditText(this).apply { hint = "Nome ou padrão, por exemplo *.zip"; setSingleLine(true) }
-        AlertDialog.Builder(this).setTitle("Pesquisar ficheiros").setView(input)
-            .setNegativeButton("Cancelar", null).setPositiveButton("Pesquisar") { _, _ ->
-                val query = input.text.toString().trim().lowercase(Locale.ROOT)
-                if (query.isBlank()) { toast("Escreve um nome para pesquisar."); return@setPositiveButton }
-                val start = currentDir
-                runTask("A pesquisar…", 0L, 1L) { meter ->
-                    val entries = countFilesForSearch(start) { meter.show(it) }
-                    meter.setTotals(0L, entries)
-                    val hits = mutableListOf<File>()
-                    searchTree(start, query, hits, 0, meter)
-                    runOnUiThread { showSearchResults(hits) }
-                    "Pesquisa concluída: " + hits.size + " resultado(s)."
+    private fun promptSearch(includeSubfoldersByDefault: Boolean = false) {
+        if (workActive.get()) {
+            toast("Aguarda que a operação atual termine antes de pesquisar.")
+            return
+        }
+        val input = EditText(this).apply {
+            hint = tr("Nome, parte do nome ou padrão (*.zip)")
+            setSingleLine(true)
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+        }
+        val typeNames = arrayOf(
+            "Todos os tipos", "Pastas", "Imagens", "Vídeos", "Áudio",
+            "Documentos", "Texto e código", "Arquivos comprimidos", "Aplicações APK", "Outros ficheiros"
+        )
+        val typePicker = makeSpinner(typeNames.map { tr(it) }.toTypedArray())
+        val includeSubfolders = CheckBox(this).apply {
+            text = tr("Incluir subpastas")
+            isChecked = includeSubfoldersByDefault
+        }
+        val scope = TextView(this).apply {
+            text = tr("Âmbito da pesquisa") + "\n" + currentDir.absolutePath
+            textSize = 12f
+            setTextColor(mutedTextColor())
+            setPadding(0, dp(4), 0, dp(8))
+        }
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+            addView(label(tr("A pesquisa começa nesta pasta e nunca sai dela."), 13, mutedTextColor(), false))
+            addView(scope, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            addView(input, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(label(tr("Filtrar resultados"), 13, mutedTextColor(), false).apply {
+                setPadding(0, dp(12), 0, dp(3))
+            })
+            addView(typePicker, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(includeSubfolders, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Pesquisar nesta pasta"))
+            .setView(form)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(tr("Pesquisar"), null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val query = input.text.toString().trim()
+                if (query.isBlank()) {
+                    input.error = tr("Escreve o nome ou padrão que procuras.")
+                    input.requestFocus()
+                    return@setOnClickListener
                 }
-            }.show()
+                val start = currentDir.canonicalFile
+                val typeIndex = typePicker.selectedItemPosition
+                val recursive = includeSubfolders.isChecked
+                dialog.dismiss()
+                runScopedSearch(start, query, typeIndex, recursive)
+            }
+        }
+        dialog.show()
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
     }
 
-    private fun searchTree(directory: File, query: String, hits: MutableList<File>, depth: Int, meter: TaskProgress? = null) {
-        if (depth > 60 || hits.size >= 300) return
-        val children = try { directory.listFiles() } catch (_: Exception) { null } ?: return
-        for (child in children) {
-            if (hits.size >= 300) return
-            if (!showHidden && child.name.startsWith(".")) continue
-            val name = child.name.lowercase(Locale.ROOT)
-            val matches = if (query.contains('*') || query.contains('?')) {
-                val regex = query.replace(".", "\\.").replace("*", ".*").replace("?", ".")
-                name.matches(Regex("^" + regex + "$"))
-            } else name.contains(query)
-            if (matches) hits.add(child)
-            if (child.isDirectory) searchTree(child, query, hits, depth + 1, meter)
-            meter?.itemDone(child)
+    private fun matchesSearchType(file: File, typeIndex: Int): Boolean {
+        if (typeIndex == 0) return true
+        if (typeIndex == 1) return file.isDirectory
+        if (file.isDirectory) return false
+        val ext = extension(file.name)
+        return when (typeIndex) {
+            2 -> ext in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff", "svg")
+            3 -> ext in setOf("mp4", "mkv", "webm", "avi", "mov", "3gp", "m4v", "mpeg", "mpg")
+            4 -> ext in setOf("mp3", "wav", "ogg", "m4a", "flac", "aac", "opus", "wma", "mid", "midi")
+            5 -> ext in setOf("pdf", "doc", "docx", "odt", "rtf", "pages", "epub", "xls", "xlsx", "ods", "csv", "tsv")
+            6 -> isEditableTextFile(file)
+            7 -> ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "lz4", "zst", "tgz", "tbz", "iso", "cab", "arj")
+            8 -> ext in setOf("apk", "aab", "apks", "xapk")
+            else -> ext !in setOf(
+                "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff", "svg",
+                "mp4", "mkv", "webm", "avi", "mov", "3gp", "m4v", "mpeg", "mpg",
+                "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus", "wma", "mid", "midi",
+                "pdf", "doc", "docx", "odt", "rtf", "pages", "epub", "xls", "xlsx", "ods", "csv", "tsv",
+                "zip", "7z", "rar", "tar", "gz", "bz2", "xz", "lz4", "zst", "tgz", "tbz", "iso", "cab", "arj",
+                "apk", "aab", "apks", "xapk"
+            )
         }
     }
 
-    private fun showSearchResults(hits: List<File>) {
-        if (isFinishing) return
-        if (hits.isEmpty()) { toast("Nenhum resultado encontrado."); return }
-        val labels = hits.map { it.absolutePath.removePrefix(rootDir.absolutePath).trimStart(File.separatorChar) }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Resultados (" + hits.size + ")").setItems(labels) { _, which ->
-            val found = hits[which]
-            currentDir = if (found.isDirectory) found else found.parentFile ?: rootDir
+    private fun runScopedSearch(startDir: File, rawQuery: String, typeIndex: Int, recursive: Boolean) {
+        if (!searchActive.compareAndSet(false, true)) {
+            toast("Já existe uma pesquisa em curso.")
+            return
+        }
+        val cancelled = AtomicBoolean(false)
+        val query = rawQuery.lowercase(Locale.ROOT)
+        val queryRegex = if (query.contains('*') || query.contains('?')) {
+            Regex("^" + query.map { ch ->
+                when (ch) {
+                    '*' -> ".*"
+                    '?' -> "."
+                    else -> Regex.escape(ch.toString())
+                }
+            }.joinToString("") + "$")
+        } else null
+
+        val statusView = label(tr("A preparar pesquisa…"), 13, mutedTextColor(), false)
+        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+        }
+        val resultsColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(12))
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(resultsColumn, ScrollView.LayoutParams(-1, -2))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(4))
+            addView(statusView, LinearLayout.LayoutParams(-1, -2).apply {
+                leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(8)
+            })
+            addView(progress, LinearLayout.LayoutParams(-1, dp(5)).apply {
+                leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(8)
+            })
+            addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Resultados da pesquisa"))
+            .setView(content)
+            .setNegativeButton(tr("Parar"), null)
+            .setPositiveButton(tr("Fechar"), null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                cancelled.set(true)
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
+                statusView.text = tr("A parar a pesquisa…")
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                cancelled.set(true)
+                dialog.dismiss()
+            }
+        }
+        dialog.setOnCancelListener { cancelled.set(true) }
+        dialog.setOnDismissListener { cancelled.set(true) }
+        dialog.show()
+
+        searchWorker.execute {
+            var scanned = 0
+            var directoriesSkipped = 0
+            val hits = ArrayList<File>()
+            fun visit(directory: File, depth: Int) {
+                if (cancelled.get() || depth > 48 || hits.size >= 500) return
+                val children = try {
+                    directory.listFiles()
+                } catch (_: SecurityException) {
+                    null
+                }
+                if (children == null) {
+                    directoriesSkipped++
+                    return
+                }
+                children.sortWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+                for (child in children) {
+                    if (cancelled.get() || hits.size >= 500) return
+                    if (!showHidden && child.name.startsWith(".")) continue
+                    scanned++
+                    val name = child.name.lowercase(Locale.ROOT)
+                    val matchesName = if (queryRegex != null) queryRegex.matches(name) else name.contains(query)
+                    if (matchesName && matchesSearchType(child, typeIndex)) hits.add(child)
+                    if (recursive && child.isDirectory) visit(child, depth + 1)
+                    if (scanned % 80 == 0) {
+                        val status = tr("Analisados") + ": $scanned  •  " + tr("resultados") + ": " + hits.size
+                        mainHandler.post {
+                            if (dialog.isShowing && !isFinishing) statusView.text = status
+                        }
+                    }
+                }
+            }
+            visit(startDir, 0)
+            hits.sortWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase(Locale.ROOT) }))
+            val scannedFinal = scanned
+            val skippedFinal = directoriesSkipped
+            val limited = hits.size >= 500
+            mainHandler.post {
+                try {
+                    if (!isFinishing && dialog.isShowing) {
+                        progress.visibility = View.GONE
+                        statusView.text = buildString {
+                            append(tr(if (cancelled.get()) "Pesquisa interrompida" else "Pesquisa concluída"))
+                            append(" • "); append(scannedFinal); append(" "); append(tr("itens analisados"))
+                            append(" • "); append(hits.size); append(" "); append(tr("resultados"))
+                            if (limited) append(" • ").append(tr("Limite de 500 resultados; afina a pesquisa."))
+                            if (skippedFinal > 0) append(" • ").append(skippedFinal).append(" ").append(tr("pastas sem acesso"))
+                        }
+                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).visibility = View.GONE
+                        resultsColumn.removeAllViews()
+                        if (hits.isEmpty()) {
+                            resultsColumn.addView(label(tr("Nenhum resultado encontrado nesta pasta."), 15, mutedTextColor(), false).apply {
+                                setPadding(dp(12), dp(18), dp(12), dp(18))
+                            }, LinearLayout.LayoutParams(-1, -2))
+                        } else {
+                            hits.forEach { found ->
+                                resultsColumn.addView(createSearchResultRow(found, dialog), LinearLayout.LayoutParams(-1, -2))
+                                resultsColumn.addView(View(this).apply { setBackgroundColor(0x22333339) },
+                                    LinearLayout.LayoutParams(-1, dp(1)))
+                            }
+                        }
+                    }
+                } finally {
+                    searchActive.set(false)
+                }
+            }
+        }
+    }
+
+    private fun createSearchResultRow(file: File, resultsDialog: AlertDialog): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(9), dp(4), dp(9))
+            isClickable = true
+            isFocusable = true
+            background = roundedBackground(rowSurfaceColor(), 8)
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(iconForFile(file))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = tr(if (file.isDirectory) "Pasta" else "Ficheiro")
+        }
+        row.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(10) })
+        val textColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        textColumn.addView(TextView(this).apply {
+            text = file.name
+            textSize = 15f
+            setTextColor(primaryTextColor())
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }, LinearLayout.LayoutParams(-1, -2))
+        val parentPath = file.parentFile?.absolutePath ?: file.absolutePath
+        textColumn.addView(TextView(this).apply {
+            text = parentPath
+            textSize = 11f
+            setTextColor(mutedTextColor())
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            setPadding(0, dp(2), 0, 0)
+        }, LinearLayout.LayoutParams(-1, -2))
+        val meta = if (file.isDirectory) {
+            safeList(file).size.toString() + " " + tr("itens")
+        } else {
+            formatSize(file.length()) + " • " + DateFormat.getDateInstance(DateFormat.SHORT).format(Date(file.lastModified()))
+        }
+        textColumn.addView(label(meta, 11, mutedTextColor(), false).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }, LinearLayout.LayoutParams(-1, -2))
+        row.addView(textColumn, LinearLayout.LayoutParams(0, -2, 1f))
+        val more = TextView(this).apply {
+            text = "⋮"
+            textSize = 24f
+            gravity = Gravity.CENTER
+            contentDescription = tr("Mais ações")
+            setTextColor(primaryTextColor())
+            isClickable = true
+            setOnClickListener {
+                resultsDialog.dismiss()
+                showFileActions(file)
+            }
+        }
+        row.addView(more, LinearLayout.LayoutParams(dp(40), dp(48)))
+        row.setOnClickListener {
+            resultsDialog.dismiss()
+            if (file.isDirectory) {
+                currentDir = file
+                selected.clear()
+                refreshFiles()
+            } else {
+                currentDir = file.parentFile ?: rootDir
+                selected.clear()
+                refreshFiles()
+                showFileActions(file)
+            }
+        }
+        row.setOnLongClickListener {
+            resultsDialog.dismiss()
+            currentDir = file.parentFile ?: rootDir
+            selected.clear()
+            selected.add(pathKey(file))
             refreshFiles()
-            if (!found.isDirectory) showFileActions(found)
-        }.setPositiveButton("Fechar", null).show()
+            true
+        }
+        return row
     }
 
     private fun showFavorites() {
@@ -3021,6 +3273,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         worker.shutdown()
+        searchWorker.shutdown()
         thumbnailWorker.shutdown()
         super.onDestroy()
     }
