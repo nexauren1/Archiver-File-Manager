@@ -1877,7 +1877,6 @@ class MainActivity : Activity() {
         directories.filter { it.empty }.forEach { directory ->
             val folderParams = zip4jParameters(directory.entryName.trimEnd('/') + "/", "Nenhuma").apply {
                 setCompressionMethod(net.lingala.zip4j.model.enums.CompressionMethod.STORE)
-                setSourceExternalStream(true)
             }
             archive.addFolder(directory.file, folderParams)
             meter.itemDone(directory.file)
