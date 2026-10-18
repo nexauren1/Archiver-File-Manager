@@ -88,9 +88,14 @@ class MainActivity : Activity() {
     private var settingsOpen = false
     private var editorOpen = false
     private var editorDirty = false
+    private var editorSavedText = ""
     private var editorFile: File? = null
     private var editorInput: EditText? = null
     private var closeEditorAfterSave = false
+    private var appLanguage = "pt"
+    private var uiTheme = "Escuro"
+    private var accentName = "Lavanda"
+    private val folderColors = linkedMapOf<String, String>()
 
     private val selected = linkedSetOf<String>()
     private val favorites = linkedSetOf<String>()
@@ -155,8 +160,17 @@ class MainActivity : Activity() {
         sortBy = prefs.getString("sort", "Nome") ?: "Nome"
         viewMode = prefs.getString("view_mode", "Detalhado") ?: "Detalhado"
         compressionLevel = prefs.getInt("compression", 2)
+        appLanguage = prefs.getString("app_language", "pt") ?: "pt"
+        uiTheme = prefs.getString("ui_theme", "Escuro") ?: "Escuro"
+        accentName = prefs.getString("accent_color", "Lavanda") ?: "Lavanda"
+        folderColors.clear()
+        (prefs.getStringSet("folder_colors", emptySet()) ?: emptySet()).forEach { entry ->
+            val index = entry.lastIndexOf('=')
+            if (index > 0) folderColors[entry.substring(0, index)] = entry.substring(index + 1)
+        }
         favorites.clear()
         favorites.addAll(prefs.getStringSet("favorites", emptySet()) ?: emptySet())
+        applyPaletteToWindow()
     }
 
     private fun savePreferences() {
@@ -176,6 +190,10 @@ class MainActivity : Activity() {
             .putString("sort", sortBy)
             .putString("view_mode", viewMode)
             .putInt("compression", compressionLevel)
+            .putString("app_language", appLanguage)
+            .putString("ui_theme", uiTheme)
+            .putString("accent_color", accentName)
+            .putStringSet("folder_colors", folderColors.map { (path, color) -> "$path=$color" }.toSet())
             .putStringSet("favorites", HashSet(favorites))
             .apply()
     }
@@ -261,13 +279,13 @@ class MainActivity : Activity() {
 
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF19191D.toInt())
+            setBackgroundColor(pageBackgroundColor())
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(4), 0)
-            setBackgroundColor(0xFF292D40.toInt())
+            setBackgroundColor(toolbarBackgroundColor())
         }
         toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Pasta anterior") { goUp() },
             LinearLayout.LayoutParams(dp(48), dp(58)))
@@ -294,14 +312,14 @@ class MainActivity : Activity() {
         toolbar.addView(toolbarIcon(R.drawable.ic_more_vertical, "Mais opções") { showMainMenu() },
             LinearLayout.LayoutParams(dp(44), dp(58)))
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
-        page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) },
+        page.addView(View(this).apply { setBackgroundColor(accentColor()) },
             LinearLayout.LayoutParams(-1, dp(2)))
 
         val breadcrumbScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             clipToPadding = false
             setPadding(dp(8), 0, dp(8), 0)
-            setBackgroundColor(0xFF202025.toInt())
+            setBackgroundColor(panelBackgroundColor())
         }
         breadcrumbRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -313,7 +331,7 @@ class MainActivity : Activity() {
         countView = label("", 13, 0xFFB9B9C3.toInt(), false).apply {
             setPadding(dp(16), dp(7), dp(16), dp(7))
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF202025.toInt())
+            setBackgroundColor(panelBackgroundColor())
         }
         page.addView(countView, LinearLayout.LayoutParams(-1, dp(34)))
 
@@ -347,7 +365,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), dp(2), dp(4), dp(2))
-            setBackgroundColor(0xFF292D40.toInt())
+            setBackgroundColor(toolbarBackgroundColor())
             elevation = dp(10).toFloat()
             visibility = View.GONE
         }
@@ -508,7 +526,10 @@ class MainActivity : Activity() {
             gravity = if (inGrid) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
             setPadding(dp(if (inGrid) 8 else 4), dp(if (inGrid) 12 else 6),
                 dp(if (inGrid) 8 else 6), dp(if (inGrid) 12 else 6))
-            background = roundedBackground(if (isSelected) 0xFF353348.toInt() else if (inGrid) 0xFF24242A.toInt() else 0xFF19191D.toInt(), if (inGrid) 10 else 4)
+            background = roundedBackground(
+                if (isSelected) selectedRowColor() else if (inGrid) rowSurfaceColor() else pageBackgroundColor(),
+                if (inGrid) 10 else 4
+            )
             isClickable = true
             isFocusable = true
         }
@@ -737,13 +758,13 @@ class MainActivity : Activity() {
     private fun renderSettingsScreen() {
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF19191D.toInt())
+            setBackgroundColor(pageBackgroundColor())
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(12), 0)
-            setBackgroundColor(0xFF292D40.toInt())
+            setBackgroundColor(toolbarBackgroundColor())
         }
         toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Voltar ao explorador") {
             settingsOpen = false
@@ -752,7 +773,7 @@ class MainActivity : Activity() {
         toolbar.addView(label("Explorador", 22, 0xFFFFFFFF.toInt(), true),
             LinearLayout.LayoutParams(0, dp(58), 1f))
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
-        page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) },
+        page.addView(View(this).apply { setBackgroundColor(accentColor()) },
             LinearLayout.LayoutParams(-1, dp(2)))
 
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -972,18 +993,19 @@ class MainActivity : Activity() {
         }
         editorOpen = true
         editorDirty = false
+        editorSavedText = sourceText
         editorFile = file
         closeEditorAfterSave = false
 
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF19191D.toInt())
+            setBackgroundColor(pageBackgroundColor())
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(8), 0)
-            setBackgroundColor(0xFF292D40.toInt())
+            setBackgroundColor(toolbarBackgroundColor())
         }
         toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Voltar ao gestor") { requestLeaveTextEditor() },
             LinearLayout.LayoutParams(dp(48), dp(58)))
@@ -993,7 +1015,7 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(0, dp(58), 1f))
         toolbar.addView(actionButton("Guardar") { saveTextEditor() }, LinearLayout.LayoutParams(-2, dp(44)))
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
-        page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) }, LinearLayout.LayoutParams(-1, dp(2)))
+        page.addView(View(this).apply { setBackgroundColor(accentColor()) }, LinearLayout.LayoutParams(-1, dp(2)))
 
         val status = label("UTF-8  •  " + sourceText.count { it == '\n' }.plus(1) + " linhas", 11, 0xFFAAAAB4.toInt(), false)
             .apply { setPadding(dp(14), dp(8), dp(14), dp(8)) }
@@ -1005,7 +1027,7 @@ class MainActivity : Activity() {
             typeface = android.graphics.Typeface.MONOSPACE
             gravity = Gravity.TOP or Gravity.START
             setPadding(dp(14), dp(12), dp(14), dp(24))
-            setBackgroundColor(0xFF19191D.toInt())
+            setBackgroundColor(pageBackgroundColor())
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -1016,7 +1038,7 @@ class MainActivity : Activity() {
         input.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
-                editorDirty = text?.toString() != sourceText
+                editorDirty = text?.toString() != editorSavedText
                 status.text = "UTF-8  •  " + (text?.count { it == '\n' } ?: 0).plus(1) + " linhas" +
                     if (editorDirty) "  •  alterações por guardar" else ""
             }
@@ -1085,6 +1107,7 @@ class MainActivity : Activity() {
     private fun closeTextEditor() {
         editorOpen = false
         editorDirty = false
+        editorSavedText = ""
         editorFile = null
         editorInput = null
         closeEditorAfterSave = false
@@ -1986,7 +2009,11 @@ class MainActivity : Activity() {
             return
         }
         ensureNotificationChannel()
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !prefs.getBoolean("notification_permission_requested", false)
+        ) {
+            prefs.edit().putBoolean("notification_permission_requested", true).apply()
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 742)
         }
 
@@ -2047,6 +2074,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (dialog.isShowing) dialog.dismiss()
                 if (finalResult.startsWith("Ficheiro guardado:")) {
+                    editorSavedText = editorInput?.text?.toString() ?: editorSavedText
                     editorDirty = false
                     if (closeEditorAfterSave) closeTextEditor()
                 } else if (finalResult.startsWith("Erro:")) {
@@ -2112,9 +2140,9 @@ class MainActivity : Activity() {
         }
 
     private fun label(text: String, size: Int, color: Int, bold: Boolean): TextView = TextView(this).apply {
-        this.text = text
+        this.text = tr(text)
         textSize = size.toFloat()
-        setTextColor(color)
+        setTextColor(resolveTextColor(color))
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
 
@@ -2131,10 +2159,183 @@ class MainActivity : Activity() {
         }
 
     private fun actionButton(text: String, click: () -> Unit): Button = Button(this).apply {
-        this.text = text
+        this.text = tr(text)
         textSize = 12f
         isAllCaps = false
         setOnClickListener { click() }
+    }
+
+
+    private fun tr(text: String): String {
+        if (appLanguage != "en") return text
+        return mapOf(
+            "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
+            "Conceder acesso aos ficheiros" to "Grant file access", "Opções" to "Options",
+            "Selecionar tudo" to "Select all", "Limpar seleção" to "Clear selection",
+            "Copiar seleção" to "Copy selection", "Recortar seleção" to "Cut selection",
+            "Colar" to "Paste", "Criar novo…" to "Create new…", "Comprimir em ZIP" to "Compress to ZIP",
+            "Comprimir em 7Z" to "Compress to 7Z", "Pesquisar em subpastas" to "Search subfolders",
+            "Favoritos" to "Favorites", "Ordenar" to "Sort", "Definições do explorador" to "Explorer settings",
+            "Atualizar" to "Refresh", "Pasta de início" to "Home folder", "Ordenar ficheiros" to "Sort files",
+            "Nome" to "Name", "Tamanho" to "Size", "Data" to "Date", "Tipo" to "Type",
+            "Ordem crescente" to "Ascending", "Ordem decrescente" to "Descending",
+            "Detalhado" to "Detailed", "Compacto" to "Compact", "Grelha" to "Grid",
+            "Idioma" to "Language", "Tema da interface" to "Interface theme", "Cor de destaque" to "Accent color",
+            "Cores das pastas" to "Folder colors", "Escolher o idioma da interface" to "Choose interface language",
+            "Escuro" to "Dark", "Preto OLED" to "OLED black", "Claro" to "Light",
+            "Lavanda" to "Lavender", "Azul" to "Blue", "Verde" to "Green", "Laranja" to "Orange",
+            "Rosa" to "Pink", "Vermelho" to "Red", "Amarelo" to "Yellow",
+            "Miniaturas" to "Thumbnails", "Miniaturas do PDF" to "PDF thumbnails",
+            "Miniaturas de vídeo" to "Video thumbnails", "Capa do álbum" to "Album covers",
+            "Ícones do APK" to "APK icons", "Miniaturas quadradas" to "Square thumbnails",
+            "Nível de compressão" to "Compression level", "Escolher a ordem dos ficheiros" to "Choose file sorting",
+            "Inverte a ordem de ordenação dos arquivos" to "Reverse the sort order",
+            "Usar item \"..\" " to "Show parent-directory entry",
+            "Permite subir para o diretório anterior a partir da lista" to "Show parent directory in the list",
+            "Exibir arquivos ocultos" to "Show hidden files",
+            "Mostra ficheiros e diretórios cujo nome começa por ponto" to "Show files and folders beginning with a dot",
+            "Modo de exibição" to "View mode", "Detalhado, compacto ou grelha" to "Detailed, compact or grid",
+            "Exibir tamanho" to "Show size", "Mostra o tamanho dos ficheiros na lista" to "Show file sizes",
+            "Exibir data" to "Show date", "Mostra a data da última modificação" to "Show last modified date",
+            "Exibir hora" to "Show time", "Mostra a hora da última modificação" to "Show last modified time",
+            "Permite a exibição de miniaturas" to "Enable file thumbnails",
+            "Mostrar miniaturas de documentos PDF" to "Show PDF previews",
+            "Mostrar miniaturas de vídeo" to "Show video previews",
+            "Mostrar a capa do álbum nos ficheiros de música" to "Show music album art",
+            "Exibir os ícones das aplicações APK" to "Show APK application icons",
+            "Recorta as miniaturas para formato quadrado" to "Crop previews to a square",
+            "Copiar" to "Copy", "Mover" to "Move", "Eliminar" to "Delete", "Renomear" to "Rename",
+            "Informações" to "Information", "Abrir" to "Open", "Abrir pasta" to "Open folder",
+            "Partilhar" to "Share", "Recortar" to "Cut", "Ver conteúdo" to "Browse archive",
+            "Testar arquivo" to "Test archive", "Extrair aqui" to "Extract here",
+            "Extrair para nova pasta" to "Extract to new folder", "Adicionar aos Favoritos" to "Add to Favorites",
+            "Remover dos Favoritos" to "Remove from Favorites", "Cor da pasta" to "Folder color",
+            "Predefinida" to "Default", "Pasta vazia" to "Empty folder",
+            "Armazenamento interno" to "Internal storage", "Guardar" to "Save", "Cancelar" to "Cancel",
+            "Continuar a editar" to "Continue editing", "Sair sem guardar" to "Discard changes",
+            "Alterações por guardar" to "Unsaved changes",
+            "Queres guardar as alterações antes de sair do editor?" to "Would you like to save changes before leaving the editor?",
+            "Já existe uma operação em curso. Aguarda que termine." to "Another operation is running. Please wait.",
+            "A operação está em curso. Acompanha o progresso na janela ou na notificação." to "An operation is running. Follow progress in the dialog or notification."
+        )[text] ?: text
+    }
+
+    private fun accentColor(): Int = when (accentName) {
+        "Azul" -> 0xFF64B5F6.toInt()
+        "Verde" -> 0xFF81C784.toInt()
+        "Laranja" -> 0xFFFFB74D.toInt()
+        "Rosa" -> 0xFFF48FB1.toInt()
+        "Vermelho" -> 0xFFE57373.toInt()
+        "Amarelo" -> 0xFFFFD54F.toInt()
+        else -> 0xFFB8B5FF.toInt()
+    }
+
+    private fun pageBackgroundColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFF5F6FA.toInt()
+        "Preto OLED" -> 0xFF000000.toInt()
+        else -> 0xFF19191D.toInt()
+    }
+
+    private fun panelBackgroundColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFE7E8EF.toInt()
+        "Preto OLED" -> 0xFF08080A.toInt()
+        else -> 0xFF202025.toInt()
+    }
+
+    private fun toolbarBackgroundColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFE0E3F0.toInt()
+        "Preto OLED" -> 0xFF050507.toInt()
+        else -> 0xFF292D40.toInt()
+    }
+
+    private fun rowSurfaceColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFECEEF4.toInt()
+        "Preto OLED" -> 0xFF08080A.toInt()
+        else -> 0xFF24242A.toInt()
+    }
+
+    private fun selectedRowColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFD9DCF1.toInt()
+        "Preto OLED" -> 0xFF242033.toInt()
+        else -> 0xFF353348.toInt()
+    }
+
+    private fun primaryTextColor(): Int = if (uiTheme == "Claro") 0xFF22232A.toInt() else 0xFFF3F3F5.toInt()
+    private fun mutedTextColor(): Int = if (uiTheme == "Claro") 0xFF676A75.toInt() else 0xFFAAAAB4.toInt()
+
+    private fun resolveTextColor(requested: Int): Int = when (requested) {
+        0xFFFFFFFF.toInt(), 0xFFF4F4F6.toInt(), 0xFFF3F3F5.toInt(), 0xFFF1F1F4.toInt(),
+        0xFFF0F0F3.toInt(), 0xFFE3E3E8.toInt(), 0xFFE2E2E8.toInt() -> primaryTextColor()
+        0xFFAAAAB4.toInt(), 0xFFACACB6.toInt(), 0xFF9999A4.toInt(), 0xFF9D9DA8.toInt(),
+        0xFFB9B9C3.toInt(), 0xFFABABB5.toInt() -> mutedTextColor()
+        0xFFB8B5FF.toInt(), 0xFFD8D3FF.toInt(), 0xFFD0CBFF.toInt() -> accentColor()
+        else -> requested
+    }
+
+    private fun applyPaletteToWindow() {
+        window.statusBarColor = toolbarBackgroundColor()
+        window.navigationBarColor = if (uiTheme == "Preto OLED") 0xFF000000.toInt() else 0xFF101014.toInt()
+        window.decorView.systemUiVisibility = if (uiTheme == "Claro") {
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        } else 0
+    }
+
+    private fun showLanguageMenu() {
+        val options = arrayOf("Português", "English")
+        AlertDialog.Builder(this).setTitle(tr("Idioma"))
+            .setSingleChoiceItems(options, if (appLanguage == "en") 1 else 0) { dialog, which ->
+                appLanguage = if (which == 1) "en" else "pt"
+                savePreferences()
+                dialog.dismiss()
+                if (settingsOpen) renderSettingsScreen() else renderBrowser()
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showThemeMenu() {
+        val options = arrayOf("Escuro", "Preto OLED", "Claro")
+        AlertDialog.Builder(this).setTitle(tr("Tema da interface"))
+            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(uiTheme).coerceAtLeast(0)) { dialog, which ->
+                uiTheme = options[which]
+                savePreferences()
+                applyPaletteToWindow()
+                dialog.dismiss()
+                if (settingsOpen) renderSettingsScreen() else renderBrowser()
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showAccentMenu() {
+        val options = arrayOf("Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
+        AlertDialog.Builder(this).setTitle(tr("Cor de destaque"))
+            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(accentName).coerceAtLeast(0)) { dialog, which ->
+                accentName = options[which]
+                savePreferences()
+                dialog.dismiss()
+                if (settingsOpen) renderSettingsScreen() else renderBrowser()
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showFolderColorMenu(file: File) {
+        val options = arrayOf("Predefinida", "Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
+        AlertDialog.Builder(this).setTitle(tr("Cor da pasta"))
+            .setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
+                val key = pathKey(file)
+                if (which == 0) folderColors.remove(key) else folderColors[key] = options[which]
+                savePreferences()
+                refreshFiles()
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun folderColorValue(file: File): Int? = folderColors[pathKey(file)]?.let { color ->
+        when (color) {
+            "Lavanda" -> 0xFFB8B5FF.toInt()
+            "Azul" -> 0xFF64B5F6.toInt()
+            "Verde" -> 0xFF81C784.toInt()
+            "Laranja" -> 0xFFFFB74D.toInt()
+            "Rosa" -> 0xFFF48FB1.toInt()
+            "Vermelho" -> 0xFFE57373.toInt()
+            "Amarelo" -> 0xFFFFD54F.toInt()
+            else -> null
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
@@ -2151,10 +2352,14 @@ class MainActivity : Activity() {
     private fun onOff(value: Boolean): String = if (value) "Ligado" else "Desligado"
 
     private fun toast(message: String) {
-        runOnUiThread { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
+        runOnUiThread { Toast.makeText(this, tr(message), Toast.LENGTH_LONG).show() }
     }
 
     override fun onBackPressed() {
+        if (workActive.get()) {
+            toast("A operação está em curso. Acompanha o progresso na janela ou na notificação.")
+            return
+        }
         if (editorOpen) {
             requestLeaveTextEditor()
             return
