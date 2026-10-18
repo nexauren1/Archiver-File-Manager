@@ -572,7 +572,7 @@ class MainActivity : Activity() {
     private fun showMainMenu() {
         val options = arrayOf(
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
-            "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisar em subpastas", "Favoritos",
+            "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisar em subpastas", "Favoritos",
             "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início"
         )
         AlertDialog.Builder(this).setTitle("Opções").setItems(options) { _, which ->
@@ -586,14 +586,15 @@ class MainActivity : Activity() {
                 2 -> stageClipboard(false)
                 3 -> stageClipboard(true)
                 4 -> paste()
-                5 -> promptArchive(chosenOrVisible(), "zip")
-                6 -> promptArchive(chosenOrVisible(), "7z")
-                7 -> promptSearch()
-                8 -> showFavorites()
-                9 -> showSortMenu()
-                10 -> showExplorerSettings()
-                11 -> refreshFiles()
-                12 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
+                5 -> showCreateMenu()
+                6 -> promptArchive(chosenOrVisible(), "zip")
+                7 -> promptArchive(chosenOrVisible(), "7z")
+                8 -> promptSearch()
+                9 -> showFavorites()
+                10 -> showSortMenu()
+                11 -> showExplorerSettings()
+                12 -> refreshFiles()
+                13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
             }
         }.show()
     }
@@ -603,44 +604,184 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle("Ordenar ficheiros").setItems(items) { _, which ->
             if (which < 4) sortBy = items[which] else descending = !descending
             savePreferences()
-            refreshFiles()
+            if (settingsOpen) renderSettingsScreen() else refreshFiles()
         }.show()
     }
 
     private fun showExplorerSettings() {
-        val options = arrayOf(
-            "Modo de exibição: " + viewMode,
-            "Miniaturas: " + onOff(showThumbnails),
-            "Miniaturas de PDF: " + onOff(showPdfThumbnails),
-            "Miniaturas de vídeo: " + onOff(showVideoThumbnails),
-            "Capa do álbum: " + onOff(showAlbumCovers),
-            "Ícones do APK: " + onOff(showApkIcons),
-            "Miniaturas quadradas: " + onOff(squareThumbnails),
-            "Mostrar tamanho: " + onOff(showSize),
-            "Mostrar data: " + onOff(showDate),
-            "Mostrar hora: " + onOff(showTime),
-            "Usar item .. para subir: " + onOff(useParentEntry),
-            "Nível de compressão: " + compressionName()
-        )
-        AlertDialog.Builder(this).setTitle("Definições do explorador").setItems(options) { _, which ->
-            when (which) {
-                0 -> showViewModeMenu()
-                1 -> showThumbnails = !showThumbnails
-                2 -> showPdfThumbnails = !showPdfThumbnails
-                3 -> showVideoThumbnails = !showVideoThumbnails
-                4 -> showAlbumCovers = !showAlbumCovers
-                5 -> showApkIcons = !showApkIcons
-                6 -> squareThumbnails = !squareThumbnails
-                7 -> showSize = !showSize
-                8 -> showDate = !showDate
-                9 -> showTime = !showTime
-                10 -> useParentEntry = !useParentEntry
-                11 -> showCompressionMenu()
+        settingsOpen = true
+        renderSettingsScreen()
+    }
+
+    private fun renderSettingsScreen() {
+        page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF19191D.toInt())
+        }
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, dp(12), 0)
+            setBackgroundColor(0xFF292D40.toInt())
+        }
+        toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Voltar ao explorador") {
+            settingsOpen = false
+            renderBrowser()
+        }, LinearLayout.LayoutParams(dp(48), dp(58)))
+        toolbar.addView(label("Explorador", 22, 0xFFFFFFFF.toInt(), true),
+            LinearLayout.LayoutParams(0, dp(58), 1f))
+        page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
+        page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) },
+            LinearLayout.LayoutParams(-1, dp(2)))
+
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(18))
+        }
+        scroll.addView(content, ScrollView.LayoutParams(-1, -2))
+        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        addSettingChoice(content, "Ordenar arquivos", sortBy, "Escolher a ordem dos ficheiros") {
+            showSortMenu()
+        }
+        addSettingSwitch(content, "Decrescente", "Inverte a ordem de ordenação dos arquivos", descending) {
+            descending = it
+        }
+        addSettingSwitch(content, "Usar item \"..\" ", "Permite subir para o diretório anterior a partir da lista", useParentEntry) {
+            useParentEntry = it
+        }
+        addSettingSwitch(content, "Exibir arquivos ocultos", "Mostra ficheiros e diretórios cujo nome começa por ponto", showHidden) {
+            showHidden = it
+        }
+        addSettingChoice(content, "Modo de exibição", viewMode, "Detalhado, compacto ou grelha") {
+            showViewModeMenu()
+        }
+        addSettingSwitch(content, "Exibir tamanho", "Mostra o tamanho dos ficheiros na lista", showSize) {
+            showSize = it
+        }
+        addSettingSwitch(content, "Exibir data", "Mostra a data da última modificação", showDate) {
+            showDate = it
+        }
+        addSettingSwitch(content, "Exibir hora", "Mostra a hora da última modificação", showTime, showDate) {
+            showTime = it
+        }
+        addSettingSwitch(content, "Miniaturas", "Permite a exibição de miniaturas", showThumbnails) {
+            showThumbnails = it
+        }
+        addSettingSwitch(content, "Miniaturas do PDF", "Mostrar miniaturas de documentos PDF (pode causar erros em alguns dispositivos)", showPdfThumbnails) {
+            showPdfThumbnails = it
+        }
+        addSettingSwitch(content, "Miniaturas de vídeo", "Mostrar miniaturas de vídeo", showVideoThumbnails) {
+            showVideoThumbnails = it
+        }
+        addSettingSwitch(content, "Capa do álbum", "Mostrar a capa do álbum nos ficheiros de música", showAlbumCovers) {
+            showAlbumCovers = it
+        }
+        addSettingSwitch(content, "Ícones do APK", "Exibir os ícones das aplicações APK", showApkIcons) {
+            showApkIcons = it
+        }
+        addSettingSwitch(content, "Miniaturas quadradas", "Recorta as miniaturas para formato quadrado", squareThumbnails) {
+            squareThumbnails = it
+        }
+        addSettingChoice(content, "Nível de compressão", compressionName(), "ZIP e 7Z") {
+            showCompressionMenu()
+        }
+
+        setContentView(page)
+    }
+
+    private fun addSettingChoice(
+        container: LinearLayout,
+        title: String,
+        summary: String,
+        click: () -> Unit
+    ) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(15), dp(4), dp(15))
+            background = roundedBackground(0xFF19191D.toInt(), 4)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { click() }
+        }
+        val copy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        copy.addView(label(title, 16, 0xFFF0F0F3.toInt(), false))
+        copy.addView(label(summary, 13, 0xFFABABB5.toInt(), false).apply {
+            setPadding(0, dp(4), 0, 0)
+        })
+        row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(TextView(this).apply {
+            text = "›"
+            textSize = 28f
+            gravity = Gravity.CENTER
+            setTextColor(0xFFB8B5FF.toInt())
+        }, LinearLayout.LayoutParams(dp(32), dp(44)))
+        container.addView(row, LinearLayout.LayoutParams(-1, -2))
+        container.addView(View(this).apply { setBackgroundColor(0xFF333339.toInt()) },
+            LinearLayout.LayoutParams(-1, dp(1)))
+    }
+
+    private fun addSettingSwitch(
+        container: LinearLayout,
+        title: String,
+        summary: String,
+        checked: Boolean,
+        enabled: Boolean = true,
+        change: (Boolean) -> Unit
+    ) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(14), dp(2), dp(14))
+            isClickable = true
+            isFocusable = true
+        }
+        val copy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        copy.addView(label(title, 16, if (enabled) 0xFFF0F0F3.toInt() else 0xFF777780.toInt(), false))
+        copy.addView(label(summary, 13, if (enabled) 0xFFABABB5.toInt() else 0xFF777780.toInt(), false).apply {
+            setPadding(0, dp(4), 0, 0)
+        })
+        row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+        val toggle = Switch(this).apply {
+            isChecked = checked
+            isEnabled = enabled
+            contentDescription = title
+            setOnCheckedChangeListener { _, value ->
+                change(value)
+                savePreferences()
+                renderSettingsScreen()
+                refreshFiles()
             }
-            savePreferences()
-            refreshFiles()
-            if (which != 0 && which != 11) showExplorerSettings()
-        }.setNegativeButton("Fechar", null).show()
+        }
+        row.addView(toggle, LinearLayout.LayoutParams(dp(58), -2).apply {
+            leftMargin = dp(10)
+        })
+        row.setOnClickListener {
+            if (enabled) toggle.isChecked = !toggle.isChecked
+        }
+        container.addView(row, LinearLayout.LayoutParams(-1, -2))
+        container.addView(View(this).apply { setBackgroundColor(0xFF333339.toInt()) },
+            LinearLayout.LayoutParams(-1, dp(1)))
+    }
+
+    private fun showCreateMenu() {
+        val items = arrayOf("Nova pasta", "Novo ficheiro vazio", "Criar arquivo ZIP", "Criar arquivo 7Z")
+        AlertDialog.Builder(this).setTitle("Criar").setItems(items) { _, which ->
+            when (which) {
+                0 -> promptNewItem(true)
+                1 -> promptNewItem(false)
+                2 -> promptArchive(chosenOrVisible(), "zip")
+                3 -> promptArchive(chosenOrVisible(), "7z")
+            }
+        }.show()
     }
 
     private fun showViewModeMenu() {
@@ -650,8 +791,7 @@ class MainActivity : Activity() {
             viewMode = modes[which]
             savePreferences()
             dialog.dismiss()
-            refreshFiles()
-            showExplorerSettings()
+            if (settingsOpen) renderSettingsScreen() else refreshFiles()
         }.setNegativeButton("Cancelar", null).show()
     }
 
@@ -1446,6 +1586,11 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
+        if (settingsOpen) {
+            settingsOpen = false
+            renderBrowser()
+            return
+        }
         if (selected.isNotEmpty()) {
             selected.clear()
             refreshFiles()
