@@ -106,6 +106,9 @@ class MainActivity : Activity() {
     private val folderColors = linkedMapOf<String, String>()
 
     private val selected = linkedSetOf<String>()
+    private val fileRowViews = linkedMapOf<String, View>()
+    private val fileRowNames = linkedMapOf<String, TextView>()
+    private var visibleFilesCount = 0
     private val favorites = linkedSetOf<String>()
     private var clipboard = emptyList<File>()
     private var clipboardIsCut = false
@@ -396,6 +399,8 @@ class MainActivity : Activity() {
     private fun refreshFiles() {
         if (!browserRendered || settingsOpen || editorOpen || !hasStorageAccess()) return
         rows.removeAllViews()
+        fileRowViews.clear()
+        fileRowNames.clear()
         gridRows = null
         pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
         selectionView.text = currentDir.absolutePath
@@ -424,11 +429,8 @@ class MainActivity : Activity() {
                 if (descending) -order else order
             }
         }
-        countView.text = when {
-            selected.isNotEmpty() -> selected.size.toString() + " selecionado(s) • " + files.size + " itens"
-            files.isEmpty() -> "Pasta vazia"
-            else -> files.size.toString() + if (files.size == 1) " item" else " itens"
-        }
+        visibleFilesCount = files.size
+        updateCountLabel()
         files.forEach { addFileRow(it) }
         updateSelectionBar()
     }
@@ -613,6 +615,8 @@ class MainActivity : Activity() {
             rows.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(2) })
             if (viewMode != "Compacto") addDivider()
         }
+        fileRowViews[key] = item
+        fileRowNames[key] = name
         item.setOnClickListener {
             if (selected.isNotEmpty()) toggleSelection(file)
             else if (file.isDirectory) {
@@ -678,8 +682,33 @@ class MainActivity : Activity() {
 
     private fun toggleSelection(file: File) {
         val key = pathKey(file)
-        if (!selected.add(key)) selected.remove(key)
-        refreshFiles()
+        val isSelected = if (selected.contains(key)) {
+            selected.remove(key)
+            false
+        } else {
+            selected.add(key)
+            true
+        }
+        val inGrid = viewMode == "Grelha"
+        fileRowViews[key]?.background = roundedBackground(
+            if (isSelected) selectedRowColor() else if (inGrid) rowSurfaceColor() else pageBackgroundColor(),
+            if (inGrid) 10 else 4
+        )
+        fileRowNames[key]?.apply {
+            setTextColor(if (isSelected) accentColor() else primaryTextColor())
+            typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        }
+        updateCountLabel()
+        updateSelectionBar()
+    }
+
+    private fun updateCountLabel() {
+        if (!::countView.isInitialized) return
+        countView.text = when {
+            selected.isNotEmpty() -> selected.size.toString() + " selecionado(s) • " + visibleFilesCount + " itens"
+            visibleFilesCount == 0 -> tr("Pasta vazia")
+            else -> visibleFilesCount.toString() + if (visibleFilesCount == 1) " item" else " itens"
+        }
     }
 
     private fun goUp() {
