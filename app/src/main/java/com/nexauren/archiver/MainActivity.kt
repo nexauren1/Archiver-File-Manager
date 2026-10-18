@@ -1429,7 +1429,7 @@ class MainActivity : Activity() {
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
-            addView(form, ScrollView.LayoutParams(-1, -2))
+            addView(form, FrameLayout.LayoutParams(-1, -2))
         }
         AlertDialog.Builder(this).setTitle("Criação de arquivo")
             .setMessage("Escolhe o formato, a compressão e, para ZIP, opções de segurança e volumes.")
@@ -1575,11 +1575,11 @@ class MainActivity : Activity() {
     private fun zip4jParameters(entryName: String? = null, encryption: String = "Nenhuma"): ZipParameters =
         ZipParameters().apply {
             setCompressionMethod(
-                if (compressionLevel == 0) net.lingala.zip4j.model.enums.CompressionMethod.STORE
+                if (this@MainActivity.compressionLevel == 0) net.lingala.zip4j.model.enums.CompressionMethod.STORE
                 else net.lingala.zip4j.model.enums.CompressionMethod.DEFLATE
             )
-            if (compressionLevel != 0) {
-                setCompressionLevel(when (compressionLevel) {
+            if (this@MainActivity.compressionLevel != 0) {
+                setCompressionLevel(when (this@MainActivity.compressionLevel) {
                     1 -> net.lingala.zip4j.model.enums.CompressionLevel.FASTEST
                     3 -> net.lingala.zip4j.model.enums.CompressionLevel.ULTRA
                     else -> net.lingala.zip4j.model.enums.CompressionLevel.NORMAL
@@ -1685,7 +1685,7 @@ class MainActivity : Activity() {
                 setCompressionMethod(net.lingala.zip4j.model.enums.CompressionMethod.STORE)
                 setSourceExternalStream(true)
             }
-            archive.addStream(java.io.ByteArrayInputStream(ByteArray(0)), folderParams)
+            archive.addFolder(directory.file, folderParams)
             meter.itemDone(directory.file)
         }
         directories.filterNot { it.empty }.forEach { meter.itemDone(it.file) }
