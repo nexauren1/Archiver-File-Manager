@@ -537,6 +537,7 @@ class MainActivity : Activity() {
             setImageResource(iconForFile(file))
             contentDescription = if (file.isDirectory) "Pasta " + file.name else file.name
             scaleType = if (squareThumbnails) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
+            if (file.isDirectory) folderColorValue(file)?.let { setColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
         }
         val iconWidth = dp(if (inGrid) 72 else 48)
         val iconHeight = dp(if (inGrid) 66 else 48)
@@ -557,7 +558,7 @@ class MainActivity : Activity() {
         val name = TextView(this).apply {
             text = file.name.ifBlank { "(sem nome)" }
             textSize = if (inGrid) 13f else if (viewMode == "Compacto") 13f else 15f
-            setTextColor(if (isSelected) 0xFFD8D3FF.toInt() else 0xFFF3F3F5.toInt())
+            setTextColor(if (isSelected) accentColor() else primaryTextColor())
             typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
             maxLines = if (inGrid) 2 else if (viewMode == "Detalhado") 2 else 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -574,7 +575,7 @@ class MainActivity : Activity() {
         if (metaText.isNotEmpty()) middle.addView(TextView(this).apply {
             text = metaText
             textSize = 12f
-            setTextColor(0xFFAAAAB4.toInt())
+            setTextColor(mutedTextColor())
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = if (inGrid) Gravity.CENTER else Gravity.START
@@ -700,7 +701,7 @@ class MainActivity : Activity() {
             "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisar em subpastas", "Favoritos",
             "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início"
         )
-        AlertDialog.Builder(this).setTitle("Opções").setItems(options) { _, which ->
+        AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
                 0 -> {
                     selected.clear()
@@ -728,7 +729,7 @@ class MainActivity : Activity() {
         val options = arrayOf("Comprimir em ZIP", "Comprimir em 7Z", "Renomear", "Informações", "Limpar seleção")
         AlertDialog.Builder(this)
             .setTitle("${selected.size} selecionado(s)")
-            .setItems(options) { _, which ->
+            .setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
                 val items = chosen()
                 when (which) {
                     0 -> promptArchive(items, "zip")
@@ -743,7 +744,7 @@ class MainActivity : Activity() {
 
     private fun showSortMenu() {
         val items = arrayOf("Nome", "Tamanho", "Data", "Tipo", if (descending) "Ordem crescente" else "Ordem decrescente")
-        AlertDialog.Builder(this).setTitle("Ordenar ficheiros").setItems(items) { _, which ->
+        AlertDialog.Builder(this).setTitle(tr("Ordenar ficheiros")).setItems(items.map { tr(it) }.toTypedArray()) { _, which ->
             if (which < 4) sortBy = items[which] else descending = !descending
             savePreferences()
             if (settingsOpen) renderSettingsScreen() else refreshFiles()
@@ -784,6 +785,9 @@ class MainActivity : Activity() {
         scroll.addView(content)
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
+        addSettingChoice(content, "Idioma", if (appLanguage == "en") "English" else "Português", "Escolher o idioma da interface") { showLanguageMenu() }
+        addSettingChoice(content, "Tema da interface", uiTheme, "Escuro, preto OLED ou claro") { showThemeMenu() }
+        addSettingChoice(content, "Cor de destaque", accentName, "Personaliza a cor dos controlos e realces") { showAccentMenu() }
         addSettingChoice(content, "Ordenar arquivos", sortBy, "Escolher a ordem dos ficheiros") { showSortMenu() }
         addSettingSwitch(content, "Decrescente", "Inverte a ordem de ordenação dos arquivos", descending) { descending = it }
         addSettingSwitch(content, "Usar item \"..\" ", "Permite subir para o diretório anterior a partir da lista", useParentEntry) { useParentEntry = it }
@@ -823,7 +827,7 @@ class MainActivity : Activity() {
             text = "›"
             textSize = 28f
             gravity = Gravity.CENTER
-            setTextColor(0xFFB8B5FF.toInt())
+            setTextColor(accentColor())
         }, LinearLayout.LayoutParams(dp(32), dp(44)))
         container.addView(row, LinearLayout.LayoutParams(-1, -2))
         container.addView(View(this).apply { setBackgroundColor(0xFF333339.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)))
@@ -940,9 +944,11 @@ class MainActivity : Activity() {
         }
         options += listOf("Partilhar", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
-        AlertDialog.Builder(this).setTitle(file.name).setItems(options.toTypedArray()) { _, which ->
+        if (file.isDirectory) options += "Cor da pasta"
+        AlertDialog.Builder(this).setTitle(file.name).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (options[which]) {
                 "Abrir pasta" -> { currentDir = file; selected.clear(); refreshFiles() }
+                "Cor da pasta" -> showFolderColorMenu(file)
                 "Abrir" -> openFile(file)
                 "Ver conteúdo" -> browseArchive(file)
                 "Testar arquivo" -> if (ext == "7z") testSevenZip(file) else testZip(file)
@@ -1021,7 +1027,7 @@ class MainActivity : Activity() {
             .apply { setPadding(dp(14), dp(8), dp(14), dp(8)) }
         val input = EditText(this).apply {
             setText(sourceText)
-            setTextColor(0xFFF1F1F4.toInt())
+            setTextColor(primaryTextColor())
             setHintTextColor(0xFF8F8F99.toInt())
             textSize = 14f
             typeface = android.graphics.Typeface.MONOSPACE
@@ -2096,6 +2102,7 @@ class MainActivity : Activity() {
         ImageButton(this).apply {
             setImageResource(resource)
             contentDescription = description
+            imageTintList = android.content.res.ColorStateList.valueOf(primaryTextColor())
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(dp(11), dp(11), dp(11), dp(11))
             background = GradientDrawable().apply {
@@ -2118,7 +2125,7 @@ class MainActivity : Activity() {
                 text = symbol
                 textSize = if (symbol == "ZIP") 13f else 22f
                 gravity = Gravity.CENTER
-                setTextColor(0xFFD8D3FF.toInt())
+                setTextColor(accentColor())
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
                 maxLines = 1
             }, LinearLayout.LayoutParams(-1, dp(30)))
@@ -2126,7 +2133,7 @@ class MainActivity : Activity() {
                 text = title
                 textSize = 10f
                 gravity = Gravity.CENTER
-                setTextColor(0xFFF0F0F4.toInt())
+                setTextColor(primaryTextColor())
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(-1, dp(22)))
@@ -2152,7 +2159,7 @@ class MainActivity : Activity() {
             contentDescription = description
             textSize = 27f
             gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(if (uiTheme == "Claro") primaryTextColor() else 0xFFFFFFFF.toInt())
             isClickable = true
             isFocusable = true
             setOnClickListener { click() }
