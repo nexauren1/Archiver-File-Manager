@@ -365,8 +365,8 @@ class MainActivity : Activity() {
 
         val fab = ImageButton(this).apply {
             setImageResource(R.drawable.ic_add)
-            contentDescription = "Criar ficheiro ou arquivo"
-            background = roundedBackground(0xFFB8B5FF.toInt(), 28)
+            contentDescription = tr("Criar ficheiro ou arquivo")
+            background = roundedBackground(accentColor(), 28)
             scaleType = ImageView.ScaleType.CENTER
             setPadding(dp(16), dp(16), dp(16), dp(16))
             elevation = dp(8).toFloat()
@@ -744,7 +744,7 @@ class MainActivity : Activity() {
         val options = arrayOf(
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
             "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisar em subpastas", "Favoritos",
-            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início"
+            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar aplicação"
         )
         AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
@@ -766,6 +766,7 @@ class MainActivity : Activity() {
                 11 -> showExplorerSettings()
                 12 -> refreshFiles()
                 13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
+                14 -> shareApplication()
             }
         }.show()
     }
@@ -2941,7 +2942,51 @@ class MainActivity : Activity() {
                     dialog.dismiss()
                 }
                 showOperationNotification(message, tr(finalResult), null, finished = true, failed = failed)
+                val shouldAskToShare = !failed && recordSuccessfulOperation()
+                mainHandler.postDelayed({
+                    if (dialog.isShowing) dialog.dismiss()
+                    try {
+                        getSystemService(NotificationManager::class.java).cancel(operationNotificationId)
+                    } catch (_: Exception) { }
+                    if (shouldAskToShare && !isFinishing) showSharePrompt()
+                }, if (failed) 2400L else 1300L)
             }
+        }
+    }
+
+    private fun recordSuccessfulOperation(): Boolean {
+        val completed = prefs.getInt("successful_operations", 0) + 1
+        prefs.edit().putInt("successful_operations", completed).apply()
+        if (completed >= 5 && !prefs.getBoolean("share_prompt_shown", false)) {
+            prefs.edit().putBoolean("share_prompt_shown", true).apply()
+            return true
+        }
+        return false
+    }
+
+    private fun showSharePrompt() {
+        AlertDialog.Builder(this)
+            .setTitle(tr("Gostas do Archiver?"))
+            .setMessage(tr("Se a aplicação te está a ajudar, partilha-a com alguém. É opcional e não volta a aparecer."))
+            .setPositiveButton(tr("Partilhar aplicação")) { _, _ -> shareApplication() }
+            .setNegativeButton(tr("Agora não"), null)
+            .show()
+    }
+
+    private fun shareApplication() {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, tr("Archiver — gestor de ficheiros Android"))
+            putExtra(
+                Intent.EXTRA_TEXT,
+                tr("Experimenta o Archiver, um gestor de ficheiros Android com compressão ZIP/7Z, pesquisa e editor de texto.") +
+                    "\nhttps://github.com/nexauren1/Archiver-File-Manager/releases"
+            )
+        }
+        try {
+            startActivity(Intent.createChooser(shareIntent, tr("Partilhar Archiver")))
+        } catch (_: ActivityNotFoundException) {
+            toast("Não foi possível abrir o menu de partilha.")
         }
     }
 
@@ -3061,6 +3106,12 @@ class MainActivity : Activity() {
             "Copiar seleção" to "Copy selection", "Recortar seleção" to "Cut selection",
             "Colar" to "Paste", "Criar novo…" to "Create new…", "Comprimir em ZIP" to "Compress to ZIP",
             "Comprimir em 7Z" to "Compress to 7Z", "Pesquisar em subpastas" to "Search subfolders",
+            "Partilhar aplicação" to "Share app", "Gostas do Archiver?" to "Enjoying Archiver?",
+            "Se a aplicação te está a ajudar, partilha-a com alguém. É opcional e não volta a aparecer." to "If the app is useful to you, share it with someone. This is optional and will not appear again.",
+            "Agora não" to "Not now", "Partilhar Archiver" to "Share Archiver",
+            "Archiver — gestor de ficheiros Android" to "Archiver — Android file manager",
+            "Experimenta o Archiver, um gestor de ficheiros Android com compressão ZIP/7Z, pesquisa e editor de texto." to "Try Archiver, an Android file manager with ZIP/7Z archives, search and a text editor.",
+            "Não foi possível abrir o menu de partilha." to "Could not open the share sheet.",
             "Favoritos" to "Favorites", "Ordenar" to "Sort", "Definições do explorador" to "Explorer settings",
             "Atualizar" to "Refresh", "Pasta de início" to "Home folder", "Ordenar ficheiros" to "Sort files",
             "Nome" to "Name", "Tamanho" to "Size", "Data" to "Date", "Tipo" to "Type",
