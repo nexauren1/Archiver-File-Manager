@@ -522,14 +522,40 @@ public class MainActivity extends Activity {
     private DocumentFile createTree(DocumentFile root, String path, boolean directory) throws IOException {
         String[] parts = path.split("/");
         DocumentFile parent = root;
-        for (int i=0; i<parts.length; i++) {
+        for (int i = 0; i < parts.length; i++) {
             if (parts[i].isEmpty()) continue;
             boolean last = i == parts.length - 1;
             DocumentFile found = null;
             DocumentFile[] children = parent.listFiles();
-            if (children != null) for (DocumentFile child : children) if (parts[i].equals(child.getName())) { found = child; break; }
-            if (found == null) found = (last && !directory)
-                ? parent.createFile("application/octet-stream", parts[i]) : parent.createDirectory(parts[i]);
+            if (children != null) {
+                for (DocumentFile child : children) {
+                    if (parts[i].equals(child.getName())) { found = child; break; }
+                }
+            }
+            if (last && !directory) {
+                String outName = parts[i];
+                if (found != null) {
+                    int dot = outName.lastIndexOf('.');
+                    String stem = dot > 0 ? outName.substring(0, dot) : outName;
+                    String ext = dot > 0 ? outName.substring(dot) : "";
+                    int suffix = 2;
+                    boolean collision;
+                    do {
+                        String candidate = stem + " (" + suffix++ + ")" + ext;
+                        collision = false;
+                        DocumentFile[] existing = parent.listFiles();
+                        if (existing != null) {
+                            for (DocumentFile child : existing) {
+                                if (candidate.equals(child.getName())) { collision = true; break; }
+                            }
+                        }
+                        if (!collision) outName = candidate;
+                    } while (collision);
+                }
+                found = parent.createFile("application/octet-stream", outName);
+            } else if (found == null) {
+                found = parent.createDirectory(parts[i]);
+            }
             if (found == null) throw new IOException("Falha ao criar " + parts[i]);
             parent = found;
         }
