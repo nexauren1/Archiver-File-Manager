@@ -1888,19 +1888,22 @@ class MainActivity : Activity() {
             publish(0, "A preparar operação…")
         }
 
+        private fun detailFor(file: File): String =
+            "${completedEntries.coerceAtMost(totalEntries)}/${totalEntries}  •  ${file.absolutePath}"
+
         @Synchronized
-        fun show(file: File) = publish(progressPercent(), file.absolutePath)
+        fun show(file: File) = publish(progressPercent(), detailFor(file))
 
         @Synchronized
         fun bytesRead(count: Long, file: File) {
             if (count > 0L) completedBytes = (completedBytes + count).coerceAtMost(totalBytes.coerceAtLeast(0L))
-            publish(progressPercent(), file.absolutePath)
+            publish(progressPercent(), detailFor(file))
         }
 
         @Synchronized
         fun itemDone(file: File) {
             completedEntries = (completedEntries + 1L).coerceAtMost(totalEntries.coerceAtLeast(1L))
-            publish(progressPercent(), file.absolutePath)
+            publish(progressPercent(), detailFor(file))
         }
 
         private fun progressPercent(): Int {
@@ -2041,12 +2044,20 @@ class MainActivity : Activity() {
             addView(percentView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
             addView(detailView, LinearLayout.LayoutParams(-1, -2))
         }
-        val dialog = AlertDialog.Builder(this).setTitle(message).setView(dialogContent).setCancelable(false).create()
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(message)
+            .setView(dialogContent)
+            .setCancelable(false)
+            .setPositiveButton(tr("Fechar"), null)
+            .create()
         dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+        var latestPercent = 0
         var lastPercent = -1
         var lastDetail = ""
         var lastNoticeAt = 0L
         val meter = TaskProgress(totalBytes, totalEntries) { percent, detail ->
+            latestPercent = percent.coerceIn(0, 99)
             runOnUiThread {
                 if (!isFinishing && dialog.isShowing) {
                     progressBar.progress = percent
@@ -2073,12 +2084,11 @@ class MainActivity : Activity() {
                 result = action(meter)
             } catch (e: Exception) {
                 result = "Erro: " + (e.message ?: e.javaClass.simpleName)
-            } finally {
-                workActive.set(false)
             }
             val finalResult = result
+            val failed = finalResult.startsWith("Erro:")
             runOnUiThread {
-                if (dialog.isShowing) dialog.dismiss()
+                workActive.set(false)
                 if (finalResult.startsWith("Ficheiro guardado:")) {
                     editorSavedText = editorInput?.text?.toString() ?: editorSavedText
                     editorDirty = false
@@ -2087,13 +2097,25 @@ class MainActivity : Activity() {
                     closeEditorAfterSave = false
                 }
                 if (!isFinishing) {
-                    percentView.text = "100%"
-                    progressBar.progress = 100
+                    if (failed) {
+                        progressBar.progress = latestPercent
+                        percentView.text = "$latestPercent%"
+                    } else {
+                        progressBar.progress = 100
+                        percentView.text = "100%"
+                    }
                     detailView.text = finalResult
-                    Toast.makeText(this, finalResult, Toast.LENGTH_LONG).show()
+                    dialog.setTitle(if (failed) tr("Falha na operação") else tr("Operação concluída"))
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+                        text = tr("Fechar")
+                        isEnabled = true
+                    }
+                    Toast.makeText(this, tr(finalResult), Toast.LENGTH_LONG).show()
                     if (hasStorageAccess() && browserRendered && !settingsOpen && !editorOpen) refreshFiles()
+                } else {
+                    dialog.dismiss()
                 }
-                showOperationNotification(message, finalResult, null, finished = true, failed = finalResult.startsWith("Erro:"))
+                showOperationNotification(message, tr(finalResult), null, finished = true, failed = failed)
             }
         }
     }
