@@ -53,6 +53,63 @@ import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+
+/** Zoom/pan view shared by the PDF and image readers. */
+private class ZoomableImageView(context: android.content.Context) : ImageView(context) {
+    private val transform = android.graphics.Matrix()
+    private var userScale = 1f
+    private var panX = 0f
+    private var panY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+
+    private val scaleDetector = android.view.ScaleGestureDetector(context,
+        object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: android.view.ScaleGestureDetector): Boolean {
+                userScale = (userScale * detector.scaleFactor).coerceIn(1f, 6f)
+                updateTransform()
+                return true
+            }
+        })
+    private val gestureDetector = android.view.GestureDetector(context,
+        object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                userScale = if (userScale > 1.1f) 1f else 2f
+                panX = 0f; panY = 0f
+                updateTransform()
+                return true
+            }
+        })
+
+    init { scaleType = ScaleType.MATRIX; isClickable = true; contentDescription = "Zoomable image or PDF page" }
+    override fun setImageBitmap(bitmap: Bitmap?) { super.setImageBitmap(bitmap); resetZoom(); post { updateTransform() } }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { super.onSizeChanged(w, h, oldw, oldh); updateTransform() }
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        scaleDetector.onTouchEvent(event)
+        gestureDetector.onTouchEvent(event)
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> { lastX = event.x; lastY = event.y }
+            android.view.MotionEvent.ACTION_MOVE -> if (userScale > 1.01f && event.pointerCount == 1) {
+                panX += event.x - lastX; panY += event.y - lastY
+                updateTransform(); lastX = event.x; lastY = event.y
+            }
+        }
+        return true
+    }
+    fun zoomIn() { userScale = (userScale * 1.25f).coerceAtMost(6f); updateTransform() }
+    fun zoomOut() { userScale = (userScale / 1.25f).coerceAtLeast(1f); if (userScale <= 1f) { panX = 0f; panY = 0f }; updateTransform() }
+    fun resetZoom() { userScale = 1f; panX = 0f; panY = 0f; updateTransform() }
+    private fun updateTransform() {
+        val source = drawable ?: return
+        if (width <= 0 || height <= 0 || source.intrinsicWidth <= 0 || source.intrinsicHeight <= 0) return
+        val sw = source.intrinsicWidth.toFloat(); val sh = source.intrinsicHeight.toFloat()
+        val scale = kotlin.math.min(width / sw, height / sh) * userScale
+        transform.setScale(scale, scale)
+        transform.postTranslate((width - sw * scale) / 2f + panX, (height - sh * scale) / 2f + panY)
+        imageMatrix = transform
+        invalidate()
+    }
+}
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -1143,34 +1200,30 @@ class MainActivity : Activity() {
     }
 
     private fun showPdfReader(file: File) {
-        val image = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            adjustViewBounds = true
-            setBackgroundColor(0xFF303036.toInt())
-        }
+        val image = ZoomableImageView(this).apply { setBackgroundColor(0xFF303036.toInt()) }
         val status = label("A abrir PDF…", 13, mutedTextColor(), false)
         val previous = Button(this).apply { text = tr("Anterior"); isAllCaps = false; isEnabled = false }
         val next = Button(this).apply { text = tr("Seguinte"); isAllCaps = false; isEnabled = false }
+        val pageSlider = SeekBar(this).apply { max = 0; isEnabled = false; contentDescription = tr("Página do PDF") }
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             addView(previous, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) })
             addView(next, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
         }
-        var zoom = 1f
         val zoomControls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
         val zoomOut = Button(this).apply { text = "−"; isAllCaps = false; contentDescription = "Diminuir zoom" }
         val zoomIn = Button(this).apply { text = "+"; isAllCaps = false; contentDescription = "Aumentar zoom" }
-        val zoomReset = Button(this).apply { text = "100%"; isAllCaps = false; contentDescription = "Repor zoom" }
+        val zoomReset = Button(this).apply { text = tr("Ajustar"); isAllCaps = false; contentDescription = tr("Repor zoom") }
         zoomControls.addView(zoomOut, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(4) })
         zoomControls.addView(zoomReset, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(4) })
         zoomControls.addView(zoomIn, LinearLayout.LayoutParams(0, dp(42), 1f))
         val scroll = ScrollView(this).apply {
             isFillViewport = false
-            addView(image, FrameLayout.LayoutParams(-1, -2))
+            addView(image, FrameLayout.LayoutParams(-1, dp(500)))
         }
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1179,6 +1232,7 @@ class MainActivity : Activity() {
                 bottomMargin = dp(6); leftMargin = dp(4); rightMargin = dp(4)
             })
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(pageSlider, LinearLayout.LayoutParams(-1, dp(34)))
             addView(zoomControls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
             addView(controls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         }
@@ -1218,9 +1272,10 @@ class MainActivity : Activity() {
                         pageCount = count
                         if (rendered != null) {
                             image.setImageBitmap(rendered)
-                            image.scaleX = zoom
-                            image.scaleY = zoom
                             status.text = "${index + 1} / ${pageCount}"
+                            pageSlider.max = (pageCount - 1).coerceAtLeast(0)
+                            pageSlider.progress = index
+                            pageSlider.isEnabled = pageCount > 1
                             previous.isEnabled = index > 0
                             next.isEnabled = index + 1 < pageCount
                         } else {
@@ -1241,22 +1296,22 @@ class MainActivity : Activity() {
         dialog = builtDialog
         previous.setOnClickListener { if (requestedPage > 0) renderPage(requestedPage - 1) }
         next.setOnClickListener { if (requestedPage + 1 < pageCount) renderPage(requestedPage + 1) }
-        zoomIn.setOnClickListener { zoom = (zoom * 1.25f).coerceAtMost(4f); image.scaleX = zoom; image.scaleY = zoom; zoomReset.text = "${(zoom * 100).toInt()}%" }
-        zoomOut.setOnClickListener { zoom = (zoom / 1.25f).coerceAtLeast(0.5f); image.scaleX = zoom; image.scaleY = zoom; zoomReset.text = "${(zoom * 100).toInt()}%" }
-        zoomReset.setOnClickListener { zoom = 1f; image.scaleX = 1f; image.scaleY = 1f; zoomReset.text = "100%" }
+        zoomIn.setOnClickListener { image.zoomIn() }
+        zoomOut.setOnClickListener { image.zoomOut() }
+        zoomReset.setOnClickListener { image.resetZoom() }
+        pageSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) = Unit
+            override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar?) { if (bar != null && bar.progress != requestedPage) renderPage(bar.progress) }
+        })
         builtDialog.setOnDismissListener { image.setImageDrawable(null) }
         builtDialog.show()
         renderPage(0)
     }
 
     private fun showImageViewer(file: File) {
-        val image = ImageView(this).apply {
-            adjustViewBounds = true
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setBackgroundColor(pageBackgroundColor())
-        }
+        val image = ZoomableImageView(this).apply { setBackgroundColor(pageBackgroundColor()) }
         val status = label("A carregar imagem…", 13, mutedTextColor(), false)
-        var zoom = 1f
         val imageControls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -1264,14 +1319,14 @@ class MainActivity : Activity() {
         val zoomOut = Button(this).apply { text = "−"; isAllCaps = false; contentDescription = "Diminuir zoom" }
         val zoomIn = Button(this).apply { text = "+"; isAllCaps = false; contentDescription = "Aumentar zoom" }
         val rotate = Button(this).apply { text = "↻"; isAllCaps = false; contentDescription = "Rodar imagem" }
-        val reset = Button(this).apply { text = "1:1"; isAllCaps = false; contentDescription = "Repor visualização" }
+        val reset = Button(this).apply { text = tr("Ajustar"); isAllCaps = false; contentDescription = "Repor visualização" }
         imageControls.addView(zoomOut, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
         imageControls.addView(zoomIn, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
         imageControls.addView(rotate, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
         imageControls.addView(reset, LinearLayout.LayoutParams(0, dp(42), 1f))
         val scroll = ScrollView(this).apply {
             isFillViewport = false
-            addView(image, FrameLayout.LayoutParams(-1, -2))
+            addView(image, FrameLayout.LayoutParams(-1, dp(500)))
         }
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1289,10 +1344,10 @@ class MainActivity : Activity() {
             .setNegativeButton(tr("Fechar"), null)
             .create()
         var decoded: Bitmap? = null
-        zoomIn.setOnClickListener { zoom = (zoom * 1.25f).coerceAtMost(4f); image.scaleX = zoom; image.scaleY = zoom; reset.text = "${(zoom * 100).toInt()}%" }
-        zoomOut.setOnClickListener { zoom = (zoom / 1.25f).coerceAtLeast(0.5f); image.scaleX = zoom; image.scaleY = zoom; reset.text = "${(zoom * 100).toInt()}%" }
+        zoomIn.setOnClickListener { image.zoomIn() }
+        zoomOut.setOnClickListener { image.zoomOut() }
         rotate.setOnClickListener { image.rotation = (image.rotation + 90f) % 360f }
-        reset.setOnClickListener { zoom = 1f; image.scaleX = 1f; image.scaleY = 1f; image.rotation = 0f; reset.text = "1:1" }
+        reset.setOnClickListener { image.resetZoom(); image.rotation = 0f }
         dialog.setOnDismissListener {
             image.setImageDrawable(null)
             decoded?.let { if (!it.isRecycled) it.recycle() }
@@ -1319,7 +1374,7 @@ class MainActivity : Activity() {
                 if (dialog.isShowing && bitmap != null) {
                     decoded = bitmap
                     image.setImageBitmap(bitmap)
-                    status.text = tr("Pré-visualização da imagem")
+                    status.text = "${bitmap.width} × ${bitmap.height} px  •  ${formatSize(file.length())}  •  " + tr("Pré-visualização da imagem")
                 } else if (dialog.isShowing) {
                     status.text = tr("Não foi possível abrir a imagem.") + ": " + (error ?: "")
                 } else {
@@ -1603,6 +1658,9 @@ class MainActivity : Activity() {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
         }, LinearLayout.LayoutParams(0, dp(58), 1f))
+        toolbar.addView(actionButton("A−") { adjustEditorFontSize(-1f) }, LinearLayout.LayoutParams(dp(38), dp(44)))
+        toolbar.addView(actionButton("A+") { adjustEditorFontSize(1f) }, LinearLayout.LayoutParams(dp(38), dp(44)))
+        toolbar.addView(actionButton("Pesquisar") { showEditorFindDialog() }, LinearLayout.LayoutParams(-2, dp(44)))
         toolbar.addView(actionButton("Guardar") { saveTextEditor() }, LinearLayout.LayoutParams(-2, dp(44)))
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
         page.addView(View(this).apply { setBackgroundColor(accentColor()) }, LinearLayout.LayoutParams(-1, dp(2)))
@@ -1642,6 +1700,32 @@ class MainActivity : Activity() {
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
         input.requestFocus()
+    }
+
+    private fun adjustEditorFontSize(delta: Float) {
+        val input = editorInput ?: return
+        val currentSp = input.textSize / resources.displayMetrics.scaledDensity
+        input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, (currentSp + delta).coerceIn(10f, 30f))
+    }
+
+    private fun showEditorFindDialog() {
+        val queryInput = EditText(this).apply { hint = tr("Texto a procurar"); setSingleLine(true) }
+        AlertDialog.Builder(this)
+            .setTitle(tr("Pesquisar no ficheiro"))
+            .setView(queryInput)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(tr("Seguinte")) { _, _ ->
+                val query = queryInput.text?.toString().orEmpty()
+                val input = editorInput
+                if (query.isBlank() || input == null) return@setPositiveButton
+                val content = input.text?.toString().orEmpty()
+                val start = input.selectionEnd.coerceAtLeast(0).coerceAtMost(content.length)
+                var found = content.indexOf(query, start, ignoreCase = true)
+                if (found < 0) found = content.indexOf(query, 0, ignoreCase = true)
+                if (found >= 0) { input.requestFocus(); input.setSelection(found, found + query.length) }
+                else toast("Texto não encontrado.")
+            }
+            .show()
     }
 
     private fun saveTextEditor() {
@@ -3742,6 +3826,9 @@ class MainActivity : Activity() {
             "A abrir PDF…" to "Opening PDF…",
             "A carregar imagem…" to "Loading image…",
             "Pré-visualização da imagem" to "Image preview",
+            "Ajustar" to "Fit", "Pesquisar" to "Find", "Texto a procurar" to "Text to find",
+            "Pesquisar no ficheiro" to "Find in file", "Texto não encontrado." to "Text not found.",
+            "Página do PDF" to "PDF page", "Diminuir zoom" to "Zoom out", "Aumentar zoom" to "Zoom in", "Repor zoom" to "Reset zoom",
             "Não foi possível abrir PDF." to "Could not open PDF.",
             "Não foi possível abrir a imagem." to "Could not open image.",
             "Ficheiro de imagem inválido." to "Invalid image file.",
