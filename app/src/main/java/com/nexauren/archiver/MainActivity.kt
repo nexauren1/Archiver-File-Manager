@@ -8,6 +8,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.ProgressDialog
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
@@ -70,6 +72,7 @@ import java.text.DateFormat
 import java.util.Collections
 import java.util.Date
 import java.util.Locale
+import java.security.MessageDigest
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -106,6 +109,9 @@ class MainActivity : Activity() {
     private val folderColors = linkedMapOf<String, String>()
 
     private val selected = linkedSetOf<String>()
+    private val rowViews = linkedMapOf<String, View>()
+    private val rowNameViews = linkedMapOf<String, TextView>()
+    private var visibleFileCount = 0
     private val favorites = linkedSetOf<String>()
     private var clipboard = emptyList<File>()
     private var clipboardIsCut = false
@@ -396,6 +402,8 @@ class MainActivity : Activity() {
     private fun refreshFiles() {
         if (!browserRendered || settingsOpen || editorOpen || !hasStorageAccess()) return
         rows.removeAllViews()
+        rowViews.clear()
+        rowNameViews.clear()
         gridRows = null
         pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
         selectionView.text = currentDir.absolutePath
@@ -407,6 +415,7 @@ class MainActivity : Activity() {
             rows.addView(gridRows, LinearLayout.LayoutParams(-1, -2))
         }
         val files = safeList(currentDir).filter { showHidden || !it.name.startsWith(".") }.toMutableList()
+        visibleFileCount = files.size
         val comparator = when (sortBy) {
             "Tamanho" -> compareBy<File> { if (it.isDirectory) -1L else it.length() }
             "Data" -> compareBy<File> { it.lastModified() }
@@ -591,6 +600,8 @@ class MainActivity : Activity() {
             gravity = if (inGrid) Gravity.CENTER else Gravity.START
             setPadding(0, dp(4), 0, 0)
         }, LinearLayout.LayoutParams(-1, -2))
+        rowViews[key] = item
+        rowNameViews[key] = name
         if (inGrid) {
             item.addView(middle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
             val params = GridLayout.LayoutParams(
@@ -679,7 +690,20 @@ class MainActivity : Activity() {
     private fun toggleSelection(file: File) {
         val key = pathKey(file)
         if (!selected.add(key)) selected.remove(key)
-        refreshFiles()
+        rowViews[key]?.background = roundedBackground(
+            if (selected.contains(key)) selectedRowColor() else if (gridRows != null) rowSurfaceColor() else pageBackgroundColor(),
+            if (gridRows != null) 10 else 4
+        )
+        rowNameViews[key]?.apply {
+            setTextColor(if (selected.contains(key)) accentColor() else primaryTextColor())
+            typeface = if (selected.contains(key)) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        }
+        countView.text = when {
+            selected.isNotEmpty() -> "${selected.size} selecionado(s) • ${visibleFileCount} itens"
+            visibleFileCount == 0 -> tr("Pasta vazia")
+            else -> visibleFileCount.toString() + if (visibleFileCount == 1) " item" else " itens"
+        }
+        updateSelectionBar()
     }
 
     private fun goUp() {
@@ -2639,25 +2663,11 @@ class MainActivity : Activity() {
                     closeEditorAfterSave = false
                 }
                 if (!isFinishing) {
-                    if (failed) {
-                        progressBar.progress = latestPercent
-                        percentView.text = "$latestPercent%"
-                    } else {
-                        progressBar.progress = 100
-                        percentView.text = "100%"
-                    }
-                    detailView.text = finalResult
-                    dialog.setTitle(if (failed) tr("Falha na operação") else tr("Operação concluída"))
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
-                        text = tr("Fechar")
-                        isEnabled = true
-                    }
                     Toast.makeText(this, tr(finalResult), Toast.LENGTH_LONG).show()
                     if (hasStorageAccess() && browserRendered && !settingsOpen && !editorOpen) refreshFiles()
-                } else {
-                    dialog.dismiss()
                 }
-                showOperationNotification(message, tr(finalResult), null, finished = true, failed = failed)
+                dialog.dismiss()
+                runCatching { getSystemService(NotificationManager::class.java).cancel(operationNotificationId) }
             }
         }
     }
