@@ -149,6 +149,11 @@ class MainActivity : Activity() {
         rootDir = Environment.getExternalStorageDirectory().canonicalFile
         currentDir = rootDir
         if (hasStorageAccess()) renderBrowser() else showPermissionScreen()
+        val launches = prefs.getInt("launch_count", 0) + 1
+        prefs.edit().putInt("launch_count", launches).apply()
+        if (browserRendered && launches >= 3 && !prefs.getBoolean("share_prompt_dismissed", false)) {
+            page.postDelayed({ maybeAskToShareApp() }, 1600L)
+        }
     }
 
     override fun onResume() {
@@ -736,8 +741,8 @@ class MainActivity : Activity() {
     private fun showMainMenu() {
         val options = arrayOf(
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
-            "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisar em subpastas", "Favoritos",
-            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início"
+            "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisa avançada", "Favoritos",
+            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar o Archiver"
         )
         AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
@@ -759,6 +764,7 @@ class MainActivity : Activity() {
                 11 -> showExplorerSettings()
                 12 -> refreshFiles()
                 13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
+                14 -> shareApplication()
             }
         }.show()
     }
@@ -832,7 +838,7 @@ class MainActivity : Activity() {
 
         when (category) {
             null -> {
-                addSettingChoice(content, "Geral", "2 idiomas", "Idioma, notificações e informações") {
+                addSettingChoice(content, "Geral", "9 idiomas", "Idioma, notificações e informações") {
                     settingsCategory = "Geral"; renderSettingsScreen()
                 }
                 addSettingChoice(content, "Interface", uiTheme, "Tema, cor de destaque e aparência") {
@@ -864,15 +870,18 @@ class MainActivity : Activity() {
                         toast(if (notificationsEnabled) "As notificações estão disponíveis." else "Ativa as notificações nas definições do Android.")
                     }
                 }
-                addSettingChoice(content, "Sobre o Archiver", "0.4.0", "Gestor de ficheiros Android nativo em Kotlin") {
-                    AlertDialog.Builder(this).setTitle("Archiver 0.4.0")
-                        .setMessage("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso.")
+                addSettingChoice(content, "Partilhar o Archiver", "Ajudar o projeto", "Convida alguém a experimentar o Archiver") {
+                    shareApplication()
+                }
+                addSettingChoice(content, "Sobre o Archiver", "0.5.0", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver 0.5.0")
+                        .setMessage(tr("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso."))
                         .setPositiveButton(tr("Fechar"), null).show()
                 }
             }
             "Interface" -> {
-                addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escuro, preto OLED ou claro") { showThemeMenu() }
-                addSettingChoice(content, "Cor de destaque", tr(accentName), "Personaliza os controlos e realces") { showAccentMenu() }
+                addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escolhe entre escuro, preto OLED e claro") { showThemeMenu() }
+                addSettingChoice(content, "Cor de destaque", tr(accentName), "Cor dos botões, seleção e indicadores") { showAccentMenu() }
                 addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor no menu de cada pasta") {
                     toast("Abre o menu de uma pasta e escolhe Cor da pasta.")
                 }
@@ -1054,7 +1063,8 @@ class MainActivity : Activity() {
         }
         if (ext in setOf("glb", "gltf")) options += "Inspecionar modelo 3D"
         options += listOf("Comprimir para ZIP", "Comprimir para 7Z", "Comprimir…")
-        options += listOf("Partilhar", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
+        options += listOf("Partilhar", "Copiar caminho", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
+        if (file.isFile) options += "Calcular SHA-256"
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
         if (file.isDirectory) options += "Cor da pasta"
         AlertDialog.Builder(this).setTitle(file.name).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
@@ -1071,6 +1081,8 @@ class MainActivity : Activity() {
                 "Extrair aqui" -> if (ext == "7z") extractSevenZip(file, currentDir, false) else extractZip(file, currentDir, false)
                 "Extrair para nova pasta" -> if (ext == "7z") extractSevenZip(file, currentDir, true) else extractZip(file, currentDir, true)
                 "Partilhar" -> shareFile(file)
+                "Copiar caminho" -> copyPath(file)
+                "Calcular SHA-256" -> calculateSha256(file)
                 "Copiar" -> { clipboard = chosenOrSingle(file); clipboardIsCut = false; selected.clear(); toast("Preparado para copiar."); refreshFiles() }
                 "Recortar" -> { clipboard = chosenOrSingle(file); clipboardIsCut = true; selected.clear(); toast("Preparado para mover."); refreshFiles() }
                 "Renomear" -> promptRename(file)
@@ -3047,12 +3059,80 @@ class MainActivity : Activity() {
         } else 0
     }
 
+    private fun copyPath(file: File) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Archiver path", file.absolutePath))
+        toast("Caminho copiado.")
+    }
+
+    private fun calculateSha256(file: File) {
+        if (!file.isFile) { toast("Seleciona um ficheiro para calcular o SHA-256."); return }
+        runTask("A calcular SHA-256…", file.length(), 1L) { meter ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { stream ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = stream.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                    meter.bytesRead(count.toLong(), file)
+                }
+            }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle("SHA-256")
+                    .setMessage(file.name + "\n\n" + hash)
+                    .setPositiveButton(tr("Copiar")) { _, _ ->
+                        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("SHA-256", hash))
+                        toast("SHA-256 copiado.")
+                    }
+                    .setNegativeButton(tr("Fechar"), null)
+                    .show()
+            }
+            "SHA-256: " + hash
+        }
+    }
+
+    private fun shareApplication() {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Archiver — gestor de ficheiros Android")
+            putExtra(
+                Intent.EXTRA_TEXT,
+                tr("Experimenta o Archiver, um gestor de ficheiros Android independente:") +
+                    "\nhttps://github.com/nexauren1/Archiver-File-Manager"
+            )
+        }
+        startActivity(Intent.createChooser(intent, tr("Partilhar o Archiver")))
+    }
+
+    private fun maybeAskToShareApp() {
+        if (isFinishing || !browserRendered || prefs.getBoolean("share_prompt_dismissed", false)) return
+        prefs.edit().putBoolean("share_prompt_dismissed", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle(tr("Gostas do Archiver?"))
+            .setMessage(tr("Estamos a melhorar a aplicação. Partilhar o projeto ajuda mais pessoas a conhecê-lo."))
+            .setPositiveButton(tr("Partilhar")) { _, _ -> shareApplication() }
+            .setNegativeButton(tr("Agora não"), null)
+            .show()
+    }
+
     private fun showLanguageMenu() {
-        val options = arrayOf("Português", "English")
+        val codes = arrayOf("pt", "en", "es", "fr", "de", "zh", "hi", "ar", "ja")
+        val options = arrayOf("Português", "English", "Español", "Français", "Deutsch", "中文（简体）", "हिन्दी", "العربية", "日本語")
         AlertDialog.Builder(this).setTitle(tr("Idioma"))
-            .setSingleChoiceItems(options, if (appLanguage == "en") 1 else 0) { dialog, which ->
-                appLanguage = if (which == 1) "en" else "pt"
+            .setMessage(tr("Escolhe um idioma. Os nomes são apresentados na própria língua."))
+            .setSingleChoiceItems(options, codes.indexOf(appLanguage).coerceAtLeast(0)) { dialog, which ->
+                appLanguage = codes[which]
                 savePreferences()
+                if (Build.VERSION.SDK_INT >= 33) {
+                    runCatching {
+                        getSystemService(android.app.LocaleManager::class.java).applicationLocales =
+                            android.os.LocaleList.forLanguageTags(codes[which])
+                    }
+                }
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
             }.setNegativeButton(tr("Cancelar"), null).show()
@@ -3060,8 +3140,14 @@ class MainActivity : Activity() {
 
     private fun showThemeMenu() {
         val options = arrayOf("Escuro", "Preto OLED", "Claro")
+        val descriptions = arrayOf(
+            tr("Escuro (recomendado)"),
+            tr("Preto OLED (ecrãs OLED)"),
+            tr("Claro (boa visibilidade à luz do dia)")
+        )
         AlertDialog.Builder(this).setTitle(tr("Tema da interface"))
-            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(uiTheme).coerceAtLeast(0)) { dialog, which ->
+            .setMessage(tr("O tema altera o fundo e o contraste. A cor de destaque controla os botões e a seleção."))
+            .setSingleChoiceItems(descriptions, options.indexOf(uiTheme).coerceAtLeast(0)) { dialog, which ->
                 uiTheme = options[which]
                 savePreferences()
                 applyPaletteToWindow()
