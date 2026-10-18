@@ -30,12 +30,18 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.documentfile.provider.DocumentFile;
+import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile;
+import org.apache.commons.compress.archivers.sevenz.SevenZMethod;
+import org.apache.commons.compress.archivers.sevenz.SevenZFile;
+import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.IOException;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileInputStream;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -699,8 +705,11 @@ public class MainActivity extends Activity {
     }
 
     private void showCreateMenu() {
-        new AlertDialog.Builder(this).setTitle("Criar").setItems(new String[]{"Nova pasta", "Novo ficheiro vazio", "Criar arquivo ZIP"}, (d, which) -> {
-            if (which == 0) promptNewItem(true); else if (which == 1) promptNewItem(false); else promptZip();
+        new AlertDialog.Builder(this).setTitle("Criar").setItems(new String[]{"Nova pasta", "Novo ficheiro vazio", "Criar arquivo ZIP", "Criar arquivo 7Z"}, (d, which) -> {
+            if (which == 0) promptNewItem(true);
+            else if (which == 1) promptNewItem(false);
+            else if (which == 2) promptZip();
+            else promptSevenZip(chosen());
         }).show();
     }
     private void promptNewItem(boolean folder) {
@@ -723,17 +732,18 @@ public class MainActivity extends Activity {
 
     private void showFileActions(DocumentFile file) {
         String[] options;
-        if (file.isDirectory()) options = new String[]{"Abrir pasta", "Comprimir em ZIP", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
-        else if ("zip".equals(extension(file.getName()))) options = new String[]{"Abrir", "Testar arquivo", "Extrair aqui", "Extrair para nova pasta", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
+        if (file.isDirectory()) options = new String[]{"Abrir pasta", "Comprimir em ZIP", "Comprimir em 7Z", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
+        else if ("zip".equals(extension(file.getName())) || "7z".equals(extension(file.getName()))) options = new String[]{"Abrir", "Testar arquivo", "Extrair aqui", "Extrair para nova pasta", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
         else options = new String[]{"Abrir", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
         new AlertDialog.Builder(this).setTitle(file.getName()).setItems(options, (d,which) -> {
             String op = options[which];
             if ("Abrir pasta".equals(op)) { stack.add(file); selected.clear(); refresh(); }
             else if ("Abrir".equals(op)) openFile(file);
-            else if ("Comprimir em ZIP".equals(op)) promptZip(Collections.singletonList(file));
-            else if ("Testar arquivo".equals(op)) testZip(file);
-            else if ("Extrair aqui".equals(op)) extract(file, current(), false);
-            else if ("Extrair para nova pasta".equals(op)) extract(file, current(), true);
+            else if ("Comprimir em ZIP".equals(op)) promptZip(chosenOrSingle(file));
+            else if ("Comprimir em 7Z".equals(op)) promptSevenZip(chosenOrSingle(file));
+            else if ("Testar arquivo".equals(op)) { if ("7z".equals(extension(file.getName()))) testSevenZip(file); else testZip(file); }
+            else if ("Extrair aqui".equals(op)) { if ("7z".equals(extension(file.getName()))) extractSevenZip(file, current(), false); else extract(file, current(), false); }
+            else if ("Extrair para nova pasta".equals(op)) { if ("7z".equals(extension(file.getName()))) extractSevenZip(file, current(), true); else extract(file, current(), true); }
             else if ("Partilhar".equals(op)) shareFile(file);
             else if ("Copiar".equals(op) || "Recortar".equals(op)) {
                 List<DocumentFile> items = chosen();
@@ -794,6 +804,12 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Informações").setMessage(msg).setPositiveButton("OK", null).show();
     }
 
+    private List<DocumentFile> chosenOrSingle(DocumentFile fallback) {
+        List<DocumentFile> items = chosen();
+        if (items.isEmpty()) items.add(fallback);
+        return items;
+    }
+
     private void promptZip() { promptZip(chosen()); }
     private void promptZip(List<DocumentFile> files) {
         if (current() == null || files == null || files.isEmpty()) { toast("Selecione pelo menos um ficheiro ou pasta."); return; }
@@ -852,6 +868,203 @@ public class MainActivity extends Activity {
                     }
                 });
             }).show();
+    }
+
+    private void promptSevenZip(List<DocumentFile> files) {
+        if (current() == null || files == null || files.isEmpty()) {
+            toast("Selecione pelo menos um ficheiro ou pasta."); return;
+        }
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        String suggested = files.size() == 1 ? files.get(0).getName() : "Arquivo";
+        if (suggested == null) suggested = "Arquivo";
+        if (!suggested.toLowerCase(java.util.Locale.ROOT).endsWith(".7z")) suggested += ".7z";
+        input.setText(suggested);
+        CheckBox deleteOriginals = new CheckBox(this);
+        deleteOriginals.setText("Excluir originais depois de comprimir com sucesso");
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.addView(input);
+        form.addView(deleteOriginals);
+        new AlertDialog.Builder(this).setTitle("Criar arquivo 7Z")
+            .setMessage("Formato 7Z • Compressão: " + compressionName()).setView(form)
+            .setNegativeButton("Cancelar", null).setPositiveButton("Criar", (d,w) -> {
+                String name = input.getText().toString().trim();
+                if (name.isEmpty()) { toast("Indique um nome."); return; }
+                if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(".7z")) name += ".7z";
+                try { name = uniqueName(current(), name); }
+                catch (IOException e) { toast("Não foi possível verificar o nome de destino."); return; }
+                DocumentFile out = current().createFile("application/x-7z-compressed", name);
+                if (out == null) { toast("Não foi possível criar o 7Z neste local."); return; }
+                final DocumentFile target = out;
+                final List<DocumentFile> sources = new ArrayList<>(files);
+                final boolean removeOriginals = deleteOriginals.isChecked();
+                selected.clear();
+                runWork(() -> {
+                    File temporary = null;
+                    try {
+                        temporary = File.createTempFile("archiver-create-", ".7z", getCacheDir());
+                        try (SevenZOutputFile seven = new SevenZOutputFile(temporary)) {
+                            if (compressionLevel == 0) seven.setContentCompression(SevenZMethod.COPY);
+                            else if (compressionLevel == 1) seven.setContentCompression(SevenZMethod.DEFLATE);
+                            else if (compressionLevel == 3) seven.setContentCompression(SevenZMethod.BZIP2);
+                            else seven.setContentCompression(SevenZMethod.LZMA2);
+                            for (DocumentFile source : sources) {
+                                String entryName = source.getName() == null ? "item" : source.getName();
+                                addToSevenZip(seven, source, entryName, target.getUri());
+                            }
+                        }
+                        InputStream inputStream = new BufferedInputStream(new FileInputStream(temporary));
+                        OutputStream rawOut = getContentResolver().openOutputStream(target.getUri());
+                        if (rawOut == null) { inputStream.close(); throw new IOException("Não foi possível escrever o arquivo no armazenamento."); }
+                        try (InputStream in = inputStream; OutputStream outStream = new BufferedOutputStream(rawOut)) {
+                            byte[] buffer = new byte[32768];
+                            int n;
+                            while ((n = in.read(buffer)) != -1) outStream.write(buffer, 0, n);
+                        }
+                    } catch (Exception e) {
+                        deleteRecursively(target);
+                        postResult("Erro ao criar 7Z: " + safeMessage(e), false);
+                        return;
+                    } finally {
+                        if (temporary != null) temporary.delete();
+                    }
+                    if (removeOriginals) {
+                        for (DocumentFile source : sources) {
+                            if (!deleteRecursively(source)) {
+                                postResult("7Z criado, mas não foi possível eliminar " + source.getName() + ".", false);
+                                return;
+                            }
+                        }
+                        postResult("7Z criado e originais eliminados.", true);
+                    } else postResult("Arquivo 7Z criado: " + target.getName(), true);
+                });
+            }).show();
+    }
+
+    private void addToSevenZip(SevenZOutputFile seven, DocumentFile file, String entryName, Uri archiveUri) throws IOException {
+        if (file.getUri().equals(archiveUri)) return;
+        SevenZArchiveEntry entry = new SevenZArchiveEntry();
+        entry.setName(entryName);
+        entry.setLastModifiedDate(new Date(Math.max(0L, file.lastModified())));
+        if (file.isDirectory()) {
+            entry.setDirectory(true);
+            entry.setHasStream(false);
+            seven.putArchiveEntry(entry);
+            seven.closeArchiveEntry();
+            DocumentFile[] children = file.listFiles();
+            if (children != null) for (DocumentFile child : children) {
+                String name = child.getName() == null ? "item" : child.getName();
+                addToSevenZip(seven, child, entryName + "/" + name, archiveUri);
+            }
+        } else {
+            entry.setDirectory(false);
+            entry.setHasStream(true);
+            entry.setSize(file.length());
+            seven.putArchiveEntry(entry);
+            InputStream raw = getContentResolver().openInputStream(file.getUri());
+            if (raw == null) throw new IOException("Não foi possível ler " + file.getName());
+            try (InputStream in = new BufferedInputStream(raw)) {
+                byte[] buffer = new byte[32768];
+                int n;
+                while ((n = in.read(buffer)) != -1) seven.write(buffer, 0, n);
+            }
+            seven.closeArchiveEntry();
+        }
+    }
+
+    private File copyUriToTemp(Uri uri, String suffix) throws IOException {
+        File temporary = File.createTempFile("archiver-read-", suffix, getCacheDir());
+        boolean ok = false;
+        try {
+            InputStream raw = getContentResolver().openInputStream(uri);
+            if (raw == null) throw new IOException("Não foi possível ler o arquivo.");
+            try (InputStream in = new BufferedInputStream(raw);
+                 OutputStream out = new BufferedOutputStream(new FileOutputStream(temporary))) {
+                byte[] buffer = new byte[32768];
+                int n;
+                while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+            }
+            ok = true;
+            return temporary;
+        } finally {
+            if (!ok) temporary.delete();
+        }
+    }
+
+    private void testSevenZip(DocumentFile archive) {
+        runWork(() -> {
+            File temporary = null;
+            int count = 0;
+            try {
+                temporary = copyUriToTemp(archive.getUri(), ".7z");
+                try (SevenZFile seven = new SevenZFile(temporary)) {
+                    SevenZArchiveEntry entry;
+                    byte[] buffer = new byte[32768];
+                    while ((entry = seven.getNextEntry()) != null) {
+                        int n;
+                        while ((n = seven.read(buffer, 0, buffer.length)) != -1) { }
+                        count++;
+                    }
+                }
+            } catch (Exception e) {
+                postResult("O 7Z falhou no teste: " + safeMessage(e), false);
+                return;
+            } finally {
+                if (temporary != null) temporary.delete();
+            }
+            postResult("Teste 7Z concluído. Entradas verificadas: " + count + ".", true);
+        });
+    }
+
+    private void extractSevenZip(DocumentFile archive, DocumentFile targetDir, boolean makeSubfolder) {
+        if (targetDir == null || !"7z".equals(extension(archive.getName()))) {
+            toast("Selecione um arquivo .7z e uma pasta de destino."); return;
+        }
+        DocumentFile destination = targetDir;
+        if (makeSubfolder) {
+            String name = archive.getName() == null ? "Arquivo" : archive.getName();
+            int dot = name.lastIndexOf('.');
+            if (dot > 0) name = name.substring(0, dot);
+            try { name = uniqueName(targetDir, name); }
+            catch (IOException e) { toast("Não foi possível verificar a pasta de destino."); return; }
+            destination = targetDir.createDirectory(name);
+            if (destination == null) { toast("Não foi possível criar a pasta de destino."); return; }
+        }
+        final DocumentFile target = destination;
+        runWork(() -> {
+            File temporary = null;
+            int count = 0;
+            try {
+                temporary = copyUriToTemp(archive.getUri(), ".7z");
+                try (SevenZFile seven = new SevenZFile(temporary)) {
+                    SevenZArchiveEntry entry;
+                    byte[] buffer = new byte[32768];
+                    while ((entry = seven.getNextEntry()) != null) {
+                        String path = safeZipPath(entry.getName());
+                        if (path == null) throw new IOException("O 7Z contém um caminho inseguro.");
+                        DocumentFile out = createTree(target, path, entry.isDirectory());
+                        if (!entry.isDirectory()) {
+                            OutputStream raw = getContentResolver().openOutputStream(out.getUri());
+                            if (raw == null) throw new IOException("Não foi possível escrever: " + path);
+                            try (OutputStream outStream = new BufferedOutputStream(raw)) {
+                                int n;
+                                while ((n = seven.read(buffer, 0, buffer.length)) != -1) outStream.write(buffer, 0, n);
+                            }
+                        } else {
+                            // Directories are created by createTree; no entry data to write.
+                        }
+                        count++;
+                    }
+                }
+            } catch (Exception e) {
+                postResult("Erro na extração 7Z: " + safeMessage(e) + " (" + count + " entradas processadas).", false);
+                return;
+            } finally {
+                if (temporary != null) temporary.delete();
+            }
+            postResult("Extração 7Z concluída: " + count + " entradas.", true);
+        });
     }
 
     private void testZip(DocumentFile archive) {
