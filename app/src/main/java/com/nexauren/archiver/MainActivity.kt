@@ -808,7 +808,7 @@ class MainActivity : Activity() {
 
         when (category) {
             null -> {
-                addSettingChoice(content, "Geral", "2 idiomas", "Idioma, notificações e informações") {
+                addSettingChoice(content, "Geral", "10 idiomas", "Idioma, notificações e informações") {
                     settingsCategory = "Geral"; renderSettingsScreen()
                 }
                 addSettingChoice(content, "Interface", uiTheme, "Tema, cor de destaque e aparência") {
@@ -828,7 +828,7 @@ class MainActivity : Activity() {
                 }
             }
             "Geral" -> {
-                addSettingChoice(content, "Idioma", if (appLanguage == "en") "English" else "Português",
+                addSettingChoice(content, "Idioma", languageDisplayName(appLanguage),
                     "Escolher o idioma da interface") { showLanguageMenu() }
                 val notificationsEnabled = Build.VERSION.SDK_INT < 33 ||
                     ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -847,9 +847,14 @@ class MainActivity : Activity() {
                 }
             }
             "Interface" -> {
-                addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escuro, preto OLED ou claro") { showThemeMenu() }
-                addSettingChoice(content, "Cor de destaque", tr(accentName), "Personaliza os controlos e realces") { showAccentMenu() }
-                addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor no menu de cada pasta") {
+                addSectionHeading(content, "Tema da interface", "Escolhe um aspeto completo para a aplicação.")
+                addThemeOption(content, "Escuro", "Fundo carvão, superfícies elevadas e texto claro.")
+                addThemeOption(content, "Preto OLED", "Preto verdadeiro para ecrãs OLED e contraste alto.")
+                addThemeOption(content, "Claro", "Fundo claro, texto escuro e separadores suaves.")
+                addSectionHeading(content, "Cor de destaque", "A cor escolhida destaca botões, seleção e progresso.")
+                addAccentPalette(content)
+                addSectionHeading(content, "Cores das pastas", "Personaliza uma pasta de cada vez.")
+                addSettingChoice(content, "Como mudar a cor de uma pasta", "Abrir menu da pasta", "Escolhe «Cor da pasta» no menu de qualquer pasta.") {
                     toast("Abre o menu de uma pasta e escolhe Cor da pasta.")
                 }
             }
@@ -2797,14 +2802,31 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility = if (uiTheme == "Claro") {
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         } else 0
+        window.decorView.layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
+    }
+
+    private fun languageDisplayName(code: String): String = when (code) {
+        "en" -> "English"
+        "es" -> "Español"
+        "fr" -> "Français"
+        "de" -> "Deutsch"
+        "zh" -> "中文（简体）"
+        "ar" -> "العربية"
+        "hi" -> "हिन्दी"
+        "ru" -> "Русский"
+        "ja" -> "日本語"
+        else -> "Português"
     }
 
     private fun showLanguageMenu() {
-        val options = arrayOf("Português", "English")
+        val codes = arrayOf("pt", "en", "es", "fr", "de", "zh", "ar", "hi", "ru", "ja")
+        val names = codes.map { languageDisplayName(it) }.toTypedArray()
+        val checked = codes.indexOf(appLanguage).coerceAtLeast(0)
         AlertDialog.Builder(this).setTitle(tr("Idioma"))
-            .setSingleChoiceItems(options, if (appLanguage == "en") 1 else 0) { dialog, which ->
-                appLanguage = if (which == 1) "en" else "pt"
+            .setSingleChoiceItems(names, checked) { dialog, which ->
+                appLanguage = codes[which]
                 savePreferences()
+                applyPaletteToWindow()
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
             }.setNegativeButton(tr("Cancelar"), null).show()
@@ -2828,20 +2850,201 @@ class MainActivity : Activity() {
             .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(accentName).coerceAtLeast(0)) { dialog, which ->
                 accentName = options[which]
                 savePreferences()
+                applyPaletteToWindow()
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
             }.setNegativeButton(tr("Cancelar"), null).show()
     }
 
-    private fun showFolderColorMenu(file: File) {
-        val options = arrayOf("Predefinida", "Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
-        AlertDialog.Builder(this).setTitle(tr("Cor da pasta"))
-            .setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
-                val key = pathKey(file)
-                if (which == 0) folderColors.remove(key) else folderColors[key] = options[which]
+    private fun addSectionHeading(container: LinearLayout, title: String, summary: String) {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(16), dp(4), dp(8))
+        }
+        column.addView(label(title, 17, primaryTextColor(), true))
+        column.addView(label(summary, 12, mutedTextColor(), false).apply { setPadding(0, dp(4), 0, 0) })
+        container.addView(column, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun addThemeOption(container: LinearLayout, theme: String, summary: String) {
+        val chosen = uiTheme == theme
+        val previewBackground = when (theme) {
+            "Claro" -> 0xFFE7E8EF.toInt()
+            "Preto OLED" -> 0xFF000000.toInt()
+            else -> 0xFF19191D.toInt()
+        }
+        val previewBar = when (theme) {
+            "Claro" -> 0xFFD0D3E1.toInt()
+            "Preto OLED" -> 0xFF08080A.toInt()
+            else -> 0xFF292D40.toInt()
+        }
+        val preview = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(6), dp(8), dp(6))
+            background = roundedBackground(previewBackground, 10)
+        }
+        preview.addView(View(this).apply { setBackgroundColor(previewBar) },
+            LinearLayout.LayoutParams(-1, dp(9)))
+        preview.addView(View(this).apply { setBackgroundColor(when (theme) {
+            "Claro" -> 0xFF6E7190.toInt()
+            "Preto OLED" -> 0xFF242033.toInt()
+            else -> 0xFF55516E.toInt()
+        }) }, LinearLayout.LayoutParams(dp(42), dp(5)).apply {
+            gravity = Gravity.START
+            topMargin = dp(5)
+        })
+        preview.addView(View(this).apply { setBackgroundColor(when (theme) {
+            "Claro" -> 0xFFC7CAD7.toInt()
+            "Preto OLED" -> 0xFF121217.toInt()
+            else -> 0xFF34343E.toInt()
+        }) }, LinearLayout.LayoutParams(dp(54), dp(5)).apply {
+            gravity = Gravity.START
+            topMargin = dp(4)
+        })
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = roundedBackground(if (chosen) selectedRowColor() else panelBackgroundColor(), 12)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                uiTheme = theme
                 savePreferences()
-                refreshFiles()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+                applyPaletteToWindow()
+                renderSettingsScreen()
+            }
+        }
+        row.addView(preview, LinearLayout.LayoutParams(dp(76), dp(58)))
+        val textColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, dp(6), 0)
+        }
+        textColumn.addView(label(theme, 15, primaryTextColor(), true))
+        textColumn.addView(label(summary, 12, mutedTextColor(), false).apply { setPadding(0, dp(3), 0, 0) })
+        row.addView(textColumn, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(label(if (chosen) "✓" else "○", 20, if (chosen) accentColor() else mutedTextColor(), true))
+        container.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+    }
+
+    private fun addAccentPalette(container: LinearLayout) {
+        val colors = listOf(
+            "Lavanda" to 0xFFB8B5FF.toInt(),
+            "Azul" to 0xFF64B5F6.toInt(),
+            "Verde" to 0xFF81C784.toInt(),
+            "Laranja" to 0xFFFFB74D.toInt(),
+            "Rosa" to 0xFFF48FB1.toInt(),
+            "Vermelho" to 0xFFE57373.toInt(),
+            "Amarelo" to 0xFFFFD54F.toInt()
+        )
+        val grid = GridLayout(this).apply {
+            columnCount = 3
+            useDefaultMargins = false
+        }
+        colors.forEach { (name, color) ->
+            val chosen = accentName == name
+            val cell = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(8), dp(4), dp(8))
+                background = roundedBackground(if (chosen) selectedRowColor() else rowSurfaceColor(), 10)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    accentName = name
+                    savePreferences()
+                    applyPaletteToWindow()
+                    renderSettingsScreen()
+                }
+            }
+            val swatch = TextView(this).apply {
+                text = if (chosen) "✓" else ""
+                textSize = 17f
+                gravity = Gravity.CENTER
+                setTextColor(0xFF20202A.toInt())
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(color)
+                    if (chosen) setStroke(dp(3), primaryTextColor())
+                }
+            }
+            cell.addView(swatch, LinearLayout.LayoutParams(dp(30), dp(30)))
+            cell.addView(label(name, 12, primaryTextColor(), chosen).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(5), 0, 0)
+            }, LinearLayout.LayoutParams(-1, -2))
+            val lp = GridLayout.LayoutParams(
+                GridLayout.spec(GridLayout.UNDEFINED, 1f),
+                GridLayout.spec(GridLayout.UNDEFINED, 1f)
+            ).apply {
+                width = 0
+                height = -2
+                setMargins(dp(3), dp(3), dp(3), dp(3))
+            }
+            grid.addView(cell, lp)
+        }
+        container.addView(grid, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun showFolderColorMenu(file: File) {
+        val options = listOf(
+            "Predefinida" to null,
+            "Lavanda" to 0xFFB8B5FF.toInt(),
+            "Azul" to 0xFF64B5F6.toInt(),
+            "Verde" to 0xFF81C784.toInt(),
+            "Laranja" to 0xFFFFB74D.toInt(),
+            "Rosa" to 0xFFF48FB1.toInt(),
+            "Vermelho" to 0xFFE57373.toInt(),
+            "Amarelo" to 0xFFFFD54F.toInt()
+        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val title = label("Escolhe uma cor para esta pasta", 13, mutedTextColor(), false)
+        content.addView(title, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        val grid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
+        options.forEach { (name, color) ->
+            val cell = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(10), dp(8), dp(10))
+                background = roundedBackground(rowSurfaceColor(), 10)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    val key = pathKey(file)
+                    if (color == null) folderColors.remove(key) else folderColors[key] = name
+                    savePreferences()
+                    dialog.dismiss()
+                    refreshFiles()
+                }
+            }
+            val swatch = View(this).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(color ?: (if (uiTheme == "Claro") 0xFFECEEF4.toInt() else 0xFF24242A.toInt()))
+                    setStroke(dp(1), mutedTextColor())
+                }
+            }
+            cell.addView(swatch, LinearLayout.LayoutParams(dp(22), dp(22)))
+            cell.addView(label(name, 12, primaryTextColor(), folderColors[pathKey(file)] == name).apply {
+                setPadding(dp(7), 0, 0, 0)
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            val lp = GridLayout.LayoutParams(
+                GridLayout.spec(GridLayout.UNDEFINED, 1f),
+                GridLayout.spec(GridLayout.UNDEFINED, 1f)
+            ).apply {
+                width = 0; height = -2
+                setMargins(dp(3), dp(3), dp(3), dp(3))
+            }
+            grid.addView(cell, lp)
+        }
+        content.addView(grid, LinearLayout.LayoutParams(-1, -2))
+        val dialog = AlertDialog.Builder(this).setTitle(tr("Cor da pasta")).setView(content)
+            .setNegativeButton(tr("Cancelar"), null).create()
+        dialog.show()
     }
 
     private fun folderColorValue(file: File): Int? = folderColors[pathKey(file)]?.let { color ->
