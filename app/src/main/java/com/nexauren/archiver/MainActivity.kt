@@ -3348,15 +3348,7 @@ class MainActivity : Activity() {
         return localized[text] ?: localized[english] ?: english
     }
 
-    private fun accentColor(): Int = when (accentName) {
-        "Azul" -> 0xFF64B5F6.toInt()
-        "Verde" -> 0xFF81C784.toInt()
-        "Laranja" -> 0xFFFFB74D.toInt()
-        "Rosa" -> 0xFFF48FB1.toInt()
-        "Vermelho" -> 0xFFE57373.toInt()
-        "Amarelo" -> 0xFFFFD54F.toInt()
-        else -> 0xFFB8B5FF.toInt()
-    }
+    private fun accentColor(): Int = colorForAccent(accentName)
 
     private fun pageBackgroundColor(): Int = when (uiTheme) {
         "Claro" -> 0xFFF5F6FA.toInt()
@@ -3438,27 +3430,177 @@ class MainActivity : Activity() {
             }.setNegativeButton(tr("Cancelar"), null).show()
     }
 
+    private fun themeSurface(theme: String): Int = when (theme) {
+        "Claro" -> 0xFFF2F3F8.toInt()
+        "Preto OLED" -> 0xFF050507.toInt()
+        else -> 0xFF19191D.toInt()
+    }
+
+    private fun themeToolbar(theme: String): Int = when (theme) {
+        "Claro" -> 0xFFDDE2F1.toInt()
+        "Preto OLED" -> 0xFF111116.toInt()
+        else -> 0xFF292D40.toInt()
+    }
+
+    private fun themeText(theme: String): Int =
+        if (theme == "Claro") 0xFF24252D.toInt() else 0xFFF3F3F5.toInt()
+
     private fun showThemeMenu() {
         val options = arrayOf("Escuro", "Preto OLED", "Claro")
-        AlertDialog.Builder(this).setTitle(tr("Tema da interface"))
-            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(uiTheme).coerceAtLeast(0)) { dialog, which ->
-                uiTheme = options[which]
+        val descriptions = arrayOf(
+            "Tema escuro equilibrado para uso diário.",
+            "Fundo preto para ecrãs OLED, com menos brilho.",
+            "Fundo claro com texto escuro e contraste elevado."
+        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Tema da interface"))
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton(tr("Cancelar"), null)
+            .create()
+        options.forEachIndexed { index, theme ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = roundedBackground(themeSurface(theme), 14)
+                isClickable = true
+                isFocusable = true
+            }
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            header.addView(TextView(this).apply {
+                text = tr(theme)
+                textSize = 16f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(themeText(theme))
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            header.addView(TextView(this).apply {
+                text = if (theme == uiTheme) "✓" else ""
+                textSize = 20f
+                setTextColor(accentColor())
+            }, LinearLayout.LayoutParams(dp(28), -2))
+            card.addView(header, LinearLayout.LayoutParams(-1, -2))
+            card.addView(TextView(this).apply {
+                text = tr(descriptions[index])
+                textSize = 12f
+                setTextColor(if (theme == "Claro") 0xFF60636F.toInt() else 0xFFB9B9C3.toInt())
+                setPadding(0, dp(4), 0, dp(10))
+            }, LinearLayout.LayoutParams(-1, -2))
+            val sample = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = roundedBackground(themeToolbar(theme), 9)
+                setPadding(dp(10), dp(7), dp(10), dp(7))
+            }
+            sample.addView(TextView(this).apply {
+                text = tr("Armazenamento interno")
+                textSize = 12f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(themeText(theme))
+            }, LinearLayout.LayoutParams(-1, -2))
+            val sampleRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(8), 0, 0)
+            }
+            sampleRow.addView(View(this).apply {
+                background = roundedBackground(accentColor(), 4)
+            }, LinearLayout.LayoutParams(dp(24), dp(24)).apply { rightMargin = dp(8) })
+            sampleRow.addView(TextView(this).apply {
+                text = tr("Os teus ficheiros")
+                textSize = 12f
+                setTextColor(themeText(theme))
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            sampleRow.addView(TextView(this).apply {
+                text = "100%"
+                textSize = 11f
+                setTextColor(accentColor())
+            }, LinearLayout.LayoutParams(-2, -2))
+            sample.addView(sampleRow)
+            card.addView(sample)
+            card.setOnClickListener {
+                uiTheme = theme
                 savePreferences()
                 applyPaletteToWindow()
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+            }
+            content.addView(card, LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(5); bottomMargin = dp(5)
+            })
+        }
+        dialog.show()
     }
 
     private fun showAccentMenu() {
         val options = arrayOf("Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
-        AlertDialog.Builder(this).setTitle(tr("Cor de destaque"))
-            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(accentName).coerceAtLeast(0)) { dialog, which ->
-                accentName = options[which]
+        val descriptions = arrayOf(
+            "Destaque suave e confortável.", "Destaque frio e nítido.", "Destaque verde natural.",
+            "Destaque quente e vivo.", "Destaque rosa suave.", "Destaque vermelho forte.", "Destaque amarelo luminoso."
+        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Cor de destaque"))
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton(tr("Cancelar"), null)
+            .create()
+        options.forEachIndexed { index, option ->
+            val color = colorForAccent(option)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(10), dp(8), dp(10))
+                isClickable = true
+                isFocusable = true
+                background = roundedBackground(if (option == accentName) rowSurfaceColor() else pageBackgroundColor(), 10)
+            }
+            row.addView(View(this).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(color)
+                    setStroke(dp(2), if (option == accentName) primaryTextColor() else color)
+                }
+            }, LinearLayout.LayoutParams(dp(32), dp(32)).apply { rightMargin = dp(12) })
+            val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            labels.addView(label(option, 15, primaryTextColor(), option == accentName))
+            labels.addView(label(descriptions[index], 12, mutedTextColor(), false).apply {
+                setPadding(0, dp(3), 0, 0)
+            })
+            row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(TextView(this).apply {
+                text = if (option == accentName) "✓" else ""
+                textSize = 18f
+                setTextColor(color)
+                gravity = Gravity.CENTER
+            }, LinearLayout.LayoutParams(dp(26), dp(36)))
+            row.setOnClickListener {
+                accentName = option
                 savePreferences()
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+            }
+            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(3); bottomMargin = dp(3)
+            })
+        }
+        dialog.show()
+    }
+
+    private fun colorForAccent(name: String): Int = when (name) {
+        "Azul" -> 0xFF64B5F6.toInt()
+        "Verde" -> 0xFF81C784.toInt()
+        "Laranja" -> 0xFFFFB74D.toInt()
+        "Rosa" -> 0xFFF48FB1.toInt()
+        "Vermelho" -> 0xFFE57373.toInt()
+        "Amarelo" -> 0xFFFFD54F.toInt()
+        else -> 0xFFB8B5FF.toInt()
     }
 
     private fun showFolderColorMenu(file: File) {
