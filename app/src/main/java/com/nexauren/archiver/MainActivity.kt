@@ -29,6 +29,8 @@ import android.util.LruCache
 import android.view.Gravity
 import android.view.View
 import android.webkit.MimeTypeMap
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -42,6 +44,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -51,6 +54,9 @@ import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import org.apache.commons.compress.archivers.sevenz.SevenZMethod
 import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
+import net.lingala.zip4j.ZipFile as Zip4jFile
+import net.lingala.zip4j.model.ZipParameters
+import net.lingala.zip4j.progress.ProgressMonitor
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -1344,47 +1350,193 @@ class MainActivity : Activity() {
         }.setPositiveButton("Fechar", null).show()
     }
 
-    private fun promptArchive(files: List<File>, format: String) {
+    private fun promptArchive(files: List<File>, initialFormat: String) {
         if (files.isEmpty()) { toast("Seleciona pelo menos um ficheiro ou pasta."); return }
-        val suffix = if (format == "7z") ".7z" else ".zip"
+
+        val formatNames = arrayOf("ZIP", "7Z")
+        val formatPicker = makeSpinner(formatNames, if (initialFormat == "7z") 1 else 0)
+        val levelNames = arrayOf("Sem compressão", "Rápida", "Normal", "Ultra")
+        val levelPicker = makeSpinner(levelNames, compressionLevel.coerceIn(0, 3))
+        val encryptionNames = arrayOf("Nenhuma", "ZipCrypto", "AES-256")
+        val encryptionPicker = makeSpinner(encryptionNames)
+        val volumeNames = arrayOf("Não", "64 MB", "100 MB", "250 MB", "500 MB", "1 GB")
+        val volumeBytes = longArrayOf(
+            0L,
+            64L * 1024L * 1024L,
+            100L * 1024L * 1024L,
+            250L * 1024L * 1024L,
+            500L * 1024L * 1024L,
+            1024L * 1024L * 1024L
+        )
+        val volumePicker = makeSpinner(volumeNames)
+        val passwordInput = EditText(this).apply {
+            hint = "Palavra-passe (opcional)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        val suffix = if (initialFormat == "7z") ".7z" else ".zip"
         val input = EditText(this).apply {
             setSingleLine(true)
             val suggestion = if (files.size == 1) files[0].name else "Arquivo"
             setText(if (suggestion.lowercase(Locale.ROOT).endsWith(suffix)) suggestion else suggestion + suffix)
         }
         val deleteOriginals = CheckBox(this).apply { text = "Eliminar originais depois de comprimir com sucesso" }
-        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(input); addView(deleteOriginals) }
-        AlertDialog.Builder(this).setTitle(if (format == "7z") "Criar arquivo 7Z" else "Criar arquivo ZIP")
-            .setMessage("Compressão: " + compressionName()).setView(form)
-            .setNegativeButton("Cancelar", null).setPositiveButton("Criar") { _, _ ->
-                var name = input.text.toString().trim()
-                if (name.isBlank() || !validName(name)) { toast("Nome inválido."); return@setPositiveButton }
-                if (!name.lowercase(Locale.ROOT).endsWith(suffix)) name += suffix
-                try { name = uniqueName(currentDir, name) } catch (_: Exception) { toast("Nome de destino inválido."); return@setPositiveButton }
-                val destination = File(currentDir, name)
-                val removeSources = deleteOriginals.isChecked
-                val sources = files.toList()
-                runTask("A criar " + suffix + "…", 0L, 1L) { meter ->
-                    val totals = measureFiles(sources) { meter.show(it) }
-                    meter.setTotals(totals.bytes, totals.entries * if (removeSources) 2L else 1L)
-                    try {
-                        if (format == "7z") createSevenZip(sources, destination, meter) else createZip(sources, destination, meter)
-                    } catch (e: Exception) {
-                        destination.delete()
-                        throw e
-                    }
-                    if (removeSources) sources.forEach { source ->
-                        meter.show(source)
-                        if (!deleteRecursively(source) { deleted -> meter.itemDone(deleted) }) {
-                            throw IOException("Arquivo criado, mas não foi possível eliminar " + source.name)
+        val separateArchives = CheckBox(this).apply { text = "Criar um arquivo separado por item selecionado" }
+
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(6))
+        }
+        fun addField(title: String, view: View) {
+            form.addView(label(title, 13, 0xFFAAAAB4.toInt(), false).apply {
+                setPadding(0, dp(9), 0, dp(3))
+            }, LinearLayout.LayoutParams(-1, -2))
+            form.addView(view, LinearLayout.LayoutParams(-1, dp(46)))
+        }
+        addField("Arquivo", input)
+        addField("Formato do arquivo", formatPicker)
+        addField("Nível de compressão", levelPicker)
+        addField("Criptografia (ZIP)", encryptionPicker)
+        form.addView(passwordInput, LinearLayout.LayoutParams(-1, dp(48)))
+        addField("Dividir em volumes (ZIP)", volumePicker)
+        form.addView(deleteOriginals, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        form.addView(separateArchives, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+
+        fun updateZipOptions() {
+            val zipSelected = formatPicker.selectedItemPosition == 0
+            encryptionPicker.isEnabled = zipSelected
+            volumePicker.isEnabled = zipSelected
+            passwordInput.isEnabled = zipSelected && encryptionPicker.selectedItemPosition > 0
+            if (!zipSelected) {
+                encryptionPicker.setSelection(0)
+                volumePicker.setSelection(0)
+                passwordInput.setText("")
+            }
+        }
+        formatPicker.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateZipOptions()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        encryptionPicker.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                passwordInput.isEnabled = formatPicker.selectedItemPosition == 0 && position > 0
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        updateZipOptions()
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(form, ScrollView.LayoutParams(-1, -2))
+        }
+        AlertDialog.Builder(this).setTitle("Criação de arquivo")
+            .setMessage("Escolhe o formato, a compressão e, para ZIP, opções de segurança e volumes.")
+            .setView(scroll)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(tr("Criar"), null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val archiveFormat = if (formatPicker.selectedItemPosition == 1) "7z" else "zip"
+                        val chosenSuffix = if (archiveFormat == "7z") ".7z" else ".zip"
+                        val encryption = encryptionNames[encryptionPicker.selectedItemPosition]
+                        val password = passwordInput.text.toString()
+                        val splitSize = if (archiveFormat == "zip") volumeBytes[volumePicker.selectedItemPosition] else 0L
+                        if (archiveFormat == "7z" && (encryption != "Nenhuma" || splitSize > 0L)) {
+                            toast("Senha e volumes divididos estão disponíveis apenas para ZIP nesta versão.")
+                            return@setOnClickListener
+                        }
+                        if (encryption != "Nenhuma" && password.isBlank()) {
+                            passwordInput.error = "Escreve uma palavra-passe."
+                            passwordInput.requestFocus()
+                            return@setOnClickListener
+                        }
+
+                        var name = input.text.toString().trim()
+                        if (name.isBlank() || !validName(name)) { toast("Nome inválido."); return@setOnClickListener }
+                        name = name.removeSuffix(".zip").removeSuffix(".7z") + chosenSuffix
+                        val sources = files.toList()
+                        val removeSources = deleteOriginals.isChecked
+                        val separate = separateArchives.isChecked
+                        compressionLevel = levelPicker.selectedItemPosition
+                        savePreferences()
+
+                        val outputFiles = if (separate) {
+                            val reserved = linkedSetOf<String>()
+                            sources.map { source ->
+                                val stem = source.nameWithoutExtension.ifBlank { source.name }
+                                var candidate = stem + chosenSuffix
+                                var index = 2
+                                while (File(currentDir, candidate).exists() || !reserved.add(candidate)) {
+                                    candidate = "$stem ($index)$chosenSuffix"
+                                    index++
+                                }
+                                File(currentDir, candidate)
+                            }
+                        } else {
+                            val unique = try { uniqueName(currentDir, name) } catch (_: Exception) {
+                                toast("Nome de destino inválido.")
+                                return@setOnClickListener
+                            }
+                            listOf(File(currentDir, unique))
+                        }
+
+                        dialog.dismiss()
+                        runTask(if (separate) "A criar arquivos separados…" else "A criar $chosenSuffix…", 0L, 1L) { meter ->
+                            val totals = measureFiles(sources) { meter.show(it) }
+                            meter.setTotals(totals.bytes, totals.entries * if (removeSources) 2L else 1L)
+                            try {
+                                if (separate) {
+                                    sources.zip(outputFiles).forEach { (source, destination) ->
+                                        meter.show(source)
+                                        if (archiveFormat == "7z") createSevenZip(listOf(source), destination, meter)
+                                        else createZip(
+                                            listOf(source), destination, meter,
+                                            password.takeIf { encryption != "Nenhuma" }, encryption, splitSize
+                                        )
+                                    }
+                                } else {
+                                    val destination = outputFiles.single()
+                                    if (archiveFormat == "7z") createSevenZip(sources, destination, meter)
+                                    else createZip(
+                                        sources, destination, meter,
+                                        password.takeIf { encryption != "Nenhuma" }, encryption, splitSize
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                outputFiles.forEach { deleteArchiveOutputs(it) }
+                                throw e
+                            }
+
+                            if (removeSources) sources.forEach { source ->
+                                meter.show(source)
+                                if (!deleteRecursively(source) { deleted -> meter.itemDone(deleted) }) {
+                                    throw IOException("Arquivo criado, mas não foi possível eliminar " + source.name)
+                                }
+                            }
+                            selected.clear()
+                            val preview = outputFiles.take(3).joinToString(", ") { it.name }
+                            val more = if (outputFiles.size > 3) " e mais ${outputFiles.size - 3}" else ""
+                            if (removeSources) "Criado(s) ${outputFiles.size} arquivo(s); originais eliminados."
+                            else "Criado(s) ${outputFiles.size} arquivo(s): $preview$more"
                         }
                     }
-                    selected.clear()
-                    if (removeSources) "Arquivo criado; originais eliminados." else "Arquivo criado: " + destination.name
                 }
-            }.show()
+                dialog.show()
+            }
     }
 
+    private fun makeSpinner(options: Array<String>, selectedIndex: Int = 0): Spinner =
+        Spinner(this).apply {
+            adapter = ArrayAdapter<String>(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                options.toList()
+            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            setSelection(selectedIndex.coerceIn(0, options.lastIndex))
+        }
     private fun compressionName(): String = when (compressionLevel) {
         0 -> "sem compressão"
         1 -> "rápida"
@@ -1392,7 +1544,18 @@ class MainActivity : Activity() {
         else -> "normal"
     }
 
-    private fun createZip(sources: List<File>, destination: File, meter: TaskProgress) {
+    private fun createZip(
+        sources: List<File>,
+        destination: File,
+        meter: TaskProgress,
+        password: String? = null,
+        encryption: String = "Nenhuma",
+        splitBytes: Long = 0L
+    ) {
+        if (!password.isNullOrBlank() || splitBytes > 0L) {
+            createZipWithZip4j(sources, destination, meter, password, encryption, splitBytes)
+            return
+        }
         ZipOutputStream(BufferedOutputStream(FileOutputStream(destination))).use { zip ->
             zip.setLevel(when (compressionLevel) {
                 0 -> java.util.zip.Deflater.NO_COMPRESSION
@@ -1404,6 +1567,140 @@ class MainActivity : Activity() {
                 if (source.canonicalFile != destination.canonicalFile) addToZip(zip, source, source.name, destination, meter)
             }
         }
+    }
+
+    private data class ZipFileSource(val file: File, val entryName: String)
+    private data class ZipFolderSource(val file: File, val entryName: String, val empty: Boolean)
+
+    private fun zip4jParameters(entryName: String? = null, encryption: String = "Nenhuma"): ZipParameters =
+        ZipParameters().apply {
+            setCompressionMethod(
+                if (compressionLevel == 0) net.lingala.zip4j.model.enums.CompressionMethod.STORE
+                else net.lingala.zip4j.model.enums.CompressionMethod.DEFLATE
+            )
+            if (compressionLevel != 0) {
+                setCompressionLevel(when (compressionLevel) {
+                    1 -> net.lingala.zip4j.model.enums.CompressionLevel.FASTEST
+                    3 -> net.lingala.zip4j.model.enums.CompressionLevel.ULTRA
+                    else -> net.lingala.zip4j.model.enums.CompressionLevel.NORMAL
+                })
+            }
+            if (entryName != null) setFileNameInZip(entryName)
+            if (encryption != "Nenhuma") {
+                setEncryptFiles(true)
+                setEncryptionMethod(
+                    if (encryption == "ZipCrypto") net.lingala.zip4j.model.enums.EncryptionMethod.ZIP_STANDARD
+                    else net.lingala.zip4j.model.enums.EncryptionMethod.AES
+                )
+                if (encryption == "AES-256") {
+                    setAesKeyStrength(net.lingala.zip4j.model.enums.AesKeyStrength.KEY_STRENGTH_256)
+                }
+            }
+        }
+
+    private fun createZipWithZip4j(
+        sources: List<File>,
+        destination: File,
+        meter: TaskProgress,
+        password: String?,
+        encryption: String,
+        splitBytes: Long
+    ) {
+        val archive = Zip4jFile(destination, password?.toCharArray())
+        archive.setRunInThread(true)
+        val parameters = zip4jParameters(encryption = encryption)
+
+        if (splitBytes > 0L) {
+            when {
+                sources.all { it.isFile } ->
+                    archive.createSplitZipFile(sources, parameters, true, splitBytes)
+                sources.size == 1 && sources[0].isDirectory ->
+                    archive.createSplitZipFileFromFolder(sources[0], parameters, true, splitBytes)
+                else -> throw IOException("Para dividir o ZIP, seleciona apenas ficheiros ou uma única pasta por arquivo.")
+            }
+            val monitor = archive.getProgressMonitor()
+            while (monitor.getState() == ProgressMonitor.State.BUSY) {
+                val current = monitor.getFileName()?.takeIf { it.isNotBlank() } ?: destination.name
+                meter.report(monitor.getPercentDone(), current)
+                Thread.sleep(120L)
+            }
+            if (monitor.getResult() == ProgressMonitor.Result.ERROR) {
+                throw IOException(monitor.getException()?.message ?: "Falha ao criar ZIP dividido.")
+            }
+            val visited = mutableListOf<File>()
+            measureFiles(sources) { visited.add(it) }
+            val totalBytes = visited.filter { it.isFile }.sumOf { it.length().coerceAtLeast(0L) }
+            if (totalBytes > 0L) meter.bytesRead(totalBytes, destination)
+            visited.forEach { meter.itemDone(it) }
+            return
+        }
+
+        val files = mutableListOf<ZipFileSource>()
+        val directories = mutableListOf<ZipFolderSource>()
+        val visited = HashSet<String>()
+        fun collect(file: File, entryName: String, depth: Int) {
+            if (depth > 80 || visited.size >= 200000) return
+            val key = pathKey(file)
+            if (!visited.add(key) || file.canonicalFile == destination.canonicalFile) return
+            if (file.isDirectory) {
+                val children = safeList(file)
+                directories.add(ZipFolderSource(file, entryName, children.isEmpty()))
+                children.forEach { child -> collect(child, entryName.trimEnd('/') + "/" + child.name, depth + 1) }
+            } else {
+                files.add(ZipFileSource(file, entryName))
+            }
+        }
+        sources.forEach { source -> collect(source, source.name, 0) }
+
+        val totalBytes = files.sumOf { it.file.length().coerceAtLeast(0L) }
+        var completedBytes = 0L
+        files.forEach { entry ->
+            val entryParameters = zip4jParameters(entry.entryName, encryption)
+            archive.addFile(entry.file, entryParameters)
+            val monitor = archive.getProgressMonitor()
+            var lastReported = 0L
+            while (monitor.getState() == ProgressMonitor.State.BUSY) {
+                val percent = monitor.getPercentDone().coerceIn(0, 100)
+                val estimated = (entry.file.length().toDouble() * percent / 100.0).toLong()
+                val delta = (estimated - lastReported).coerceAtLeast(0L)
+                if (delta > 0L) {
+                    meter.bytesRead(delta, entry.file)
+                    lastReported = estimated
+                } else {
+                    meter.show(entry.file)
+                }
+                Thread.sleep(100L)
+            }
+            if (monitor.getResult() == ProgressMonitor.Result.ERROR) {
+                throw IOException(monitor.getException()?.message ?: "Falha ao comprimir " + entry.file.name)
+            }
+            val remaining = (entry.file.length() - lastReported).coerceAtLeast(0L)
+            if (remaining > 0L) meter.bytesRead(remaining, entry.file)
+            completedBytes += entry.file.length().coerceAtLeast(0L)
+            meter.itemDone(entry.file)
+        }
+
+        directories.filter { it.empty }.forEach { directory ->
+            val folderParams = zip4jParameters(directory.entryName.trimEnd('/') + "/", "Nenhuma").apply {
+                setCompressionMethod(net.lingala.zip4j.model.enums.CompressionMethod.STORE)
+                setSourceExternalStream(true)
+            }
+            archive.addStream(java.io.ByteArrayInputStream(ByteArray(0)), folderParams)
+            meter.itemDone(directory.file)
+        }
+        directories.filterNot { it.empty }.forEach { meter.itemDone(it.file) }
+        if (files.isEmpty() && directories.isEmpty()) throw IOException("Não existem ficheiros para adicionar ao ZIP.")
+        if (completedBytes < totalBytes) meter.bytesRead(totalBytes - completedBytes, destination)
+    }
+
+    private fun deleteArchiveOutputs(destination: File) {
+        destination.delete()
+        val parent = destination.parentFile ?: return
+        val stem = destination.nameWithoutExtension
+        val splitPattern = Regex(Regex.escape(stem) + "\\.z[0-9]{2,3}")
+        safeList(parent).filter { candidate ->
+            candidate.name == destination.name || splitPattern.matches(candidate.name)
+        }.forEach { it.delete() }
     }
 
     private fun addToZip(zip: ZipOutputStream, source: File, entryName: String, destination: File, meter: TaskProgress) {
@@ -1910,6 +2207,10 @@ class MainActivity : Activity() {
             val done = completedBytes + completedEntries
             return ((done.toDouble() / totalUnits.toDouble()) * 100.0).toInt().coerceIn(0, 99)
         }
+
+        @Synchronized
+        fun report(percent: Int, detail: String) =
+            publish(percent.coerceIn(0, 99), "${completedEntries.coerceAtMost(totalEntries)}/${totalEntries}  •  $detail")
 
         fun finish(detail: String) = publish(100, detail)
     }
