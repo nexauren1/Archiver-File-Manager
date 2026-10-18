@@ -3004,6 +3004,8 @@ class MainActivity : Activity() {
         }
         val title = label("Escolhe uma cor para esta pasta", 13, mutedTextColor(), false)
         content.addView(title, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        val dialog = AlertDialog.Builder(this).setTitle(tr("Cor da pasta")).setView(content)
+            .setNegativeButton(tr("Cancelar"), null).create()
         val grid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
         options.forEach { (name, color) ->
             val cell = LinearLayout(this).apply {
@@ -3042,8 +3044,6 @@ class MainActivity : Activity() {
             grid.addView(cell, lp)
         }
         content.addView(grid, LinearLayout.LayoutParams(-1, -2))
-        val dialog = AlertDialog.Builder(this).setTitle(tr("Cor da pasta")).setView(content)
-            .setNegativeButton(tr("Cancelar"), null).create()
         dialog.show()
     }
 
