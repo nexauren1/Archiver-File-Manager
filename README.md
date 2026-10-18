@@ -14,7 +14,7 @@ Archiver is a native Android file manager written in Kotlin. It is an independen
 - File-type icons, image thumbnails and optional PDF/video/music/APK previews.
 - Built-in UTF-8 text editor for common files up to 4 MiB.
 - GLB/GLTF metadata inspector; interactive 3D rendering is handed off to a compatible external viewer.
-- Nine selectable interface languages: Portuguese, English, Spanish, French, German, Simplified Chinese, Hindi, Arabic and Japanese. Arabic uses a right-to-left layout. Translation coverage is being expanded screen by screen.
+- Twelve selectable interface languages: Portuguese, English, Spanish, French, German, Simplified Chinese, Hindi, Arabic, Japanese, Russian, Bengali and Indonesian. Arabic uses a right-to-left layout. Navigation, common file actions, search filters, theme controls and sharing prompts have localized labels; uncommon diagnostic strings may still fall back to English.
 - Theme presets with a visual preview (Dark, OLED black and Light), clearer accent-color selection, custom folder colors and thumbnail preferences.
 - Optional one-time invitation asking the user to share the app.
 
