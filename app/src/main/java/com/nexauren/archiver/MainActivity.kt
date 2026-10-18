@@ -1157,6 +1157,17 @@ class MainActivity : Activity() {
             addView(previous, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) })
             addView(next, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
         }
+        var zoom = 1f
+        val zoomControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val zoomOut = Button(this).apply { text = "−"; isAllCaps = false; contentDescription = "Diminuir zoom" }
+        val zoomIn = Button(this).apply { text = "+"; isAllCaps = false; contentDescription = "Aumentar zoom" }
+        val zoomReset = Button(this).apply { text = "100%"; isAllCaps = false; contentDescription = "Repor zoom" }
+        zoomControls.addView(zoomOut, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(4) })
+        zoomControls.addView(zoomReset, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(4) })
+        zoomControls.addView(zoomIn, LinearLayout.LayoutParams(0, dp(42), 1f))
         val scroll = ScrollView(this).apply {
             isFillViewport = false
             addView(image, FrameLayout.LayoutParams(-1, -2))
@@ -1168,7 +1179,8 @@ class MainActivity : Activity() {
                 bottomMargin = dp(6); leftMargin = dp(4); rightMargin = dp(4)
             })
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(controls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+            addView(zoomControls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+            addView(controls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         }
         var dialog: AlertDialog? = null
         var requestedPage = 0
@@ -1206,6 +1218,8 @@ class MainActivity : Activity() {
                         pageCount = count
                         if (rendered != null) {
                             image.setImageBitmap(rendered)
+                            image.scaleX = zoom
+                            image.scaleY = zoom
                             status.text = "${index + 1} / ${pageCount}"
                             previous.isEnabled = index > 0
                             next.isEnabled = index + 1 < pageCount
@@ -1227,6 +1241,9 @@ class MainActivity : Activity() {
         dialog = builtDialog
         previous.setOnClickListener { if (requestedPage > 0) renderPage(requestedPage - 1) }
         next.setOnClickListener { if (requestedPage + 1 < pageCount) renderPage(requestedPage + 1) }
+        zoomIn.setOnClickListener { zoom = (zoom * 1.25f).coerceAtMost(4f); image.scaleX = zoom; image.scaleY = zoom; zoomReset.text = "${(zoom * 100).toInt()}%" }
+        zoomOut.setOnClickListener { zoom = (zoom / 1.25f).coerceAtLeast(0.5f); image.scaleX = zoom; image.scaleY = zoom; zoomReset.text = "${(zoom * 100).toInt()}%" }
+        zoomReset.setOnClickListener { zoom = 1f; image.scaleX = 1f; image.scaleY = 1f; zoomReset.text = "100%" }
         builtDialog.setOnDismissListener { image.setImageDrawable(null) }
         builtDialog.show()
         renderPage(0)
@@ -1239,6 +1256,19 @@ class MainActivity : Activity() {
             setBackgroundColor(pageBackgroundColor())
         }
         val status = label("A carregar imagem…", 13, mutedTextColor(), false)
+        var zoom = 1f
+        val imageControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val zoomOut = Button(this).apply { text = "−"; isAllCaps = false; contentDescription = "Diminuir zoom" }
+        val zoomIn = Button(this).apply { text = "+"; isAllCaps = false; contentDescription = "Aumentar zoom" }
+        val rotate = Button(this).apply { text = "↻"; isAllCaps = false; contentDescription = "Rodar imagem" }
+        val reset = Button(this).apply { text = "1:1"; isAllCaps = false; contentDescription = "Repor visualização" }
+        imageControls.addView(zoomOut, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
+        imageControls.addView(zoomIn, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
+        imageControls.addView(rotate, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
+        imageControls.addView(reset, LinearLayout.LayoutParams(0, dp(42), 1f))
         val scroll = ScrollView(this).apply {
             isFillViewport = false
             addView(image, FrameLayout.LayoutParams(-1, -2))
@@ -1249,6 +1279,7 @@ class MainActivity : Activity() {
             addView(status, LinearLayout.LayoutParams(-1, -2).apply {
                 bottomMargin = dp(6); leftMargin = dp(4)
             })
+            addView(imageControls, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         }
         val dialog = AlertDialog.Builder(this)
@@ -1258,6 +1289,10 @@ class MainActivity : Activity() {
             .setNegativeButton(tr("Fechar"), null)
             .create()
         var decoded: Bitmap? = null
+        zoomIn.setOnClickListener { zoom = (zoom * 1.25f).coerceAtMost(4f); image.scaleX = zoom; image.scaleY = zoom; reset.text = "${(zoom * 100).toInt()}%" }
+        zoomOut.setOnClickListener { zoom = (zoom / 1.25f).coerceAtLeast(0.5f); image.scaleX = zoom; image.scaleY = zoom; reset.text = "${(zoom * 100).toInt()}%" }
+        rotate.setOnClickListener { image.rotation = (image.rotation + 90f) % 360f }
+        reset.setOnClickListener { zoom = 1f; image.scaleX = 1f; image.scaleY = 1f; image.rotation = 0f; reset.text = "1:1" }
         dialog.setOnDismissListener {
             image.setImageDrawable(null)
             decoded?.let { if (!it.isRecycled) it.recycle() }
