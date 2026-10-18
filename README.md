@@ -12,6 +12,7 @@ A lightweight Android file manager project focused on practical file operations 
 - Optional on-device thumbnails for images, PDF pages, video frames, music album art, and APK icons.
 - Create folders and empty files, open/share files, and inspect item information.
 - Rename, recursively delete, copy, move, and paste files/folders, with safeguards against recursive copies and name collisions.
+- Save persistent file/folder favorites and navigate to them later, including favorites from other selected folders.
 - Create ZIP archives with store, fast, normal, or ultra compression.
 - Create and extract 7z archives; test ZIP and 7z contents for common read/CRC errors.
 - Optionally delete source items only after archive creation succeeds.
