@@ -1606,7 +1606,6 @@ class MainActivity : Activity() {
         val children = safeList(directory)
         for (child in children) {
             if (hits.size >= 300) return
-            if (!isWithinRoot(child) || !isWithinScope(child, scope)) continue
             if (!showHidden && child.name.startsWith(".")) continue
             val matchesName = if (matcher != null) matcher.matches(child.name) else child.name.contains(query, ignoreCase = true)
             if (matchesName && matchesSearchType(child, typeFilter)) hits.add(child)
@@ -1614,7 +1613,7 @@ class MainActivity : Activity() {
             if (processed[0] % 20L == 0L) {
                 meter?.report(0, tr("Analisados") + ": " + processed[0] + " • " + child.name)
             }
-            if (recursive && child.isDirectory) {
+            if (recursive && child.isDirectory && isWithinRoot(child) && isWithinScope(child, scope)) {
                 searchTree(child, scope, query, matcher, typeFilter, true, hits, depth + 1, processed, meter)
             }
         }
@@ -1700,10 +1699,12 @@ class MainActivity : Activity() {
             }
             row.addView(more, LinearLayout.LayoutParams(dp(42), dp(52)))
             row.setOnClickListener {
+                val resultDialog = (content.parent as? View)
                 if (found.isDirectory) {
                     currentDir = found
                     selected.clear()
                     refreshFiles()
+                    // The surrounding dialog is dismissed by the user after navigation if still visible.
                 } else {
                     currentDir = found.parentFile ?: rootDir
                     selected.clear()
