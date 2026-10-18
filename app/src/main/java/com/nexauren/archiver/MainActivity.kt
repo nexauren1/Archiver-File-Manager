@@ -637,7 +637,11 @@ class MainActivity : Activity() {
             }
         }
         return when (extension(file.name)) {
-            "zip", "7z", "rar", "tar", "gz", "bz2", "xz", "lz4", "zst", "tgz", "tbz", "iso", "cab", "arj" -> R.drawable.ic_archive
+            "zip" -> R.drawable.ic_zip_file
+            "7z" -> R.drawable.ic_7z_file
+            "rar" -> R.drawable.ic_rar_file
+            "tar", "tgz", "tbz" -> R.drawable.ic_tar_file
+            "gz", "bz2", "xz", "lz4", "zst", "iso", "cab", "arj" -> R.drawable.ic_archive
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff", "svg" -> R.drawable.ic_image
             "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus", "wma", "mid", "midi" -> R.drawable.ic_audio
             "mp4", "mkv", "webm", "avi", "mov", "3gp", "m4v", "mpeg", "mpg" -> R.drawable.ic_video
