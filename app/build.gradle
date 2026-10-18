@@ -37,4 +37,5 @@ android {
 dependencies {
     implementation 'androidx.core:core:1.16.0'
     implementation 'org.apache.commons:commons-compress:1.28.0'
+    implementation 'net.lingala.zip4j:zip4j:2.11.6'
 }
