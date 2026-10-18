@@ -25,6 +25,8 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
@@ -47,6 +49,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
@@ -379,13 +382,15 @@ class MainActivity : Activity() {
         body.addView(scroll, FrameLayout.LayoutParams(-1, -1))
 
         val fab = ImageButton(this).apply {
-            setImageResource(R.drawable.ic_add)
-            contentDescription = "Criar ficheiro ou arquivo"
-            background = roundedBackground(0xFFB8B5FF.toInt(), 28)
+            setImageResource(if (clipboard.isNotEmpty()) R.drawable.ic_paste else R.drawable.ic_add)
+            contentDescription = if (clipboard.isNotEmpty()) tr("Colar aqui") else tr("Criar pasta ou ficheiro")
+            background = roundedBackground(accentColor(), 28)
             scaleType = ImageView.ScaleType.CENTER
             setPadding(dp(16), dp(16), dp(16), dp(16))
             elevation = dp(8).toFloat()
-            setOnClickListener { showCreateMenu() }
+            setOnClickListener {
+                if (clipboard.isNotEmpty()) paste() else showCreateMenu()
+            }
         }
         val fabParams = FrameLayout.LayoutParams(dp(58), dp(58), Gravity.END or Gravity.BOTTOM)
         fabParams.setMargins(0, 0, dp(20), dp(20))
@@ -516,7 +521,15 @@ class MainActivity : Activity() {
         val bar = selectionBar ?: return
         val hasSelection = selected.isNotEmpty()
         bar.visibility = if (hasSelection) View.VISIBLE else View.GONE
-        addFab?.visibility = if (hasSelection) View.GONE else View.VISIBLE
+        addFab?.let { fab ->
+            fab.visibility = if (hasSelection) View.GONE else View.VISIBLE
+            val canPaste = clipboard.isNotEmpty()
+            fab.setImageResource(if (canPaste) R.drawable.ic_paste else R.drawable.ic_add)
+            fab.contentDescription = if (canPaste) {
+                tr(if (clipboardIsCut) "Mover para esta pasta — Colar" else "Copiar para esta pasta — Colar")
+            } else tr("Criar pasta ou ficheiro")
+            fab.background = roundedBackground(if (canPaste) 0xFF66BB6A.toInt() else accentColor(), 28)
+        }
     }
 
     private fun safeList(dir: File): List<File> {
@@ -889,8 +902,8 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escolhe entre escuro, preto OLED e claro") { showThemeMenu() }
                 addSettingChoice(content, "Cor de destaque", tr(accentName), "Cor dos botões, seleção e indicadores") { showAccentMenu() }
                 addSettingSwitch(content, "Animações suaves", "Efeitos leves ao apresentar ficheiros", showAnimations) { showAnimations = it }
-                addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor no menu de cada pasta") {
-                    toast("Abre o menu de uma pasta e escolhe Cor da pasta.")
+                addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor para uma pasta") {
+                    showFolderColorFolderPicker()
                 }
             }
             "Explorador" -> {
@@ -1144,6 +1157,17 @@ class MainActivity : Activity() {
             addView(previous, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) })
             addView(next, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
         }
+        var zoom = 1f
+        val zoomControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val zoomOut = Button(this).apply { text = "−"; isAllCaps = false; contentDescription = "Diminuir zoom" }
+        val zoomIn = Button(this).apply { text = "+"; isAllCaps = false; contentDescription = "Aumentar zoom" }
+        val zoomReset = Button(this).apply { text = "100%"; isAllCaps = false; contentDescription = "Repor zoom" }
+        zoomControls.addView(zoomOut, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(4) })
+        zoomControls.addView(zoomReset, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(4) })
+        zoomControls.addView(zoomIn, LinearLayout.LayoutParams(0, dp(42), 1f))
         val scroll = ScrollView(this).apply {
             isFillViewport = false
             addView(image, FrameLayout.LayoutParams(-1, -2))
@@ -1155,7 +1179,8 @@ class MainActivity : Activity() {
                 bottomMargin = dp(6); leftMargin = dp(4); rightMargin = dp(4)
             })
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(controls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+            addView(zoomControls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+            addView(controls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         }
         var dialog: AlertDialog? = null
         var requestedPage = 0
@@ -1193,6 +1218,8 @@ class MainActivity : Activity() {
                         pageCount = count
                         if (rendered != null) {
                             image.setImageBitmap(rendered)
+                            image.scaleX = zoom
+                            image.scaleY = zoom
                             status.text = "${index + 1} / ${pageCount}"
                             previous.isEnabled = index > 0
                             next.isEnabled = index + 1 < pageCount
@@ -1214,6 +1241,9 @@ class MainActivity : Activity() {
         dialog = builtDialog
         previous.setOnClickListener { if (requestedPage > 0) renderPage(requestedPage - 1) }
         next.setOnClickListener { if (requestedPage + 1 < pageCount) renderPage(requestedPage + 1) }
+        zoomIn.setOnClickListener { zoom = (zoom * 1.25f).coerceAtMost(4f); image.scaleX = zoom; image.scaleY = zoom; zoomReset.text = "${(zoom * 100).toInt()}%" }
+        zoomOut.setOnClickListener { zoom = (zoom / 1.25f).coerceAtLeast(0.5f); image.scaleX = zoom; image.scaleY = zoom; zoomReset.text = "${(zoom * 100).toInt()}%" }
+        zoomReset.setOnClickListener { zoom = 1f; image.scaleX = 1f; image.scaleY = 1f; zoomReset.text = "100%" }
         builtDialog.setOnDismissListener { image.setImageDrawable(null) }
         builtDialog.show()
         renderPage(0)
@@ -1226,6 +1256,19 @@ class MainActivity : Activity() {
             setBackgroundColor(pageBackgroundColor())
         }
         val status = label("A carregar imagem…", 13, mutedTextColor(), false)
+        var zoom = 1f
+        val imageControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val zoomOut = Button(this).apply { text = "−"; isAllCaps = false; contentDescription = "Diminuir zoom" }
+        val zoomIn = Button(this).apply { text = "+"; isAllCaps = false; contentDescription = "Aumentar zoom" }
+        val rotate = Button(this).apply { text = "↻"; isAllCaps = false; contentDescription = "Rodar imagem" }
+        val reset = Button(this).apply { text = "1:1"; isAllCaps = false; contentDescription = "Repor visualização" }
+        imageControls.addView(zoomOut, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
+        imageControls.addView(zoomIn, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
+        imageControls.addView(rotate, LinearLayout.LayoutParams(0, dp(42), 1f).apply { rightMargin = dp(3) })
+        imageControls.addView(reset, LinearLayout.LayoutParams(0, dp(42), 1f))
         val scroll = ScrollView(this).apply {
             isFillViewport = false
             addView(image, FrameLayout.LayoutParams(-1, -2))
@@ -1236,6 +1279,7 @@ class MainActivity : Activity() {
             addView(status, LinearLayout.LayoutParams(-1, -2).apply {
                 bottomMargin = dp(6); leftMargin = dp(4)
             })
+            addView(imageControls, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         }
         val dialog = AlertDialog.Builder(this)
@@ -1245,6 +1289,10 @@ class MainActivity : Activity() {
             .setNegativeButton(tr("Fechar"), null)
             .create()
         var decoded: Bitmap? = null
+        zoomIn.setOnClickListener { zoom = (zoom * 1.25f).coerceAtMost(4f); image.scaleX = zoom; image.scaleY = zoom; reset.text = "${(zoom * 100).toInt()}%" }
+        zoomOut.setOnClickListener { zoom = (zoom / 1.25f).coerceAtLeast(0.5f); image.scaleX = zoom; image.scaleY = zoom; reset.text = "${(zoom * 100).toInt()}%" }
+        rotate.setOnClickListener { image.rotation = (image.rotation + 90f) % 360f }
+        reset.setOnClickListener { zoom = 1f; image.scaleX = 1f; image.scaleY = 1f; image.rotation = 0f; reset.text = "1:1" }
         dialog.setOnDismissListener {
             image.setImageDrawable(null)
             decoded?.let { if (!it.isRecycled) it.recycle() }
@@ -1283,6 +1331,7 @@ class MainActivity : Activity() {
 
     private fun showAudioPlayer(file: File) {
         val status = label("A preparar áudio…", 14, mutedTextColor(), false)
+        val seek = SeekBar(this).apply { max = 1000; isEnabled = false; contentDescription = tr("Posição do áudio") }
         val play = Button(this).apply { text = tr("Reproduzir"); isAllCaps = false; isEnabled = false }
         val stop = Button(this).apply { text = tr("Parar"); isAllCaps = false; isEnabled = false }
         val controls = LinearLayout(this).apply {
@@ -1291,11 +1340,18 @@ class MainActivity : Activity() {
             addView(play, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(6) })
             addView(stop, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(6) })
         }
+        val backgroundPlay = Button(this).apply {
+            text = tr("Continuar em segundo plano")
+            isAllCaps = false
+            isEnabled = false
+        }
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(16), dp(20), dp(8))
-            addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+            addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+            addView(seek, LinearLayout.LayoutParams(-1, dp(42)))
             addView(controls, LinearLayout.LayoutParams(-1, -2))
+            addView(backgroundPlay, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         }
         val dialog = AlertDialog.Builder(this)
             .setTitle(tr("Leitor de áudio") + " — " + file.name)
@@ -1304,7 +1360,53 @@ class MainActivity : Activity() {
             .setNegativeButton(tr("Fechar"), null)
             .create()
         val player = MediaPlayer()
+        val progressHandler = Handler(Looper.getMainLooper())
         var prepared = false
+        var dragging = false
+        var handedOffToService = false
+        val progressUpdate = object : Runnable {
+            override fun run() {
+                if (prepared && player.isPlaying && !dragging) {
+                    val duration = player.duration.coerceAtLeast(1)
+                    seek.max = duration
+                    seek.progress = player.currentPosition.coerceIn(0, duration)
+                    val current = (player.currentPosition / 1000).coerceAtLeast(0)
+                    val total = (duration / 1000).coerceAtLeast(0)
+                    status.text = "${current / 60}:${(current % 60).toString().padStart(2, '0')} / ${total / 60}:${(total % 60).toString().padStart(2, '0')}"
+                }
+                if (dialog.isShowing && prepared && !handedOffToService) progressHandler.postDelayed(this, 400L)
+            }
+        }
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                if (fromUser && prepared) {
+                    val seconds = (value / 1000).coerceAtLeast(0)
+                    status.text = "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+                }
+            }
+            override fun onStartTrackingTouch(bar: SeekBar?) { dragging = true }
+            override fun onStopTrackingTouch(bar: SeekBar?) {
+                if (prepared && bar != null) runCatching { player.seekTo(bar.progress) }
+                dragging = false
+            }
+        })
+        backgroundPlay.setOnClickListener {
+            if (!prepared) return@setOnClickListener
+            try {
+                runCatching { if (player.isPlaying) player.stop() }
+                runCatching { player.release() }
+                prepared = false
+                handedOffToService = true
+                val intent = Intent(this, AudioPlaybackService::class.java)
+                    .setAction(AudioPlaybackService.ACTION_PLAY)
+                    .putExtra(AudioPlaybackService.EXTRA_PATH, file.absolutePath)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                dialog.dismiss()
+                toast("O áudio continua a tocar em segundo plano. Usa a notificação para parar.")
+            } catch (e: Exception) {
+                toast("Não foi possível iniciar a reprodução em segundo plano: " + (e.message ?: ""))
+            }
+        }
         play.setOnClickListener {
             if (!prepared) return@setOnClickListener
             try {
@@ -1328,8 +1430,13 @@ class MainActivity : Activity() {
             prepared = true
             play.isEnabled = true
             stop.isEnabled = true
+            backgroundPlay.isEnabled = true
+            seek.isEnabled = true
+            seek.max = preparedPlayer.duration.coerceAtLeast(1)
+            seek.progress = 0
             val seconds = (preparedPlayer.duration / 1000).coerceAtLeast(0)
-            status.text = tr("Pronto") + " • ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+            status.text = "0:00 / ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+            progressHandler.post(progressUpdate)
         }
         player.setOnCompletionListener {
             play.text = tr("Reproduzir")
@@ -1342,8 +1449,11 @@ class MainActivity : Activity() {
             true
         }
         dialog.setOnDismissListener {
-            runCatching { if (player.isPlaying) player.stop() }
-            runCatching { player.release() }
+            progressHandler.removeCallbacks(progressUpdate)
+            if (!handedOffToService) {
+                runCatching { if (player.isPlaying) player.stop() }
+                runCatching { player.release() }
+            }
         }
         dialog.show()
         try {
@@ -3641,6 +3751,7 @@ class MainActivity : Activity() {
             "Reproduzir" to "Play",
             "Pausar" to "Pause",
             "Parar" to "Stop",
+            "Selecionar idioma" to "Select language", "Toca diretamente no idioma que queres usar." to "Tap the language you want to use.", "Colar aqui" to "Paste here", "Criar pasta ou ficheiro" to "Create folder or file", "Mover para esta pasta — Colar" to "Move to this folder — Paste", "Copiar para esta pasta — Colar" to "Copy to this folder — Paste", "Escolher pasta" to "Choose folder", "Cor da pasta reposta." to "Folder color reset.", "Cor da pasta alterada." to "Folder color changed.", "Usar a cor normal" to "Use default color", "Aplicar a cor " to "Apply color ", "Continuar em segundo plano" to "Continue in background", "Posição do áudio" to "Audio position", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "Audio will keep playing in the background. Use the notification to stop it.", "Não foi possível iniciar a reprodução em segundo plano: " to "Could not start background playback: ",
             "Pronto" to "Ready",
             "Anterior" to "Previous",
             "Seguinte" to "Next",
@@ -4284,8 +4395,21 @@ class MainActivity : Activity() {
             "id" -> mapOf("Animações suaves" to "Animasi halus", "Efeitos leves ao apresentar ficheiros" to "Efek ringan saat menampilkan berkas", "Leitor de PDF" to "Pembaca PDF", "Leitor de áudio" to "Pemutar audio", "A abrir PDF…" to "Membuka PDF…", "A carregar imagem…" to "Memuat gambar…", "Pré-visualização da imagem" to "Pratinjau gambar", "Não foi possível abrir PDF." to "PDF tidak dapat dibuka.", "Não foi possível abrir a imagem." to "Gambar tidak dapat dibuka.", "Ficheiro de imagem inválido." to "Berkas gambar tidak valid.", "A preparar áudio…" to "Menyiapkan audio…", "Não foi possível reproduzir o áudio." to "Audio tidak dapat diputar.", "Reprodução concluída." to "Pemutaran selesai.", "Reproduzir" to "Putar", "Pausar" to "Jeda", "Parar" to "Berhenti", "Pronto" to "Siap", "Anterior" to "Sebelumnya", "Seguinte" to "Berikutnya", "Extrair pasta atual" to "Ekstrak folder saat ini", "Extrair item" to "Ekstrak item", "para a pasta atual" to "ke folder saat ini", "Extrair" to "Ekstrak")
             else -> emptyMap()
         }
+        val uxTranslations = when (appLanguage) {
+            "es" -> mapOf("Selecionar idioma" to "Seleccionar idioma", "Toca diretamente no idioma que queres usar." to "Toca el idioma que quieres usar.", "Colar aqui" to "Pegar aquí", "Criar pasta ou ficheiro" to "Crear carpeta o archivo", "Mover para esta pasta — Colar" to "Mover a esta carpeta — Pegar", "Copiar para esta pasta — Colar" to "Copiar a esta carpeta — Pegar", "Escolher pasta" to "Elegir carpeta", "Cor da pasta reposta." to "Color de carpeta restablecido.", "Cor da pasta alterada." to "Color de carpeta cambiado.", "Usar a cor normal" to "Usar color predeterminado", "Aplicar a cor " to "Aplicar color ", "Continuar em segundo plano" to "Continuar en segundo plano", "Posição do áudio" to "Posición del audio", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "El audio seguirá reproduciéndose en segundo plano. Usa la notificación para detenerlo.")
+            "fr" -> mapOf("Selecionar idioma" to "Choisir la langue", "Toca diretamente no idioma que queres usar." to "Touchez la langue à utiliser.", "Colar aqui" to "Coller ici", "Criar pasta ou ficheiro" to "Créer un dossier ou un fichier", "Mover para esta pasta — Colar" to "Déplacer ici — Coller", "Copiar para esta pasta — Colar" to "Copier ici — Coller", "Escolher pasta" to "Choisir un dossier", "Cor da pasta reposta." to "Couleur du dossier réinitialisée.", "Cor da pasta alterada." to "Couleur du dossier modifiée.", "Usar a cor normal" to "Utiliser la couleur par défaut", "Aplicar a cor " to "Appliquer la couleur ", "Continuar em segundo plano" to "Continuer en arrière-plan", "Posição do áudio" to "Position audio", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "L’audio continuera en arrière-plan. Utilisez la notification pour l’arrêter.")
+            "de" -> mapOf("Selecionar idioma" to "Sprache auswählen", "Toca diretamente no idioma que queres usar." to "Tippe auf die gewünschte Sprache.", "Colar aqui" to "Hier einfügen", "Criar pasta ou ficheiro" to "Ordner oder Datei erstellen", "Mover para esta pasta — Colar" to "In diesen Ordner verschieben — Einfügen", "Copiar para esta pasta — Colar" to "In diesen Ordner kopieren — Einfügen", "Escolher pasta" to "Ordner auswählen", "Cor da pasta reposta." to "Ordnerfarbe zurückgesetzt.", "Cor da pasta alterada." to "Ordnerfarbe geändert.", "Usar a cor normal" to "Standardfarbe verwenden", "Aplicar a cor " to "Farbe anwenden: ", "Continuar em segundo plano" to "Im Hintergrund fortsetzen", "Posição do áudio" to "Audioposition", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "Audio wird im Hintergrund weitergespielt. Über die Benachrichtigung stoppen.")
+            "zh" -> mapOf("Selecionar idioma" to "选择语言", "Toca diretamente no idioma que queres usar." to "点击要使用的语言。", "Colar aqui" to "粘贴到这里", "Criar pasta ou ficheiro" to "新建文件夹或文件", "Mover para esta pasta — Colar" to "移动到此文件夹 — 粘贴", "Copiar para esta pasta — Colar" to "复制到此文件夹 — 粘贴", "Escolher pasta" to "选择文件夹", "Cor da pasta reposta." to "文件夹颜色已重置。", "Cor da pasta alterada." to "文件夹颜色已更改。", "Usar a cor normal" to "使用默认颜色", "Aplicar a cor " to "应用颜色", "Continuar em segundo plano" to "在后台继续播放", "Posição do áudio" to "音频位置", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "音频将在后台继续播放。请使用通知停止。")
+            "hi" -> mapOf("Selecionar idioma" to "भाषा चुनें", "Toca diretamente no idioma que queres usar." to "जिस भाषा का उपयोग करना है उस पर टैप करें।", "Colar aqui" to "यहाँ पेस्ट करें", "Criar pasta ou ficheiro" to "फ़ोल्डर या फ़ाइल बनाएँ", "Mover para esta pasta — Colar" to "इस फ़ोल्डर में ले जाएँ — पेस्ट", "Copiar para esta pasta — Colar" to "इस फ़ोल्डर में कॉपी करें — पेस्ट", "Escolher pasta" to "फ़ोल्डर चुनें", "Cor da pasta reposta." to "फ़ोल्डर का रंग रीसेट किया गया।", "Cor da pasta alterada." to "फ़ोल्डर का रंग बदल गया।", "Usar a cor normal" to "डिफ़ॉल्ट रंग उपयोग करें", "Aplicar a cor " to "रंग लागू करें ", "Continuar em segundo plano" to "बैकग्राउंड में जारी रखें", "Posição do áudio" to "ऑडियो की स्थिति", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "ऑडियो बैकग्राउंड में चलता रहेगा। रोकने के लिए नोटिफ़िकेशन का उपयोग करें।")
+            "ar" -> mapOf("Selecionar idioma" to "اختيار اللغة", "Toca diretamente no idioma que queres usar." to "اضغط على اللغة التي تريد استخدامها.", "Colar aqui" to "لصق هنا", "Criar pasta ou ficheiro" to "إنشاء مجلد أو ملف", "Mover para esta pasta — Colar" to "نقل إلى هذا المجلد — لصق", "Copiar para esta pasta — Colar" to "نسخ إلى هذا المجلد — لصق", "Escolher pasta" to "اختيار مجلد", "Cor da pasta reposta." to "تمت إعادة تعيين لون المجلد.", "Cor da pasta alterada." to "تم تغيير لون المجلد.", "Usar a cor normal" to "استخدام اللون الافتراضي", "Aplicar a cor " to "تطبيق اللون ", "Continuar em segundo plano" to "المتابعة في الخلفية", "Posição do áudio" to "موضع الصوت", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "سيستمر الصوت في الخلفية. استخدم الإشعار لإيقافه.")
+            "ja" -> mapOf("Selecionar idioma" to "言語を選択", "Toca diretamente no idioma que queres usar." to "使用する言語をタップしてください。", "Colar aqui" to "ここに貼り付け", "Criar pasta ou ficheiro" to "フォルダーまたはファイルを作成", "Mover para esta pasta — Colar" to "このフォルダーに移動 — 貼り付け", "Copiar para esta pasta — Colar" to "このフォルダーにコピー — 貼り付け", "Escolher pasta" to "フォルダーを選択", "Cor da pasta reposta." to "フォルダーの色をリセットしました。", "Cor da pasta alterada." to "フォルダーの色を変更しました。", "Usar a cor normal" to "既定の色を使用", "Aplicar a cor " to "色を適用: ", "Continuar em segundo plano" to "バックグラウンドで続行", "Posição do áudio" to "音声位置", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "音声はバックグラウンドで再生されます。通知から停止できます。")
+            "ru" -> mapOf("Selecionar idioma" to "Выбрать язык", "Toca diretamente no idioma que queres usar." to "Нажмите на нужный язык.", "Colar aqui" to "Вставить сюда", "Criar pasta ou ficheiro" to "Создать папку или файл", "Mover para esta pasta — Colar" to "Переместить сюда — Вставить", "Copiar para esta pasta — Colar" to "Копировать сюда — Вставить", "Escolher pasta" to "Выбрать папку", "Cor da pasta reposta." to "Цвет папки сброшен.", "Cor da pasta alterada." to "Цвет папки изменён.", "Usar a cor normal" to "Цвет по умолчанию", "Aplicar a cor " to "Применить цвет ", "Continuar em segundo plano" to "Продолжить в фоне", "Posição do áudio" to "Позиция аудио", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "Аудио продолжит играть в фоне. Остановите его через уведомление.")
+            "bn" -> mapOf("Selecionar idioma" to "ভাষা নির্বাচন করুন", "Toca diretamente no idioma que queres usar." to "যে ভাষাটি ব্যবহার করতে চান সেটিতে ট্যাপ করুন।", "Colar aqui" to "এখানে পেস্ট করুন", "Criar pasta ou ficheiro" to "ফোল্ডার বা ফাইল তৈরি করুন", "Mover para esta pasta — Colar" to "এই ফোল্ডারে সরান — পেস্ট", "Copiar para esta pasta — Colar" to "এই ফোল্ডারে কপি — পেস্ট", "Escolher pasta" to "ফোল্ডার নির্বাচন করুন", "Cor da pasta reposta." to "ফোল্ডারের রং রিসেট হয়েছে।", "Cor da pasta alterada." to "ফোল্ডারের রং পরিবর্তিত হয়েছে।", "Usar a cor normal" to "ডিফল্ট রং ব্যবহার করুন", "Aplicar a cor " to "রং প্রয়োগ করুন ", "Continuar em segundo plano" to "ব্যাকগ্রাউন্ডে চালিয়ে যান", "Posição do áudio" to "অডিওর অবস্থান", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "অডিও ব্যাকগ্রাউন্ডে চলবে। থামাতে নোটিফিকেশন ব্যবহার করুন।")
+            "id" -> mapOf("Selecionar idioma" to "Pilih bahasa", "Toca diretamente no idioma que queres usar." to "Ketuk bahasa yang ingin digunakan.", "Colar aqui" to "Tempel di sini", "Criar pasta ou ficheiro" to "Buat folder atau berkas", "Mover para esta pasta — Colar" to "Pindahkan ke folder ini — Tempel", "Copiar para esta pasta — Colar" to "Salin ke folder ini — Tempel", "Escolher pasta" to "Pilih folder", "Cor da pasta reposta." to "Warna folder direset.", "Cor da pasta alterada." to "Warna folder diubah.", "Usar a cor normal" to "Gunakan warna default", "Aplicar a cor " to "Terapkan warna ", "Continuar em segundo plano" to "Lanjutkan di latar belakang", "Posição do áudio" to "Posisi audio", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "Audio akan terus diputar di latar belakang. Gunakan notifikasi untuk menghentikannya.")
+            else -> emptyMap()
+        }
         // Long-tail labels use English until their dedicated translation is added.
-        return localized[text] ?: localizedExtras[text] ?: readerTranslations[text] ?: english[text] ?: text
+        return localized[text] ?: localizedExtras[text] ?: uxTranslations[text] ?: readerTranslations[text] ?: english[text] ?: text
     }
 
     private fun accentColor(): Int = when (accentName) {
@@ -4448,21 +4572,48 @@ class MainActivity : Activity() {
             "Português", "English", "Español", "Français", "Deutsch", "中文（简体）",
             "हिन्दी", "العربية", "日本語", "Русский", "বাংলা", "Bahasa Indonesia"
         )
-        AlertDialog.Builder(this).setTitle(tr("Idioma"))
-            .setMessage(tr("Escolhe um idioma. Os nomes são apresentados na própria língua."))
-            .setSingleChoiceItems(options, codes.indexOf(appLanguage).coerceAtLeast(0)) { dialog, which ->
-                appLanguage = codes[which]
-                savePreferences()
-                if (Build.VERSION.SDK_INT >= 33) {
-                    runCatching {
-                        val localeTag = if (codes[which] == "zh") "zh-Hans" else codes[which]
-                        getSystemService(android.app.LocaleManager::class.java).applicationLocales =
-                            android.os.LocaleList.forLanguageTags(localeTag)
+        val selectedIndex = codes.indexOf(appLanguage).coerceAtLeast(0)
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Selecionar idioma"))
+            .setMessage(tr("Toca diretamente no idioma que queres usar."))
+            .setView(ScrollView(this).apply { addView(list) })
+            .setNegativeButton(tr("Cancelar"), null)
+            .create()
+        options.forEachIndexed { index, option ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = roundedBackground(
+                    if (index == selectedIndex) selectedRowColor() else rowSurfaceColor(), 10
+                )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    appLanguage = codes[index]
+                    savePreferences()
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        runCatching {
+                            val localeTag = if (codes[index] == "zh") "zh-Hans" else codes[index]
+                            getSystemService(android.app.LocaleManager::class.java).applicationLocales =
+                                android.os.LocaleList.forLanguageTags(localeTag)
+                        }
                     }
+                    dialog.dismiss()
+                    if (settingsOpen) renderSettingsScreen() else renderBrowser()
                 }
-                dialog.dismiss()
-                if (settingsOpen) renderSettingsScreen() else renderBrowser()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+            }
+            row.addView(label(if (index == selectedIndex) "✓" else "○", 18, accentColor(), true),
+                LinearLayout.LayoutParams(dp(32), -2))
+            row.addView(label(option, 16, primaryTextColor(), index == selectedIndex),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        }
+        dialog.show()
     }
 
     private fun showThemeMenu() {
@@ -4578,14 +4729,35 @@ class MainActivity : Activity() {
         accentDialog?.show()
     }
 
+    private fun showFolderColorFolderPicker() {
+        val folders = safeList(currentDir).filter { it.isDirectory }.sortedBy { it.name.lowercase(Locale.ROOT) }
+        if (folders.isEmpty()) {
+            AlertDialog.Builder(this).setTitle(tr("Cores das pastas"))
+                .setMessage(tr("Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor."))
+                .setPositiveButton(tr("OK"), null).show()
+            return
+        }
+        val names = folders.map { (if (folderColors.containsKey(pathKey(it))) "● " else "📁 ") + it.name }.toTypedArray()
+        AlertDialog.Builder(this).setTitle(tr("Escolher pasta"))
+            .setItems(names) { _, which -> showFolderColorMenu(folders[which]) }
+            .setNegativeButton(tr("Cancelar"), null).show()
+    }
+
     private fun showFolderColorMenu(file: File) {
         val options = arrayOf("Predefinida", "Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
-        AlertDialog.Builder(this).setTitle(tr("Cor da pasta"))
-            .setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
+        val descriptions = options.map { option ->
+            when (option) {
+                "Predefinida" -> tr("Usar a cor normal")
+                else -> tr("Aplicar a cor ") + tr(option)
+            }
+        }.toTypedArray()
+        AlertDialog.Builder(this).setTitle(tr("Cor da pasta") + " — " + file.name)
+            .setItems(options.map { tr(it) + if (it == "Predefinida") "" else "  ●" }.toTypedArray()) { _, which ->
                 val key = pathKey(file)
                 if (which == 0) folderColors.remove(key) else folderColors[key] = options[which]
                 savePreferences()
                 refreshFiles()
+                toast(if (which == 0) "Cor da pasta reposta." else "Cor da pasta alterada.")
             }.setNegativeButton(tr("Cancelar"), null).show()
     }
 

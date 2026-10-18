@@ -1,4 +1,4 @@
-# Archiver 0.6.0 — Android File Manager
+# Archiver 0.7.0 — Android File Manager
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
 
@@ -51,3 +51,13 @@ No keystore or signing secrets belong in the repository. For permanent release s
 The user must grant Android's special all-files-access permission when requested. This does not grant root and does not bypass OS restrictions on other apps' private storage. Files are processed locally by the app.
 
 Archiver is an independent project and is not affiliated with ZArchiver.
+
+
+## Melhorias de experiência e assinatura (0.7.0)
+
+- O botão flutuante passa a mostrar **Colar** quando existe conteúdo copiado/recortado; tocar nele executa a ação na pasta atual.
+- O seletor de idioma apresenta cada idioma como uma opção tocável, com indicação da seleção atual.
+- A opção de cores permite escolher uma subpasta e aplicar/remover uma cor visual.
+- O leitor de áudio tem barra de progresso, navegação temporal e transferência explícita para reprodução em segundo plano, com notificação para parar.
+- O workflow Actions produz sempre um APK debug e, quando os quatro secrets de assinatura estão configurados, também gera um APK release assinado.
+- Configuração de assinatura: consulte [`.github/KEYSTORE_SECRETS.md`](.github/KEYSTORE_SECRETS.md). Nunca carregue keystores ou passwords para o repositório.
