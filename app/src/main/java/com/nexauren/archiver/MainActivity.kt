@@ -1542,6 +1542,27 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun toolbarIcon(resource: Int, description: String, click: () -> Unit): ImageButton =
+        ImageButton(this).apply {
+            setImageResource(resource)
+            contentDescription = description
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            background = GradientDrawable().apply {
+                setColor(0x00292D40)
+                cornerRadius = dp(24).toFloat()
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { click() }
+        }
+
+    private fun roundedBackground(color: Int, radiusDp: Int): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radiusDp).toFloat()
+        }
+
     private fun label(text: String, size: Int, color: Int, bold: Boolean): TextView = TextView(this).apply {
         this.text = text
         textSize = size.toFloat()
