@@ -30,7 +30,7 @@ class AudioPlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> { stopPlayback(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return START_NOT_STICKY }
+            ACTION_STOP -> { stopPlayback(); stopForeground(true); stopSelf(); return START_NOT_STICKY }
             ACTION_PLAY -> {
                 val path = intent.getStringExtra(EXTRA_PATH)
                 if (path.isNullOrBlank() || !File(path).isFile) { stopSelf(); return START_NOT_STICKY }
@@ -48,10 +48,10 @@ class AudioPlaybackService : Service() {
             val next = MediaPlayer(); player = next
             next.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
             next.setOnPreparedListener { if (player === it) { it.start(); getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification()) } }
-            next.setOnCompletionListener { if (player === it) { stopPlayback(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId) } }
-            next.setOnErrorListener { _, _, _ -> stopPlayback(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId); true }
+            next.setOnCompletionListener { if (player === it) { stopPlayback(); stopForeground(true); stopSelfResult(startId) } }
+            next.setOnErrorListener { _, _, _ -> stopPlayback(); stopForeground(true); stopSelfResult(startId); true }
             next.setDataSource(file.absolutePath); next.prepareAsync()
-        } catch (_: Exception) { stopPlayback(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId) }
+        } catch (_: Exception) { stopPlayback(); stopForeground(true); stopSelfResult(startId) }
     }
 
     private fun stopPlayback() { val old = player; player = null; try { old?.stop() } catch (_: Exception) { }; try { old?.release() } catch (_: Exception) { } }
