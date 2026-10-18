@@ -1401,7 +1401,7 @@ class MainActivity : Activity() {
             seek.progress = 0
             val seconds = (preparedPlayer.duration / 1000).coerceAtLeast(0)
             status.text = "0:00 / ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
-            progressHandler.post(progressUpdate)"
+            progressHandler.post(progressUpdate)
         }
         player.setOnCompletionListener {
             play.text = tr("Reproduzir")
