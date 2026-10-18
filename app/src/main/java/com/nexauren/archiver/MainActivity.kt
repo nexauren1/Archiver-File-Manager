@@ -57,6 +57,7 @@ import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
 import net.lingala.zip4j.ZipFile as Zip4jFile
 import net.lingala.zip4j.model.ZipParameters
 import net.lingala.zip4j.progress.ProgressMonitor
+import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -1021,6 +1022,7 @@ class MainActivity : Activity() {
             options += "Extrair aqui"
             options += "Extrair para nova pasta"
         }
+        if (ext in setOf("glb", "gltf")) options += "Inspecionar modelo 3D"
         options += listOf("Partilhar", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
         if (file.isDirectory) options += "Cor da pasta"
@@ -1029,6 +1031,7 @@ class MainActivity : Activity() {
                 "Abrir pasta" -> { currentDir = file; selected.clear(); refreshFiles() }
                 "Cor da pasta" -> showFolderColorMenu(file)
                 "Abrir" -> openFile(file)
+                "Inspecionar modelo 3D" -> showModelInspector(file)
                 "Ver conteúdo" -> browseArchive(file)
                 "Testar arquivo" -> if (ext == "7z") testSevenZip(file) else testZip(file)
                 "Extrair aqui" -> if (ext == "7z") extractSevenZip(file, currentDir, false) else extractZip(file, currentDir, false)
@@ -1050,16 +1053,113 @@ class MainActivity : Activity() {
             showTextEditor(file)
             return
         }
+        if (extension(file.name) in setOf("glb", "gltf")) {
+            showModelInspector(file)
+            return
+        }
+        openFileExternally(file)
+    }
+
+    private fun openFileExternally(file: File) {
         try {
             val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
-            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension(file.name)) ?: "*/*"
-            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(intent)
+            val mime = when (extension(file.name)) {
+                "glb" -> "model/gltf-binary"
+                "gltf" -> "model/gltf+json"
+                "obj" -> "text/plain"
+                "stl" -> "model/stl"
+                else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension(file.name)) ?: "*/*"
+            }
+            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(intent, tr("Abrir ficheiro")))
         } catch (_: ActivityNotFoundException) {
-            toast(if (isEditableTextFile(file)) "O ficheiro é demasiado grande para o editor integrado e não existe outra aplicação para o abrir." else "Não existe uma aplicação para abrir este ficheiro.")
+            toast("Não existe uma aplicação compatível para abrir este ficheiro.")
         } catch (e: Exception) {
             toast("Não foi possível abrir: " + (e.message ?: "erro desconhecido"))
         }
+    }
+
+    private fun showModelInspector(file: File) {
+        try {
+            val jsonText = if (extension(file.name) == "gltf") {
+                if (file.length() > 32L * 1024L * 1024L) throw IOException("O manifesto GLTF excede o limite de leitura de 32 MB.")
+                file.readText(Charsets.UTF_8)
+            } else {
+                readGlbJsonChunk(file)
+            }
+            val json = JSONObject(jsonText)
+            val asset = json.optJSONObject("asset")
+            fun count(key: String): Int = json.optJSONArray(key)?.length() ?: 0
+            val formatLabel = if (extension(file.name) == "glb") "GLB (binário)" else "GLTF (JSON)"
+            val details = listOf(
+                "Formato: $formatLabel",
+                "Versão GLTF: " + (asset?.optString("version", "desconhecida") ?: "desconhecida"),
+                "Cenas: " + count("scenes"),
+                "Objetos/nós: " + count("nodes"),
+                "Meshes: " + count("meshes"),
+                "Materiais: " + count("materials"),
+                "Texturas: " + count("textures"),
+                "Imagens: " + count("images"),
+                "Animações: " + count("animations"),
+                "Buffers: " + count("buffers"),
+                "Tamanho do ficheiro: " + formatSize(file.length()),
+                "",
+                "Esta versão lê os metadados do modelo; a renderização 3D interativa ainda requer uma aplicação compatível."
+            ).joinToString("\n")
+            AlertDialog.Builder(this)
+                .setTitle("Leitor de modelo 3D")
+                .setMessage(details)
+                .setPositiveButton("Abrir noutra aplicação") { _, _ -> openFileExternally(file) }
+                .setNegativeButton(tr("Fechar"), null)
+                .show()
+        } catch (e: Exception) {
+            AlertDialog.Builder(this)
+                .setTitle("Modelo 3D")
+                .setMessage("Não foi possível ler os metadados do modelo.\n" + (e.message ?: "Formato inválido."))
+                .setPositiveButton("Tentar aplicação externa") { _, _ -> openFileExternally(file) }
+                .setNegativeButton(tr("Fechar"), null)
+                .show()
+        }
+    }
+
+    private fun readGlbJsonChunk(file: File): String {
+        java.io.DataInputStream(BufferedInputStream(FileInputStream(file))).use { input ->
+            val header = ByteArray(12)
+            input.readFully(header)
+            val headerBuffer = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            if (headerBuffer.int != 0x46546C67) throw IOException("Assinatura GLB inválida.")
+            val version = headerBuffer.int
+            if (version != 2) throw IOException("Só é suportado GLB 2.0.")
+            val declaredLength = headerBuffer.int.toLong() and 0xFFFFFFFFL
+            if (declaredLength < 20L || declaredLength > file.length()) throw IOException("Comprimento GLB inválido.")
+            var consumed = 12L
+            while (consumed + 8L <= declaredLength) {
+                val chunkHeader = ByteArray(8)
+                input.readFully(chunkHeader)
+                val chunkBuffer = java.nio.ByteBuffer.wrap(chunkHeader).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                val chunkLength = chunkBuffer.int.toLong() and 0xFFFFFFFFL
+                val chunkType = chunkBuffer.int
+                consumed += 8L
+                if (chunkLength > declaredLength - consumed || chunkLength > 32L * 1024L * 1024L) {
+                    throw IOException("Bloco JSON GLB demasiado grande ou inválido.")
+                }
+                if (chunkType == 0x4E4F534A) {
+                    val data = ByteArray(chunkLength.toInt())
+                    input.readFully(data)
+                    return String(data, Charsets.UTF_8).trimEnd('\u0000', ' ', '\r', '\n', '\t')
+                }
+                var remaining = chunkLength
+                val buffer = ByteArray(8192)
+                while (remaining > 0L) {
+                    val amount = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (amount < 0) throw IOException("O ficheiro GLB terminou inesperadamente.")
+                    remaining -= amount.toLong()
+                }
+                consumed += chunkLength
+            }
+        }
+        throw IOException("O ficheiro GLB não contém um bloco JSON válido.")
     }
 
     private fun isEditableTextFile(file: File): Boolean = extension(file.name) in setOf(
