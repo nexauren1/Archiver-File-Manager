@@ -431,10 +431,9 @@ class MainActivity : Activity() {
         }
         val metaText = buildString {
             if (showSize) append(details)
-            if (showDate && modified.isNotEmpty() && !inGrid) {
+            if (showTime && modified.isNotEmpty() && !inGrid) {
                 if (isNotEmpty()) append("   •   ")
-                append(modified)
-                if (showTime) append(" ").append(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(file.lastModified())))
+                append(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(file.lastModified())))
             }
         }
         middle.addView(name, LinearLayout.LayoutParams(-1, -2))
@@ -724,6 +723,7 @@ class MainActivity : Activity() {
             savePreferences()
             dialog.dismiss()
             toast("Nível guardado.")
+            if (settingsOpen) renderSettingsScreen()
         }.setNegativeButton("Cancelar", null).show()
     }
 
