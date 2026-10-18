@@ -1950,38 +1950,77 @@ class MainActivity : Activity() {
     }
 
     private fun extractZip(archive: File, destinationDir: File, makeSubfolder: Boolean) {
-        runTask("A extrair ZIP…", 0L, 1L) { meter ->
-            val totals = try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
-            meter.setTotals(totals.bytes, totals.entries)
-            val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension)) else destinationDir
-            if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
-            var count = 0
-            ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
-                val buffer = ByteArray(32 * 1024)
-                while (true) {
-                    val entry = zip.nextEntry ?: break
-                    val output = safeArchiveTarget(destination, entry.name, entry.isDirectory)
-                    meter.show(output)
-                    if (entry.isDirectory) {
-                        if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
+        val encrypted = try { Zip4jFile(archive).isEncrypted } catch (_: Exception) { false }
+        if (encrypted) {
+            val passwordInput = EditText(this).apply {
+                hint = "Palavra-passe do ZIP"
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            AlertDialog.Builder(this)
+                .setTitle("ZIP protegido por palavra-passe")
+                .setView(passwordInput)
+                .setNegativeButton(tr("Cancelar"), null)
+                .setPositiveButton("Extrair") { _, _ ->
+                    val password = passwordInput.text.toString()
+                    if (password.isEmpty()) {
+                        toast("Escreve a palavra-passe do arquivo.")
                     } else {
-                        output.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar uma pasta de destino.") }
-                        val finalOut = if (output.exists()) File(output.parentFile, uniqueName(output.parentFile!!, output.name)) else output
-                        BufferedOutputStream(FileOutputStream(finalOut)).use { stream ->
+                        extractZipContents(archive, destinationDir, makeSubfolder, password)
+                    }
+                }
+                .show()
+        } else {
+            extractZipContents(archive, destinationDir, makeSubfolder, null)
+        }
+    }
+
+    private fun extractZipContents(
+        archive: File,
+        destinationDir: File,
+        makeSubfolder: Boolean,
+        password: String?
+    ) {
+        runTask("A extrair ZIP…", 0L, 1L) { meter ->
+            val zip = if (password.isNullOrEmpty()) Zip4jFile(archive) else Zip4jFile(archive, password.toCharArray())
+            val headers = zip.fileHeaders ?: throw IOException("Não foi possível ler o índice do ZIP.")
+            if (headers.isEmpty()) return@runTask "O arquivo ZIP está vazio."
+            val totalBytes = headers.sumOf { if (it.isDirectory) 0L else it.uncompressedSize.coerceAtLeast(0L) }
+            meter.setTotals(totalBytes, headers.size.toLong())
+            val destination = if (makeSubfolder) {
+                File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension))
+            } else destinationDir
+            if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
+
+            var count = 0
+            headers.forEach { entry ->
+                val output = safeArchiveTarget(destination, entry.fileName, entry.isDirectory)
+                meter.show(output)
+                if (entry.isDirectory) {
+                    if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
+                } else {
+                    output.parentFile?.let {
+                        if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar uma pasta de destino.")
+                    }
+                    val target = if (output.exists()) File(output.parentFile, uniqueName(output.parentFile!!, output.name)) else output
+                    zip.getInputStream(entry).use { input ->
+                        BufferedOutputStream(FileOutputStream(target)).use { stream ->
+                            val buffer = ByteArray(32 * 1024)
                             while (true) {
-                                val n = zip.read(buffer)
-                                if (n <= 0) break
-                                stream.write(buffer, 0, n)
-                                meter.bytesRead(n.toLong(), finalOut)
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                if (n > 0) {
+                                    stream.write(buffer, 0, n)
+                                    meter.bytesRead(n.toLong(), target)
+                                }
                             }
                         }
                     }
-                    zip.closeEntry()
-                    meter.itemDone(output)
-                    count++
                 }
+                meter.itemDone(output)
+                count++
             }
-            "Extração ZIP concluída: " + count + " entradas."
+            "Extração ZIP concluída: $count entradas."
         }
     }
 
