@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 import java.util.concurrent.ExecutorService;
@@ -820,10 +821,162 @@ public class MainActivity extends Activity {
         refresh();
     }
 
+    private static final class ArchiveListItem {
+        final int index;
+        final String name;
+        final boolean directory;
+        final long size;
+        ArchiveListItem(int index, String name, boolean directory, long size) {
+            this.index = index;
+            this.name = name;
+            this.directory = directory;
+            this.size = size;
+        }
+    }
+
+    private void browseArchive(DocumentFile archive) {
+        String ext = extension(archive.getName());
+        if (!"zip".equals(ext) && !"7z".equals(ext)) {
+            toast("A visualização interna está disponível para ZIP e 7Z."); return;
+        }
+        runWork(() -> {
+            File temporary = null;
+            List<ArchiveListItem> entries = new ArrayList<>();
+            try {
+                temporary = copyUriToTemp(archive.getUri(), "." + ext);
+                if ("zip".equals(ext)) {
+                    try (ZipFile zip = new ZipFile(temporary)) {
+                        java.util.Enumeration<? extends ZipEntry> enumeration = zip.entries();
+                        int index = 0;
+                        while (enumeration.hasMoreElements() && entries.size() < 300) {
+                            ZipEntry entry = enumeration.nextElement();
+                            entries.add(new ArchiveListItem(index++, entry.getName(), entry.isDirectory(), entry.getSize()));
+                        }
+                    }
+                } else {
+                    try (SevenZFile seven = new SevenZFile(temporary)) {
+                        int index = 0;
+                        for (SevenZArchiveEntry entry : seven.getEntries()) {
+                            if (entries.size() >= 300) break;
+                            entries.add(new ArchiveListItem(index++, entry.getName(), entry.isDirectory(), entry.getSize()));
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                postResult("Não foi possível ler o arquivo: " + safeMessage(e), false);
+                return;
+            } finally {
+                if (temporary != null) temporary.delete();
+            }
+            final List<ArchiveListItem> found = entries;
+            runOnUiThread(() -> {
+                if (found.isEmpty()) {
+                    new AlertDialog.Builder(this).setTitle(archive.getName())
+                        .setMessage("O arquivo está vazio ou não contém entradas legíveis.")
+                        .setPositiveButton("OK", null).show();
+                    return;
+                }
+                String[] labels = new String[found.size()];
+                for (int i = 0; i < found.size(); i++) {
+                    ArchiveListItem item = found.get(i);
+                    labels[i] = (item.directory ? "📁  " : "📄  ") + item.name +
+                        (!item.directory && item.size >= 0 ? "  •  " + formatSize(item.size) : "");
+                }
+                String title = archive.getName() + (found.size() == 300 ? " (primeiras 300 entradas)" : "");
+                new AlertDialog.Builder(this).setTitle(title).setItems(labels, (dialog, which) -> {
+                    ArchiveListItem item = found.get(which);
+                    if (item.directory) {
+                        new AlertDialog.Builder(this).setTitle("Pasta do arquivo")
+                            .setMessage("Para extrair uma pasta e todo o seu conteúdo, use «Extrair aqui» ou «Extrair para nova pasta».")
+                            .setPositiveButton("OK", null).show();
+                    } else {
+                        new AlertDialog.Builder(this).setTitle("Extrair item")
+                            .setMessage("Extrair " + item.name + " para a pasta atual?")
+                            .setNegativeButton("Cancelar", null)
+                            .setPositiveButton("Extrair", (d, w) -> extractArchiveEntry(archive, item.index))
+                            .show();
+                    }
+                }).setPositiveButton("Fechar", null).show();
+            });
+        });
+    }
+
+    private void extractArchiveEntry(DocumentFile archive, int wantedIndex) {
+        final DocumentFile target = current();
+        if (target == null) { toast("Escolha a pasta de destino."); return; }
+        String ext = extension(archive.getName());
+        runWork(() -> {
+            File temporary = null;
+            DocumentFile output = null;
+            try {
+                temporary = copyUriToTemp(archive.getUri(), "." + ext);
+                if ("zip".equals(ext)) {
+                    try (ZipFile zip = new ZipFile(temporary)) {
+                        java.util.Enumeration<? extends ZipEntry> enumeration = zip.entries();
+                        int index = 0;
+                        while (enumeration.hasMoreElements()) {
+                            ZipEntry entry = enumeration.nextElement();
+                            if (index++ != wantedIndex) continue;
+                            String path = safeZipPath(entry.getName());
+                            if (path == null) throw new IOException("O arquivo contém um caminho inseguro.");
+                            output = createTree(target, path, entry.isDirectory());
+                            if (!entry.isDirectory()) {
+                                InputStream raw = zip.getInputStream(entry);
+                                OutputStream outRaw = getContentResolver().openOutputStream(output.getUri());
+                                if (outRaw == null) { raw.close(); throw new IOException("Não foi possível criar o destino."); }
+                                try (InputStream in = new BufferedInputStream(raw);
+                                     OutputStream out = new BufferedOutputStream(outRaw)) {
+                                    byte[] buffer = new byte[32768];
+                                    int n;
+                                    while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+                                }
+                            }
+                            postResult("Item extraído: " + path, true);
+                            return;
+                        }
+                    }
+                } else if ("7z".equals(ext)) {
+                    try (SevenZFile seven = new SevenZFile(temporary)) {
+                        SevenZArchiveEntry entry;
+                        int index = 0;
+                        byte[] buffer = new byte[32768];
+                        while ((entry = seven.getNextEntry()) != null) {
+                            if (index++ != wantedIndex) {
+                                while (seven.read(buffer, 0, buffer.length) != -1) { }
+                                continue;
+                            }
+                            String path = safeZipPath(entry.getName());
+                            if (path == null) throw new IOException("O 7Z contém um caminho inseguro.");
+                            output = createTree(target, path, entry.isDirectory());
+                            if (!entry.isDirectory()) {
+                                OutputStream outRaw = getContentResolver().openOutputStream(output.getUri());
+                                if (outRaw == null) throw new IOException("Não foi possível criar o destino.");
+                                try (OutputStream out = new BufferedOutputStream(outRaw)) {
+                                    int n;
+                                    while ((n = seven.read(buffer, 0, buffer.length)) != -1) out.write(buffer, 0, n);
+                                }
+                            }
+                            postResult("Item extraído: " + path, true);
+                            return;
+                        }
+                    }
+                } else {
+                    throw new IOException("Formato não suportado.");
+                }
+                throw new IOException("A entrada selecionada já não existe.");
+            } catch (Exception e) {
+                if (output != null && !output.isDirectory()) deleteRecursively(output);
+                postResult("Falha ao extrair o item: " + safeMessage(e), false);
+            } finally {
+                if (temporary != null) temporary.delete();
+            }
+        });
+    }
+
     private void showFileActions(DocumentFile file) {
         String[] options;
         if (file.isDirectory()) options = new String[]{"Abrir pasta", "Comprimir em ZIP", "Comprimir em 7Z", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
-        else if ("zip".equals(extension(file.getName())) || "7z".equals(extension(file.getName()))) options = new String[]{"Abrir", "Testar arquivo", "Extrair aqui", "Extrair para nova pasta", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
+        else if ("zip".equals(extension(file.getName())) || "7z".equals(extension(file.getName()))) options = new String[]{"Abrir", "Ver conteúdo", "Testar arquivo", "Extrair aqui", "Extrair para nova pasta", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
         else options = new String[]{"Abrir", "Partilhar", "Copiar", "Recortar", "Renomear", "Excluir", "Informações"};
         List<String> allOptions = new ArrayList<>();
         Collections.addAll(allOptions, options);
@@ -834,6 +987,7 @@ public class MainActivity extends Activity {
             String op = actionOptions[which];
             if ("Abrir pasta".equals(op)) { stack.add(file); selected.clear(); refresh(); }
             else if ("Abrir".equals(op)) openFile(file);
+            else if ("Ver conteúdo".equals(op)) browseArchive(file);
             else if ("Comprimir em ZIP".equals(op)) promptZip(chosenOrSingle(file));
             else if ("Comprimir em 7Z".equals(op)) promptSevenZip(chosenOrSingle(file));
             else if ("Testar arquivo".equals(op)) { if ("7z".equals(extension(file.getName()))) testSevenZip(file); else testZip(file); }
