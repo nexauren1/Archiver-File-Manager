@@ -3069,8 +3069,8 @@ class MainActivity : Activity() {
     }
 
 
-    private fun tr(text: String): String {
-        val english = mapOf(
+    private val englishTranslations: Map<String, String> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        mapOf(
             "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
             "Configurações" to "Settings", "Geral" to "General", "Interface" to "Interface",
             "Tema escuro equilibrado para uso diário." to "Balanced dark theme for everyday use.",
@@ -3192,10 +3192,18 @@ class MainActivity : Activity() {
             "Queres guardar as alterações antes de sair do editor?" to "Would you like to save changes before leaving the editor?",
             "Já existe uma operação em curso. Aguarda que termine." to "Another operation is running. Please wait.",
             "A operação está em curso. Acompanha o progresso na janela ou na notificação." to "An operation is running. Follow progress in the dialog or notification."
-        )[text] ?: text
-        if (appLanguage == "pt") return text
-        if (appLanguage == "en") return english
-        val localized = when (appLanguage) {
+        )
+    }
+
+    private val localizedTranslationCache = HashMap<String, Map<String, String>>()
+
+    private fun localizedTranslations(language: String): Map<String, String> =
+        synchronized(localizedTranslationCache) {
+            localizedTranslationCache.getOrPut(language) { createLocalizedTranslations(language) }
+        }
+
+    private fun createLocalizedTranslations(language: String): Map<String, String> =
+        when (appLanguage) {
             "es" -> mapOf(
                 "Explorer" to "Explorador", "Settings" to "Ajustes", "General" to "General", "Interface" to "Interfaz",
                 "Compression" to "Compresión", "Language" to "Idioma", "Notifications" to "Notificaciones",
@@ -3380,6 +3388,12 @@ class MainActivity : Activity() {
             )
             else -> emptyMap()
         }
+
+    private fun tr(text: String): String {
+        if (appLanguage == "pt") return text
+        val english = englishTranslations[text] ?: text
+        if (appLanguage == "en") return english
+        val localized = localizedTranslations(appLanguage)
         return localized[text] ?: localized[english] ?: english
     }
 
