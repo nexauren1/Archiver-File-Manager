@@ -1330,33 +1330,33 @@ class MainActivity : Activity() {
             val json = JSONObject(jsonText)
             val asset = json.optJSONObject("asset")
             fun count(key: String): Int = json.optJSONArray(key)?.length() ?: 0
-            val formatLabel = if (extension(file.name) == "glb") "GLB (binário)" else "GLTF (JSON)"
+            val formatLabel = if (extension(file.name) == "glb") tr("GLB (binário)") else "GLTF (JSON)"
             val details = listOf(
-                "Formato: $formatLabel",
-                "Versão GLTF: " + (asset?.optString("version", "desconhecida") ?: "desconhecida"),
-                "Cenas: " + count("scenes"),
-                "Objetos/nós: " + count("nodes"),
-                "Meshes: " + count("meshes"),
-                "Materiais: " + count("materials"),
-                "Texturas: " + count("textures"),
-                "Imagens: " + count("images"),
-                "Animações: " + count("animations"),
-                "Buffers: " + count("buffers"),
-                "Tamanho do ficheiro: " + formatSize(file.length()),
+                tr("Formato") + ": " + formatLabel,
+                tr("Versão GLTF") + ": " + (asset?.optString("version", "desconhecida") ?: "desconhecida"),
+                tr("Cenas") + ": " + count("scenes"),
+                tr("Objetos/nós") + ": " + count("nodes"),
+                tr("Meshes") + ": " + count("meshes"),
+                tr("Materiais") + ": " + count("materials"),
+                tr("Texturas") + ": " + count("textures"),
+                tr("Imagens") + ": " + count("images"),
+                tr("Animações") + ": " + count("animations"),
+                tr("Buffers") + ": " + count("buffers"),
+                tr("Tamanho do ficheiro") + ": " + formatSize(file.length()),
                 "",
-                "Esta versão lê os metadados do modelo; a renderização 3D interativa ainda requer uma aplicação compatível."
+                tr("Esta versão lê os metadados do modelo; a renderização 3D interativa ainda requer uma aplicação compatível.")
             ).joinToString("\n")
             AlertDialog.Builder(this)
-                .setTitle("Leitor de modelo 3D")
+                .setTitle(tr("Leitor de modelo 3D"))
                 .setMessage(details)
-                .setPositiveButton("Abrir noutra aplicação") { _, _ -> openFileExternally(file) }
+                .setPositiveButton(tr("Abrir noutra aplicação")) { _, _ -> openFileExternally(file) }
                 .setNegativeButton(tr("Fechar"), null)
                 .show()
         } catch (e: Exception) {
             AlertDialog.Builder(this)
-                .setTitle("Modelo 3D")
-                .setMessage("Não foi possível ler os metadados do modelo.\n" + (e.message ?: "Formato inválido."))
-                .setPositiveButton("Tentar aplicação externa") { _, _ -> openFileExternally(file) }
+                .setTitle(tr("Modelo 3D"))
+                .setMessage(tr("Não foi possível ler os metadados do modelo.") + "\n" + (e.message ?: tr("Formato inválido.")))
+                .setPositiveButton(tr("Tentar aplicação externa")) { _, _ -> openFileExternally(file) }
                 .setNegativeButton(tr("Fechar"), null)
                 .show()
         }
@@ -1442,7 +1442,7 @@ class MainActivity : Activity() {
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
         page.addView(View(this).apply { setBackgroundColor(accentColor()) }, LinearLayout.LayoutParams(-1, dp(2)))
 
-        val status = label("UTF-8  •  " + sourceText.count { it == '\n' }.plus(1) + " linhas", 11, 0xFFAAAAB4.toInt(), false)
+        val status = label("UTF-8  •  " + sourceText.count { it == '\n' }.plus(1) + " " + tr("linhas"), 11, 0xFFAAAAB4.toInt(), false)
             .apply { setPadding(dp(14), dp(8), dp(14), dp(8)) }
         val input = EditText(this).apply {
             setText(sourceText)
@@ -1567,9 +1567,10 @@ class MainActivity : Activity() {
 
     private fun confirmDelete(files: List<File>) {
         if (files.isEmpty()) { toast("Seleciona pelo menos um item."); return }
-        AlertDialog.Builder(this).setTitle("Eliminar")
-            .setMessage("Eliminar " + files.size + if (files.size == 1) " item? Esta ação não pode ser anulada." else " itens? Esta ação não pode ser anulada.")
-            .setNegativeButton("Cancelar", null).setPositiveButton("Eliminar") { _, _ ->
+        AlertDialog.Builder(this).setTitle(tr("Eliminar"))
+            .setMessage(tr("Eliminar") + " " + files.size + " " +
+                tr(if (files.size == 1) "item?" else "itens?") + " " + tr("Esta ação não pode ser anulada."))
+            .setNegativeButton(tr("Cancelar"), null).setPositiveButton(tr("Eliminar")) { _, _ ->
                 selected.clear()
                 runTask("A eliminar ficheiros…", 0L, 1L) { meter ->
                     val totals = measureFiles(files) { meter.show(it) }
@@ -3070,7 +3071,7 @@ class MainActivity : Activity() {
             addView(detailView, LinearLayout.LayoutParams(-1, -2))
         }
         val dialog = AlertDialog.Builder(this)
-            .setTitle(message)
+            .setTitle(tr(message))
             .setView(dialogContent)
             .setCancelable(false)
             .setPositiveButton(tr("Fechar"), null)
@@ -3100,9 +3101,9 @@ class MainActivity : Activity() {
                 }
                 due
             }
-            if (notificationDue) showOperationNotification(message, detail, percent)
+            if (notificationDue) showOperationNotification(tr(message), detail, percent)
         }
-        showOperationNotification(message, currentDir.absolutePath, 0)
+        showOperationNotification(tr(message), currentDir.absolutePath, 0)
         worker.execute {
             var result: String
             try {
