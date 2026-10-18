@@ -68,6 +68,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.MessageDigest
 import java.text.DateFormat
 import java.util.Collections
 import java.util.Date
@@ -125,6 +126,7 @@ class MainActivity : Activity() {
     private val thumbnailCache = object : LruCache<String, Bitmap>(2 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = maxOf(1, value.byteCount / 1024)
     }
+    private val directoryCountCache = LruCache<String, Int>(512)
 
     private var showHidden = false
     private var showSize = true
@@ -568,9 +570,10 @@ class MainActivity : Activity() {
         else item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { rightMargin = dp(8) })
         if (shouldLoadThumbnail(file)) loadThumbnailAsync(file, icon)
 
+        val cachedCount = if (file.isDirectory) directoryCountCache.get(key) else null
         val details = if (file.isDirectory) {
-            val count = safeList(file).size
-            count.toString() + if (count == 1) " item" else " itens"
+            if (cachedCount == null) tr("Pasta")
+            else cachedCount.toString() + if (cachedCount == 1) " item" else " itens"
         } else formatSize(file.length())
         val modified = if (file.lastModified() > 0L) DateFormat.getDateInstance(DateFormat.SHORT).format(Date(file.lastModified())) else ""
         val middle = LinearLayout(this).apply {
@@ -595,7 +598,7 @@ class MainActivity : Activity() {
             }
         }
         middle.addView(name, LinearLayout.LayoutParams(-1, -2))
-        if (metaText.isNotEmpty()) middle.addView(TextView(this).apply {
+        val metaView = if (metaText.isNotEmpty()) TextView(this).apply {
             text = metaText
             textSize = 12f
             setTextColor(mutedTextColor())
@@ -603,7 +606,8 @@ class MainActivity : Activity() {
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = if (inGrid) Gravity.CENTER else Gravity.START
             setPadding(0, dp(4), 0, 0)
-        }, LinearLayout.LayoutParams(-1, -2))
+        } else null
+        metaView?.let { middle.addView(it, LinearLayout.LayoutParams(-1, -2)) }
         if (inGrid) {
             item.addView(middle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
             val params = GridLayout.LayoutParams(
@@ -628,6 +632,26 @@ class MainActivity : Activity() {
         }
         fileRowViews[key] = item
         fileNameViews[key] = name
+        if (file.isDirectory && showSize && cachedCount == null && metaView != null) {
+            thumbnailWorker.execute {
+                val childCount = try { file.listFiles()?.size ?: -1 } catch (_: Exception) { -1 }
+                if (childCount >= 0) {
+                    directoryCountCache.put(key, childCount)
+                    mainHandler.post {
+                        if (fileRowViews[key] === item && metaView.isAttachedToWindow) {
+                            val updatedDetails = childCount.toString() + if (childCount == 1) " item" else " itens"
+                            metaView.text = buildString {
+                                append(tr(updatedDetails))
+                                if (showTime && modified.isNotEmpty() && !inGrid) {
+                                    append("   •   ")
+                                    append(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(file.lastModified())))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         item.setOnClickListener {
             if (selected.isNotEmpty()) toggleSelection(file)
             else if (file.isDirectory) {
@@ -1777,7 +1801,8 @@ class MainActivity : Activity() {
             setPadding(0, dp(2), 0, 0)
         }, LinearLayout.LayoutParams(-1, -2))
         val meta = if (file.isDirectory) {
-            safeList(file).size.toString() + " " + tr("itens")
+            val count = directoryCountCache.get(pathKey(file))
+            if (count == null) tr("Pasta") else count.toString() + " " + tr(if (count == 1) "item" else "itens")
         } else {
             formatSize(file.length()) + " • " + DateFormat.getDateInstance(DateFormat.SHORT).format(Date(file.lastModified()))
         }
@@ -3203,7 +3228,7 @@ class MainActivity : Activity() {
         }
 
     private fun createLocalizedTranslations(language: String): Map<String, String> =
-        when (appLanguage) {
+        when (language) {
             "es" -> mapOf(
                 "Explorer" to "Explorador", "Settings" to "Ajustes", "General" to "General", "Interface" to "Interfaz",
                 "Compression" to "Compresión", "Language" to "Idioma", "Notifications" to "Notificaciones",
