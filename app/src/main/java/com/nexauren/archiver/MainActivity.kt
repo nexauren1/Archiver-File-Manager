@@ -1025,6 +1025,7 @@ class MainActivity : Activity() {
             options += "Extrair para nova pasta"
         }
         if (ext in setOf("glb", "gltf")) options += "Inspecionar modelo 3D"
+        options += listOf("Comprimir para ZIP", "Comprimir para 7Z", "Comprimir…")
         options += listOf("Partilhar", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
         if (file.isDirectory) options += "Cor da pasta"
@@ -1034,6 +1035,9 @@ class MainActivity : Activity() {
                 "Cor da pasta" -> showFolderColorMenu(file)
                 "Abrir" -> openFile(file)
                 "Inspecionar modelo 3D" -> showModelInspector(file)
+                "Comprimir para ZIP" -> promptArchive(chosenOrSingle(file), "zip")
+                "Comprimir para 7Z" -> promptArchive(chosenOrSingle(file), "7z")
+                "Comprimir…" -> promptArchive(chosenOrSingle(file), if (ext == "7z") "7z" else "zip")
                 "Ver conteúdo" -> browseArchive(file)
                 "Testar arquivo" -> if (ext == "7z") testSevenZip(file) else testZip(file)
                 "Extrair aqui" -> if (ext == "7z") extractSevenZip(file, currentDir, false) else extractZip(file, currentDir, false)
@@ -2314,6 +2318,7 @@ class MainActivity : Activity() {
         val folderBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(folderBitmap)
         val folderDrawable: Drawable = getDrawable(R.drawable.ic_folder) ?: return null
+        folderColorValue(directory)?.let { folderDrawable.setColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
         folderDrawable.setBounds(0, 0, size, size)
         folderDrawable.draw(canvas)
         val target = android.graphics.Rect(size / 3, size / 3, size * 3 / 4, size * 3 / 4)
@@ -2761,7 +2766,9 @@ class MainActivity : Activity() {
             "O ficheiro é demasiado grande para o editor integrado e não existe outra aplicação para o abrir." to "The file is too large for the built-in editor and no other app can open it.",
             "ZIP protegido por palavra-passe" to "Password-protected ZIP",
             "Palavra-passe do ZIP" to "ZIP password", "Escreve a palavra-passe do arquivo." to "Enter the archive password.",
-            "Inspecionar modelo 3D" to "Inspect 3D model", "text" to "text",
+            "Inspecionar modelo 3D" to "Inspect 3D model",
+            "Comprimir para ZIP" to "Compress to ZIP", "Comprimir para 7Z" to "Compress to 7Z",
+            "Comprimir…" to "Compress…", "text" to "text",
             "Conceder acesso aos ficheiros" to "Grant file access", "Opções" to "Options",
             "Selecionar tudo" to "Select all", "Limpar seleção" to "Clear selection",
             "Copiar seleção" to "Copy selection", "Recortar seleção" to "Cut selection",
