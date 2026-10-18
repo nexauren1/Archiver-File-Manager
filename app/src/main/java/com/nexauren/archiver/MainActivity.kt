@@ -123,6 +123,10 @@ class MainActivity : Activity() {
     private var visibleFileCount = 0
     private val notificationChannelId = "archiver_file_operations"
     private val operationNotificationId = 7410
+    private data class FolderAnalysisResult(
+        val root: File, val fileCount: Long, val folderCount: Long, val totalBytes: Long,
+        val largest: List<Pair<File, Long>>, val inaccessibleFolders: Int, val reachedLimit: Boolean
+    )
     private val thumbnailCache = object : LruCache<String, Bitmap>(2 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = maxOf(1, value.byteCount / 1024)
     }
@@ -770,7 +774,7 @@ class MainActivity : Activity() {
         val options = arrayOf(
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
             "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisar em subpastas", "Favoritos",
-            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar aplicação"
+            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar aplicação", "Analisar pasta atual"
         )
         AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
@@ -793,6 +797,7 @@ class MainActivity : Activity() {
                 12 -> refreshFiles()
                 13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
                 14 -> shareApplication()
+                15 -> showFolderAnalysis(currentDir)
             }
         }.show()
     }
@@ -1089,6 +1094,8 @@ class MainActivity : Activity() {
         }
         if (ext in setOf("glb", "gltf")) options += "Inspecionar modelo 3D"
         options += listOf("Comprimir para ZIP", "Comprimir para 7Z", "Comprimir…")
+        if (file.isFile) options += "Calcular SHA-256"
+        if (file.isDirectory) options += "Analisar pasta"
         options += listOf("Partilhar", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
         if (file.isDirectory) options += "Cor da pasta"
@@ -1101,6 +1108,8 @@ class MainActivity : Activity() {
                 "Comprimir para ZIP" -> promptArchive(chosenOrSingle(file), "zip")
                 "Comprimir para 7Z" -> promptArchive(chosenOrSingle(file), "7z")
                 "Comprimir…" -> promptArchive(chosenOrSingle(file), if (ext == "7z") "7z" else "zip")
+                "Calcular SHA-256" -> calculateSha256(file)
+                "Analisar pasta" -> showFolderAnalysis(file)
                 "Ver conteúdo" -> browseArchive(file)
                 "Testar arquivo" -> if (ext == "7z") testSevenZip(file) else testZip(file)
                 "Extrair aqui" -> if (ext == "7z") extractSevenZip(file, currentDir, false) else extractZip(file, currentDir, false)
@@ -1115,6 +1124,168 @@ class MainActivity : Activity() {
                 "Remover dos Favoritos" -> { favorites.remove(pathKey(file)); savePreferences(); toast("Removido dos Favoritos.") }
             }
         }.show()
+    }
+
+    private fun calculateSha256(file: File) {
+        if (!file.isFile || !file.canRead()) {
+            toast("Não é possível ler este ficheiro.")
+            return
+        }
+        val bytes = file.length().coerceAtLeast(1L)
+        runTask(tr("A calcular SHA-256…"), bytes, 1L) { meter ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            FileInputStream(file).use { stream ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = stream.read(buffer)
+                    if (count < 0) break
+                    if (count > 0) {
+                        digest.update(buffer, 0, count)
+                        meter.bytesRead(count.toLong(), file)
+                    }
+                }
+            }
+            meter.itemDone(file)
+            val hash = digest.digest().joinToString("") { "%02x".format(Locale.ROOT, it) }
+            tr("SHA-256 calculado") + "\n" + file.name + "\n" + hash
+        }
+    }
+
+    private fun showFolderAnalysis(folder: File) {
+        if (workActive.get()) {
+            toast("Já existe uma operação em curso. Aguarda que termine.")
+            return
+        }
+        if (!searchActive.compareAndSet(false, true)) {
+            toast("Já existe uma pesquisa ou análise em curso.")
+            return
+        }
+        val startDir = try { folder.canonicalFile } catch (_: Exception) { folder.absoluteFile }
+        if (!startDir.isDirectory || !isWithinRoot(startDir)) {
+            searchActive.set(false)
+            toast("A pasta escolhida não está disponível.")
+            return
+        }
+        val cancelled = AtomicBoolean(false)
+        val status = label(tr("A analisar a pasta…"), 13, mutedTextColor(), false)
+        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate = true }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(8))
+            addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+            addView(progress, LinearLayout.LayoutParams(-1, dp(5)))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle(tr("Análise da pasta")).setView(content)
+            .setNegativeButton(tr("Cancelar"), null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                cancelled.set(true)
+                status.text = tr("A parar a análise…")
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
+            }
+        }
+        dialog.setOnCancelListener { cancelled.set(true) }
+        dialog.setOnDismissListener { cancelled.set(true) }
+        dialog.show()
+        searchWorker.execute {
+            var fileCount = 0L
+            var folderCount = 0L
+            var totalBytes = 0L
+            var scanned = 0L
+            var inaccessible = 0
+            var reachedLimit = false
+            val seen = HashSet<String>()
+            val largest = ArrayList<Pair<File, Long>>()
+            fun visit(dir: File, depth: Int) {
+                if (cancelled.get()) return
+                if (depth > 64 || scanned >= 200000L) { reachedLimit = true; return }
+                val canonical = try { dir.canonicalPath } catch (_: Exception) { dir.absolutePath }
+                if (!seen.add(canonical)) return
+                val children = try { dir.listFiles() } catch (_: SecurityException) { null }
+                if (children == null) { inaccessible++; return }
+                for (child in children) {
+                    if (cancelled.get()) return
+                    if (!showHidden && child.name.startsWith(".")) continue
+                    scanned++
+                    if (child.isDirectory) {
+                        folderCount++
+                        visit(child, depth + 1)
+                    } else if (child.isFile) {
+                        fileCount++
+                        val length = try { child.length().coerceAtLeast(0L) } catch (_: Exception) { 0L }
+                        totalBytes = if (Long.MAX_VALUE - totalBytes < length) Long.MAX_VALUE else totalBytes + length
+                        largest.add(child to length)
+                        if (largest.size > 40) {
+                            largest.sortByDescending { it.second }
+                            while (largest.size > 20) largest.removeAt(largest.lastIndex)
+                        }
+                    }
+                    if (scanned % 150L == 0L) {
+                        val line = tr("Itens analisados") + ": $scanned\n" + tr("Ficheiros") + ": $fileCount • " + tr("Pastas") + ": $folderCount"
+                        mainHandler.post { if (dialog.isShowing && !isFinishing) status.text = line }
+                    }
+                    if (scanned >= 200000L) { reachedLimit = true; return }
+                }
+            }
+            visit(startDir, 0)
+            largest.sortByDescending { it.second }
+            val result = FolderAnalysisResult(startDir, fileCount, folderCount, totalBytes, largest.take(12), inaccessible, reachedLimit)
+            mainHandler.post {
+                try {
+                    if (!isFinishing && dialog.isShowing) dialog.dismiss()
+                    if (!isFinishing) showFolderAnalysisResults(result, cancelled.get())
+                } finally {
+                    searchActive.set(false)
+                }
+            }
+        }
+    }
+
+    private fun showFolderAnalysisResults(result: FolderAnalysisResult, cancelled: Boolean) {
+        val summary = buildString {
+            append(result.root.absolutePath)
+            append("\n\n").append(tr("Tamanho total")).append(": ").append(formatSize(result.totalBytes))
+            append("\n").append(tr("Ficheiros")).append(": ").append(result.fileCount)
+            append("   •   ").append(tr("Pastas")).append(": ").append(result.folderCount)
+            if (result.inaccessibleFolders > 0) append("\n").append(tr("Pastas sem acesso")).append(": ").append(result.inaccessibleFolders)
+            if (result.reachedLimit) append("\n").append(tr("A análise foi limitada para proteger o desempenho."))
+            if (cancelled) append("\n").append(tr("A análise foi interrompida. Os totais são parciais."))
+        }
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(8)) }
+        content.addView(TextView(this).apply {
+            text = summary; textSize = 13f; setTextColor(primaryTextColor())
+            setPadding(dp(8), dp(8), dp(8), dp(14))
+        }, LinearLayout.LayoutParams(-1, -2))
+        content.addView(label(tr("Maiores ficheiros"), 15, primaryTextColor(), true).apply {
+            setPadding(dp(8), dp(4), dp(8), dp(6))
+        }, LinearLayout.LayoutParams(-1, -2))
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        result.largest.forEach { (file, length) ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(9), dp(10), dp(9))
+                background = roundedBackground(rowSurfaceColor(), 8); isClickable = true; isFocusable = true
+            }
+            row.addView(label(file.name, 14, primaryTextColor(), true), LinearLayout.LayoutParams(-1, -2))
+            row.addView(label(formatSize(length) + " • " + (file.parentFile?.absolutePath ?: ""), 11, mutedTextColor(), false).apply {
+                maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.MIDDLE; setPadding(0, dp(3), 0, 0)
+            }, LinearLayout.LayoutParams(-1, -2))
+            row.setOnClickListener {
+                currentDir = file.parentFile ?: result.root
+                selected.clear(); refreshFiles(); showFileActions(file)
+            }
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3); bottomMargin = dp(3) })
+        }
+        content.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(-1, dp(300)))
+        AlertDialog.Builder(this).setTitle(tr("Análise da pasta")).setView(content)
+            .setPositiveButton(tr("Fechar"), null)
+            .setNeutralButton(tr("Partilhar relatório")) { _, _ ->
+                val report = summary + "\n\n" + tr("Maiores ficheiros") + "\n" +
+                    result.largest.joinToString("\n") { "${it.first.name} — ${formatSize(it.second)}" }
+                val intent = Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, tr("Relatório de armazenamento"))
+                    .putExtra(Intent.EXTRA_TEXT, report)
+                startActivity(Intent.createChooser(intent, tr("Partilhar relatório")))
+            }.show()
     }
 
     private fun openFile(file: File) {
@@ -3169,6 +3340,15 @@ class MainActivity : Activity() {
             "Copiar seleção" to "Copy selection", "Recortar seleção" to "Cut selection",
             "Colar" to "Paste", "Criar novo…" to "Create new…", "Comprimir em ZIP" to "Compress to ZIP",
             "Comprimir em 7Z" to "Compress to 7Z", "Pesquisar em subpastas" to "Search subfolders",
+            "Analisar pasta atual" to "Analyze current folder", "Analisar pasta" to "Analyze folder",
+            "Calcular SHA-256" to "Calculate SHA-256", "A calcular SHA-256…" to "Calculating SHA-256…",
+            "SHA-256 calculado" to "SHA-256 calculated", "A analisar a pasta…" to "Analyzing folder…",
+            "Análise da pasta" to "Folder analysis", "A parar a análise…" to "Stopping analysis…",
+            "Itens analisados" to "Items scanned", "Ficheiros" to "Files", "Pastas" to "Folders",
+            "Tamanho total" to "Total size", "Maiores ficheiros" to "Largest files",
+            "A análise foi limitada para proteger o desempenho." to "Analysis was limited to protect performance.",
+            "A análise foi interrompida. Os totais são parciais." to "Analysis was stopped. Totals are partial.",
+            "Partilhar relatório" to "Share report", "Relatório de armazenamento" to "Storage report",
             "Partilhar aplicação" to "Share app", "Gostas do Archiver?" to "Enjoying Archiver?",
             "Se a aplicação te está a ajudar, partilha-a com alguém. É opcional e não volta a aparecer." to "If the app is useful to you, share it with someone. This is optional and will not appear again.",
             "Agora não" to "Not now", "Partilhar Archiver" to "Share Archiver",
