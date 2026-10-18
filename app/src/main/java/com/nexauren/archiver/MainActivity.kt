@@ -444,9 +444,9 @@ class MainActivity : Activity() {
             }
         }
         countView.text = when {
-            selected.isNotEmpty() -> selected.size.toString() + " selecionado(s) • " + files.size + " itens"
-            files.isEmpty() -> "Pasta vazia"
-            else -> files.size.toString() + if (files.size == 1) " item" else " itens"
+            selected.isNotEmpty() -> selected.size.toString() + " " + tr("selecionado(s)") + " • " + files.size + " " + tr("itens")
+            files.isEmpty() -> tr("Pasta vazia")
+            else -> files.size.toString() + " " + tr(if (files.size == 1) "item" else "itens")
         }
         files.forEach { addFileRow(it) }
         updateSelectionBar()
@@ -577,7 +577,7 @@ class MainActivity : Activity() {
         val cachedCount = if (file.isDirectory) directoryCountCache.get(key) else null
         val details = if (file.isDirectory) {
             if (cachedCount == null) tr("Pasta")
-            else cachedCount.toString() + if (cachedCount == 1) " item" else " itens"
+            else cachedCount.toString() + " " + tr(if (cachedCount == 1) "item" else "itens")
         } else formatSize(file.length())
         val modified = if (file.lastModified() > 0L) DateFormat.getDateInstance(DateFormat.SHORT).format(Date(file.lastModified())) else ""
         val middle = LinearLayout(this).apply {
@@ -643,9 +643,9 @@ class MainActivity : Activity() {
                     directoryCountCache.put(key, childCount)
                     mainHandler.post {
                         if (fileRowViews[key] === item && metaView.isAttachedToWindow) {
-                            val updatedDetails = childCount.toString() + if (childCount == 1) " item" else " itens"
+                            val updatedDetails = childCount.toString() + " " + tr(if (childCount == 1) "item" else "itens")
                             metaView.text = buildString {
-                                append(tr(updatedDetails))
+                                append(updatedDetails)
                                 if (showTime && modified.isNotEmpty() && !inGrid) {
                                     append("   •   ")
                                     append(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(file.lastModified())))
@@ -1610,13 +1610,13 @@ class MainActivity : Activity() {
     }
 
     private fun showInfo(file: File) {
-        val type = if (file.isDirectory) "Pasta" else "Ficheiro"
-        val message = "Nome: " + file.name +
-            "\nTipo: " + type +
-            "\nTamanho: " + if (file.isDirectory) "—" else formatSize(file.length()) +
-            "\nModificado: " + DateFormat.getDateTimeInstance().format(Date(file.lastModified())) +
-            "\nPode ler: " + file.canRead() + "\nPode escrever: " + file.canWrite()
-        AlertDialog.Builder(this).setTitle("Informações").setMessage(message).setPositiveButton("OK", null).show()
+        val type = tr(if (file.isDirectory) "Pasta" else "Ficheiro")
+        val message = tr("Nome") + ": " + file.name +
+            "\n" + tr("Tipo") + ": " + type +
+            "\n" + tr("Tamanho") + ": " + if (file.isDirectory) "—" else formatSize(file.length()) +
+            "\n" + tr("Modificado") + ": " + DateFormat.getDateTimeInstance().format(Date(file.lastModified())) +
+            "\n" + tr("Pode ler") + ": " + file.canRead() + "\n" + tr("Pode escrever") + ": " + file.canWrite()
+        AlertDialog.Builder(this).setTitle(tr("Informações")).setMessage(message).setPositiveButton("OK", null).show()
     }
 
     private fun chosen(): List<File> {
@@ -3340,6 +3340,12 @@ class MainActivity : Activity() {
             "Copiar seleção" to "Copy selection", "Recortar seleção" to "Cut selection",
             "Colar" to "Paste", "Criar novo…" to "Create new…", "Comprimir em ZIP" to "Compress to ZIP",
             "Comprimir em 7Z" to "Compress to 7Z", "Pesquisar em subpastas" to "Search subfolders",
+            "Modificado" to "Modified", "Pode ler" to "Can read", "Pode escrever" to "Can write",
+            "selecionado(s)" to "selected", "item" to "item", "itens" to "items",
+            "Pasta" to "Folder", "Ficheiro" to "File", "Dados do ficheiro" to "File details",
+            "Cenas" to "Scenes", "Objetos/nós" to "Objects/nodes", "Materiais" to "Materials",
+            "Texturas" to "Textures", "Imagens" to "Images", "Animações" to "Animations",
+            "Buffers" to "Buffers", "Versão GLTF" to "GLTF version", "Formato" to "Format",
             "Para explorar, copiar, mover, renomear, eliminar e comprimir ficheiros em diferentes pastas, o Archiver precisa de acesso aos ficheiros partilhados do dispositivo." to "To browse, copy, move, rename, delete and archive files across folders, Archiver needs access to shared files on this device.",
             "O Android abre uma página especial de definições para confirmar este acesso. O sistema continua a bloquear algumas pastas privadas das aplicações." to "Android opens a special settings page to grant this access. The system still restricts some apps' private folders.",
             "Não foi possível abrir as definições de acesso aos ficheiros." to "Could not open file access settings.",
