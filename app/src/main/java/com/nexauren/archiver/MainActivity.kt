@@ -27,6 +27,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
@@ -160,6 +161,7 @@ class MainActivity : Activity() {
     private lateinit var pathView: TextView
     private lateinit var selectionView: TextView
     private lateinit var countView: TextView
+    private lateinit var storageView: TextView
     private lateinit var breadcrumbRow: LinearLayout
     private var selectionBar: LinearLayout? = null
     private var addFab: ImageButton? = null
@@ -177,6 +179,15 @@ class MainActivity : Activity() {
     private var uiTheme = "Escuro"
     private var accentName = "Lavanda"
     private val folderColors = linkedMapOf<String, String>()
+    private val folderIcons = linkedMapOf<String, String>()
+    private var backgroundPreset = "Carvão"
+    private val refreshHandler = Handler(Looper.getMainLooper())
+    private val autoRefreshTask = object : Runnable {
+        override fun run() {
+            if (browserRendered && !settingsOpen && !editorOpen && !workActive.get() && hasStorageAccess()) refreshFiles()
+            refreshHandler.postDelayed(this, 5000L)
+        }
+    }
 
     private val selected = linkedSetOf<String>()
     private val rowViews = linkedMapOf<String, View>()
@@ -232,6 +243,13 @@ class MainActivity : Activity() {
         if (!::prefs.isInitialized) return
         if (hasStorageAccess() && !browserRendered) renderBrowser()
         else if (!hasStorageAccess() && !browserRendered && !::page.isInitialized) showPermissionScreen()
+        refreshHandler.removeCallbacks(autoRefreshTask)
+        refreshHandler.postDelayed(autoRefreshTask, 5000L)
+    }
+
+    override fun onPause() {
+        refreshHandler.removeCallbacks(autoRefreshTask)
+        super.onPause()
     }
 
     private fun loadPreferences() {
@@ -259,6 +277,12 @@ class MainActivity : Activity() {
             val index = entry.lastIndexOf('=')
             if (index > 0) folderColors[entry.substring(0, index)] = entry.substring(index + 1)
         }
+        folderIcons.clear()
+        (prefs.getStringSet("folder_icons", emptySet()) ?: emptySet()).forEach { entry ->
+            val index = entry.lastIndexOf('=')
+            if (index > 0) folderIcons[entry.substring(0, index)] = entry.substring(index + 1)
+        }
+        backgroundPreset = prefs.getString("background_preset", "Carvão") ?: "Carvão"
         favorites.clear()
         favorites.addAll(prefs.getStringSet("favorites", emptySet()) ?: emptySet())
         applyPaletteToWindow()
@@ -286,6 +310,8 @@ class MainActivity : Activity() {
             .putString("ui_theme", uiTheme)
             .putString("accent_color", accentName)
             .putStringSet("folder_colors", folderColors.map { (path, color) -> "$path=$color" }.toSet())
+            .putStringSet("folder_icons", folderIcons.map { (path, icon) -> "$path=$icon" }.toSet())
+            .putString("background_preset", backgroundPreset)
             .putStringSet("favorites", HashSet(favorites))
             .apply()
     }
@@ -408,6 +434,14 @@ class MainActivity : Activity() {
         page.addView(View(this).apply { setBackgroundColor(accentColor()) },
             LinearLayout.LayoutParams(-1, dp(2)))
 
+        storageView = label("", 12, mutedTextColor(), true).apply {
+            setPadding(dp(16), dp(7), dp(16), dp(7))
+            setBackgroundColor(panelBackgroundColor())
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        page.addView(storageView, LinearLayout.LayoutParams(-1, dp(32)))
+
         val breadcrumbScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             clipToPadding = false
@@ -489,6 +523,7 @@ class MainActivity : Activity() {
         pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
         selectionView.text = currentDir.absolutePath
         renderBreadcrumbs()
+        updateStorageSummary()
         if (useParentEntry && currentDir.canonicalFile != rootDir.canonicalFile) addParentRow()
 
         if (viewMode == "Grelha") {
@@ -725,6 +760,17 @@ class MainActivity : Activity() {
 
     private fun iconForFile(file: File): Int {
         if (file.isDirectory) {
+            folderIcons[pathKey(file)]?.let { custom ->
+                return when (custom) {
+                    "Android" -> R.drawable.ic_folder_android
+                    "Câmara" -> R.drawable.ic_folder_camera
+                    "Transferências" -> R.drawable.ic_folder_download
+                    "Música" -> R.drawable.ic_folder_music
+                    "Vídeo" -> R.drawable.ic_folder_video
+                    "Documentos" -> R.drawable.ic_folder_documents
+                    else -> R.drawable.ic_folder
+                }
+            }
             return when (file.name.lowercase(Locale.ROOT)) {
                 "android" -> R.drawable.ic_folder_android
                 "dcim", "pictures", "picture", "collage", "myalbums" -> R.drawable.ic_folder_camera
@@ -951,8 +997,8 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Partilhar o Archiver", "Ajudar o projeto", "Convida alguém a experimentar o Archiver") {
                     shareApplication()
                 }
-                addSettingChoice(content, "Sobre o Archiver", "0.6.0", "Gestor de ficheiros Android nativo em Kotlin") {
-                    AlertDialog.Builder(this).setTitle("Archiver 0.6.0")
+                addSettingChoice(content, "Sobre o Archiver", "0.8.0", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver 0.8.0")
                         .setMessage(tr("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso."))
                         .setPositiveButton(tr("Fechar"), null).show()
                 }
@@ -961,8 +1007,14 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escolhe entre escuro, preto OLED e claro") { showThemeMenu() }
                 addSettingChoice(content, "Cor de destaque", tr(accentName), "Cor dos botões, seleção e indicadores") { showAccentMenu() }
                 addSettingSwitch(content, "Animações suaves", "Efeitos leves ao apresentar ficheiros", showAnimations) { showAnimations = it }
+                addSettingChoice(content, "Fundo da interface", tr(backgroundPreset), "Personaliza o fundo sem alterar os ficheiros") {
+                    showBackgroundMenu()
+                }
                 addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor para uma pasta") {
                     showFolderColorFolderPicker()
+                }
+                addSettingChoice(content, "Ícones das pastas", "Por pasta", "Escolhe um ícone para cada pasta") {
+                    showFolderIconFolderPicker()
                 }
             }
             "Explorador" -> {
@@ -1136,10 +1188,12 @@ class MainActivity : Activity() {
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
         if (file.isDirectory) options += "Calcular tamanho total"
         if (file.isDirectory) options += "Cor da pasta"
+        if (file.isDirectory) options += "Ícone da pasta"
         AlertDialog.Builder(this).setTitle(file.name).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (options[which]) {
                 "Abrir pasta" -> { currentDir = file; selected.clear(); refreshFiles() }
                 "Cor da pasta" -> showFolderColorMenu(file)
+                "Ícone da pasta" -> showFolderIconMenu(file)
                 "Calcular tamanho total" -> calculateFolderSize(file)
                 "Abrir" -> openFile(file)
                 "Inspecionar modelo 3D" -> showModelInspector(file)
@@ -4516,7 +4570,12 @@ class MainActivity : Activity() {
     private fun pageBackgroundColor(): Int = when (uiTheme) {
         "Claro" -> 0xFFF5F6FA.toInt()
         "Preto OLED" -> 0xFF000000.toInt()
-        else -> 0xFF19191D.toInt()
+        else -> when (backgroundPreset) {
+            "Ameixa" -> 0xFF211923.toInt()
+            "Oceano" -> 0xFF14212B.toInt()
+            "Floresta" -> 0xFF17251F.toInt()
+            else -> 0xFF19191D.toInt()
+        }
     }
 
     private fun panelBackgroundColor(): Int = when (uiTheme) {
@@ -4832,6 +4891,69 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle(tr("Escolher pasta"))
             .setItems(names) { _, which -> showFolderColorMenu(folders[which]) }
             .setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showFolderIconFolderPicker() {
+        val folders = safeList(currentDir).filter { it.isDirectory }.sortedBy { it.name.lowercase(Locale.ROOT) }
+        if (folders.isEmpty()) { toast(tr("Não existem pastas nesta localização.")); return }
+        AlertDialog.Builder(this).setTitle(tr("Escolher pasta"))
+            .setItems(folders.map { it.name }.toTypedArray()) { _, which -> showFolderIconMenu(folders[which]) }
+            .setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showFolderIconMenu(file: File) {
+        val options = arrayOf("Predefinida", "Normal", "Android", "Câmara", "Transferências", "Música", "Vídeo", "Documentos")
+        val labels = options.map { tr(it) }.toTypedArray()
+        AlertDialog.Builder(this).setTitle(tr("Ícone da pasta") + " — " + file.name)
+            .setItems(labels) { _, which ->
+                val key = pathKey(file)
+                if (which == 0) folderIcons.remove(key) else folderIcons[key] = options[which]
+                savePreferences()
+                refreshFiles()
+                toast(tr("Ícone da pasta alterado."))
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showBackgroundMenu() {
+        val options = arrayOf("Carvão", "Ameixa", "Oceano", "Floresta")
+        val previews = intArrayOf(0xFF19191D.toInt(), 0xFF211923.toInt(), 0xFF14212B.toInt(), 0xFF17251F.toInt())
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)) }
+        var dialog: AlertDialog? = null
+        options.forEachIndexed { index, option ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                background = roundedBackground(if (backgroundPreset == option) selectedRowColor() else rowSurfaceColor(), 10)
+                isClickable = true; isFocusable = true
+                setOnClickListener {
+                    backgroundPreset = option
+                    savePreferences(); applyPaletteToWindow(); dialog?.dismiss()
+                    if (settingsOpen) renderSettingsScreen() else renderBrowser()
+                }
+            }
+            row.addView(View(this).apply { background = roundedBackground(previews[index], 8) },
+                LinearLayout.LayoutParams(dp(42), dp(32)).apply { rightMargin = dp(12) })
+            row.addView(label(tr(option), 15, primaryTextColor(), true), LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label(if (backgroundPreset == option) "✓" else "›", 20, accentColor(), true))
+            body.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+        }
+        dialog = AlertDialog.Builder(this).setTitle(tr("Fundo da interface")).setView(body)
+            .setNegativeButton(tr("Fechar"), null).create()
+        dialog?.show()
+    }
+
+    private fun updateStorageSummary() {
+        if (!::storageView.isInitialized) return
+        try {
+            val stats = StatFs(rootDir.absolutePath)
+            val total = stats.totalBytes
+            val free = stats.availableBytes
+            val used = (total - free).coerceAtLeast(0L)
+            storageView.text = tr("Armazenamento") + ": " + formatSize(used) + " " + tr("usados") + " / " + formatSize(total) +
+                " • " + formatSize(free) + " " + tr("livres")
+        } catch (_: Exception) {
+            storageView.text = tr("Armazenamento interno")
+        }
     }
 
     private fun showFolderColorMenu(file: File) {
