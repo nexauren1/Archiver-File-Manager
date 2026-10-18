@@ -15,6 +15,7 @@ A lightweight Android file manager project focused on practical file operations 
 - Save persistent file/folder favorites and navigate to them later, including favorites from other selected folders.
 - Create ZIP archives with store, fast, normal, or ultra compression.
 - Create and extract 7z archives; test ZIP and 7z contents for common read/CRC errors.
+- Browse ZIP/7z archive entries inside the app and extract an individual file without unpacking the entire archive.
 - Optionally delete source items only after archive creation succeeds.
 - Extract supported archives here or into a new folder while blocking unsafe parent-directory paths.
 - Remember the selected folder and preferences.
