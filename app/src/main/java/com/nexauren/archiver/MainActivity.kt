@@ -946,14 +946,14 @@ class MainActivity : Activity() {
         entry.lastModifiedDate = Date(maxOf(0L, source.lastModified()))
         if (source.isDirectory) {
             entry.isDirectory = true
-            entry.hasStream = false
+            entry.setHasStream(false)
             seven.putArchiveEntry(entry)
             seven.closeArchiveEntry()
             val children = source.listFiles() ?: throw IOException("Não foi possível ler " + source.name)
             children.forEach { addToSevenZip(seven, it, entryName + "/" + it.name, destination) }
         } else {
             entry.isDirectory = false
-            entry.hasStream = true
+            entry.setHasStream(true)
             entry.size = source.length()
             seven.putArchiveEntry(entry)
             BufferedInputStream(FileInputStream(source)).use { input ->
