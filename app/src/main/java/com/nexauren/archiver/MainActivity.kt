@@ -2115,18 +2115,18 @@ class MainActivity : Activity() {
     ) {
         if (depth > 50 || hits.size >= 100 || processed[0] >= 10000L) return
         // Search doesn't need display sorting; avoid extra work during recursive scans.
-        val children = try { directory.listFiles()?.asList() ?: emptyList() }
-            catch (_: SecurityException) { emptyList() }
+        val children = try {
+            directory.listFiles { _, name -> showHidden || !name.startsWith(".") }?.asList() ?: emptyList()
+        } catch (_: SecurityException) { emptyList() }
         for (child in children) {
             if (hits.size >= 100 || processed[0] >= 10000L) return
-            if (!showHidden && child.name.startsWith(".")) continue
             val matchesName = if (matcher != null) matcher.matches(child.name) else child.name.contains(query, ignoreCase = true)
             if (matchesName && matchesSearchType(child, typeFilter)) hits.add(child)
             processed[0]++
             if (processed[0] % 250L == 0L) {
                 meter?.report(0, tr("Analisados") + ": " + processed[0] + " • " + child.name)
             }
-            if (recursive && child.isDirectory && isWithinRoot(child) && isWithinScope(child, scope)) {
+            if (recursive && child.isDirectory && isWithinScope(child, scope)) {
                 searchTree(child, scope, query, matcher, typeFilter, true, hits, depth + 1, processed, meter)
             }
         }
