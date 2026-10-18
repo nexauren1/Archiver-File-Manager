@@ -269,9 +269,9 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(4), dp(8), dp(4))
             setBackgroundColor(0xFF202025.toInt())
         }
-        strip.addView(actionButton("Nova pasta") { promptNewItem(true) }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        strip.addView(actionButton("+ Criar") { showCreateMenu() }, LinearLayout.LayoutParams(0, dp(42), 1f))
         strip.addView(actionButton("Colar") { paste() }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        strip.addView(actionButton("Compactar") { promptArchive(chosenOrVisible(), "zip") }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        strip.addView(actionButton("Compactar") { promptArchive(chosen(), "zip") }, LinearLayout.LayoutParams(0, dp(42), 1f))
         page.addView(strip, LinearLayout.LayoutParams(-1, dp(50)))
 
         val scroll = ScrollView(this)
@@ -345,9 +345,18 @@ class MainActivity : Activity() {
                 dp(if (inGrid) 6 else 10), dp(if (inGrid) 8 else if (viewMode == "Compacto") 4 else 9))
             if (isSelected) setBackgroundColor(0xFF353348.toInt())
         }
-        if (shouldLoadThumbnail(file)) {
+        if (file.isDirectory) {
+            val folderIcon = ImageView(this).apply {
+                setImageResource(R.drawable.ic_folder)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = "Pasta"
+            }
+            val size = dp(if (inGrid) 72 else 52)
+            if (inGrid) item.addView(folderIcon, LinearLayout.LayoutParams(size, size))
+            else item.addView(folderIcon, LinearLayout.LayoutParams(size, size).apply { rightMargin = dp(10) })
+        } else if (shouldLoadThumbnail(file)) {
             val preview = ImageView(this).apply {
-                setImageResource(if (file.isDirectory) android.R.drawable.ic_menu_agenda else android.R.drawable.ic_menu_report_image)
+                setImageResource(android.R.drawable.ic_menu_report_image)
                 scaleType = if (squareThumbnails) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
             }
             val size = dp(if (inGrid) 72 else 48)
@@ -579,6 +588,18 @@ class MainActivity : Activity() {
             dialog.dismiss()
             toast("Nível guardado.")
         }.setNegativeButton("Cancelar", null).show()
+    }
+
+    private fun showCreateMenu() {
+        val options = arrayOf("Nova pasta", "Novo ficheiro vazio", "Criar arquivo ZIP", "Criar arquivo 7Z")
+        AlertDialog.Builder(this).setTitle("Criar").setItems(options) { _, which ->
+            when (which) {
+                0 -> promptNewItem(true)
+                1 -> promptNewItem(false)
+                2 -> promptArchive(chosen(), "zip")
+                3 -> promptArchive(chosen(), "7z")
+            }
+        }.show()
     }
 
     private fun promptNewItem(folder: Boolean) {
