@@ -3,6 +3,9 @@ package com.nexauren.archiver
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.ProgressDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -26,25 +29,35 @@ import android.util.LruCache
 import android.view.Gravity
 import android.view.View
 import android.webkit.MimeTypeMap
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.GridLayout
+import android.widget.HorizontalScrollView
 import android.widget.Switch
 import android.widget.ImageButton
 import android.widget.FrameLayout
 import android.graphics.drawable.GradientDrawable
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import org.apache.commons.compress.archivers.sevenz.SevenZMethod
 import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
+import net.lingala.zip4j.ZipFile as Zip4jFile
+import net.lingala.zip4j.model.ZipParameters
+import net.lingala.zip4j.progress.ProgressMonitor
+import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -74,16 +87,33 @@ class MainActivity : Activity() {
     private lateinit var pathView: TextView
     private lateinit var selectionView: TextView
     private lateinit var countView: TextView
+    private lateinit var breadcrumbRow: LinearLayout
+    private var selectionBar: LinearLayout? = null
+    private var addFab: ImageButton? = null
     private var gridRows: GridLayout? = null
     private var browserRendered = false
     private var settingsOpen = false
+    private var settingsCategory: String? = null
+    private var editorOpen = false
+    private var editorDirty = false
+    private var editorSavedText = ""
+    private var editorFile: File? = null
+    private var editorInput: EditText? = null
+    private var closeEditorAfterSave = false
+    private var appLanguage = "pt"
+    private var uiTheme = "Escuro"
+    private var accentName = "Lavanda"
+    private val folderColors = linkedMapOf<String, String>()
 
     private val selected = linkedSetOf<String>()
     private val favorites = linkedSetOf<String>()
     private var clipboard = emptyList<File>()
     private var clipboardIsCut = false
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+    private val thumbnailWorker: ExecutorService = Executors.newFixedThreadPool(2)
     private val workActive = AtomicBoolean(false)
+    private val notificationChannelId = "archiver_file_operations"
+    private val operationNotificationId = 7410
     private val thumbnailCache = object : LruCache<String, Bitmap>(2 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = maxOf(1, value.byteCount / 1024)
     }
@@ -138,8 +168,17 @@ class MainActivity : Activity() {
         sortBy = prefs.getString("sort", "Nome") ?: "Nome"
         viewMode = prefs.getString("view_mode", "Detalhado") ?: "Detalhado"
         compressionLevel = prefs.getInt("compression", 2)
+        appLanguage = prefs.getString("app_language", "pt") ?: "pt"
+        uiTheme = prefs.getString("ui_theme", "Escuro") ?: "Escuro"
+        accentName = prefs.getString("accent_color", "Lavanda") ?: "Lavanda"
+        folderColors.clear()
+        (prefs.getStringSet("folder_colors", emptySet()) ?: emptySet()).forEach { entry ->
+            val index = entry.lastIndexOf('=')
+            if (index > 0) folderColors[entry.substring(0, index)] = entry.substring(index + 1)
+        }
         favorites.clear()
         favorites.addAll(prefs.getStringSet("favorites", emptySet()) ?: emptySet())
+        applyPaletteToWindow()
     }
 
     private fun savePreferences() {
@@ -159,6 +198,10 @@ class MainActivity : Activity() {
             .putString("sort", sortBy)
             .putString("view_mode", viewMode)
             .putInt("compression", compressionLevel)
+            .putString("app_language", appLanguage)
+            .putString("ui_theme", uiTheme)
+            .putString("accent_color", accentName)
+            .putStringSet("folder_colors", folderColors.map { (path, color) -> "$path=$color" }.toSet())
             .putStringSet("favorites", HashSet(favorites))
             .apply()
     }
@@ -244,13 +287,13 @@ class MainActivity : Activity() {
 
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF19191D.toInt())
+            setBackgroundColor(pageBackgroundColor())
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(4), 0)
-            setBackgroundColor(0xFF292D40.toInt())
+            setBackgroundColor(toolbarBackgroundColor())
         }
         toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Pasta anterior") { goUp() },
             LinearLayout.LayoutParams(dp(48), dp(58)))
@@ -277,13 +320,26 @@ class MainActivity : Activity() {
         toolbar.addView(toolbarIcon(R.drawable.ic_more_vertical, "Mais opções") { showMainMenu() },
             LinearLayout.LayoutParams(dp(44), dp(58)))
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
-        page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) },
+        page.addView(View(this).apply { setBackgroundColor(accentColor()) },
             LinearLayout.LayoutParams(-1, dp(2)))
+
+        val breadcrumbScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            setPadding(dp(8), 0, dp(8), 0)
+            setBackgroundColor(panelBackgroundColor())
+        }
+        breadcrumbRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        breadcrumbScroll.addView(breadcrumbRow, FrameLayout.LayoutParams(-2, -1))
+        page.addView(breadcrumbScroll, LinearLayout.LayoutParams(-1, dp(38)))
 
         countView = label("", 13, 0xFFB9B9C3.toInt(), false).apply {
             setPadding(dp(16), dp(7), dp(16), dp(7))
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF202025.toInt())
+            setBackgroundColor(panelBackgroundColor())
         }
         page.addView(countView, LinearLayout.LayoutParams(-1, dp(34)))
 
@@ -294,7 +350,7 @@ class MainActivity : Activity() {
         }
         rows = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(4), dp(8), dp(88))
+            setPadding(dp(8), dp(4), dp(8), dp(104))
         }
         scroll.addView(rows)
         body.addView(scroll, FrameLayout.LayoutParams(-1, -1))
@@ -311,17 +367,39 @@ class MainActivity : Activity() {
         val fabParams = FrameLayout.LayoutParams(dp(58), dp(58), Gravity.END or Gravity.BOTTOM)
         fabParams.setMargins(0, 0, dp(20), dp(20))
         body.addView(fab, fabParams)
+        addFab = fab
+
+        selectionBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(2), dp(4), dp(2))
+            setBackgroundColor(toolbarBackgroundColor())
+            elevation = dp(10).toFloat()
+            visibility = View.GONE
+        }
+        selectionBar?.addView(selectionAction("▢", "Copiar") { stageClipboard(false) },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        selectionBar?.addView(selectionAction("⇄", "Mover") { stageClipboard(true) },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        selectionBar?.addView(selectionAction("ZIP", "Comprimir") { promptArchive(chosen(), "zip") },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        selectionBar?.addView(selectionAction("⌫", "Eliminar") { confirmDelete(chosen()) },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        selectionBar?.addView(selectionAction("⋮", "Mais") { showSelectionActions() },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        body.addView(selectionBar, FrameLayout.LayoutParams(-1, dp(70), Gravity.BOTTOM))
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
         refreshFiles()
     }
 
     private fun refreshFiles() {
-        if (!browserRendered || settingsOpen || !hasStorageAccess()) return
+        if (!browserRendered || settingsOpen || editorOpen || !hasStorageAccess()) return
         rows.removeAllViews()
         gridRows = null
         pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
         selectionView.text = currentDir.absolutePath
+        renderBreadcrumbs()
         if (useParentEntry && currentDir.canonicalFile != rootDir.canonicalFile) addParentRow()
 
         if (viewMode == "Grelha") {
@@ -352,6 +430,67 @@ class MainActivity : Activity() {
             else -> files.size.toString() + if (files.size == 1) " item" else " itens"
         }
         files.forEach { addFileRow(it) }
+        updateSelectionBar()
+    }
+
+    private fun renderBreadcrumbs() {
+        if (!::breadcrumbRow.isInitialized || !::rootDir.isInitialized || !::currentDir.isInitialized) return
+        breadcrumbRow.removeAllViews()
+        val root = rootDir.canonicalFile
+        val current = currentDir.canonicalFile
+        val rootIsCurrent = pathKey(root) == pathKey(current)
+        val rootSegment = TextView(this).apply {
+            text = "Armazenamento interno"
+            textSize = 12f
+            setTextColor(if (rootIsCurrent) 0xFFD8D3FF.toInt() else 0xFFE2E2E8.toInt())
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                currentDir = rootDir
+                selected.clear()
+                refreshFiles()
+            }
+        }
+        breadcrumbRow.addView(rootSegment, LinearLayout.LayoutParams(-2, -2))
+
+        val relative = if (pathKey(current) == pathKey(root)) "" else
+            current.path.removePrefix(root.path).trimStart(File.separatorChar)
+        var cursor = root
+        relative.split(File.separatorChar).filter { it.isNotBlank() }.forEach { part ->
+            breadcrumbRow.addView(TextView(this).apply {
+                text = "›"
+                textSize = 18f
+                setTextColor(0xFF858596.toInt())
+                gravity = Gravity.CENTER
+            }, LinearLayout.LayoutParams(-2, -2))
+            cursor = File(cursor, part)
+            val target = cursor
+            val isCurrent = pathKey(target) == pathKey(current)
+            val segment = TextView(this).apply {
+                text = part
+                textSize = 12f
+                setTextColor(if (isCurrent) 0xFFD8D3FF.toInt() else 0xFFE2E2E8.toInt())
+                setPadding(dp(6), dp(5), dp(8), dp(5))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    if (target.exists() && target.isDirectory && isWithinRoot(target)) {
+                        currentDir = target
+                        selected.clear()
+                        refreshFiles()
+                    }
+                }
+            }
+            breadcrumbRow.addView(segment, LinearLayout.LayoutParams(-2, -2))
+        }
+    }
+
+    private fun updateSelectionBar() {
+        val bar = selectionBar ?: return
+        val hasSelection = selected.isNotEmpty()
+        bar.visibility = if (hasSelection) View.VISIBLE else View.GONE
+        addFab?.visibility = if (hasSelection) View.GONE else View.VISIBLE
     }
 
     private fun safeList(dir: File): List<File> {
@@ -393,9 +532,12 @@ class MainActivity : Activity() {
         val item = LinearLayout(this).apply {
             orientation = if (inGrid) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
             gravity = if (inGrid) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
-            setPadding(dp(if (inGrid) 8 else 6), dp(if (inGrid) 12 else 8),
-                dp(if (inGrid) 8 else 10), dp(if (inGrid) 12 else 8))
-            background = roundedBackground(if (isSelected) 0xFF353348.toInt() else if (inGrid) 0xFF24242A.toInt() else 0xFF19191D.toInt(), 10)
+            setPadding(dp(if (inGrid) 8 else 4), dp(if (inGrid) 12 else 6),
+                dp(if (inGrid) 8 else 6), dp(if (inGrid) 12 else 6))
+            background = roundedBackground(
+                if (isSelected) selectedRowColor() else if (inGrid) rowSurfaceColor() else pageBackgroundColor(),
+                if (inGrid) 10 else 4
+            )
             isClickable = true
             isFocusable = true
         }
@@ -403,9 +545,12 @@ class MainActivity : Activity() {
             setImageResource(iconForFile(file))
             contentDescription = if (file.isDirectory) "Pasta " + file.name else file.name
             scaleType = if (squareThumbnails) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
+            if (file.isDirectory && !shouldLoadThumbnail(file)) {
+                folderColorValue(file)?.let { setColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
+            }
         }
-        val iconWidth = dp(if (inGrid) 72 else 64)
-        val iconHeight = dp(if (inGrid) 66 else 58)
+        val iconWidth = dp(if (inGrid) 72 else 48)
+        val iconHeight = dp(if (inGrid) 66 else 48)
         if (inGrid) item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { gravity = Gravity.CENTER_HORIZONTAL })
         else item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { rightMargin = dp(8) })
         if (shouldLoadThumbnail(file)) loadThumbnailAsync(file, icon)
@@ -422,8 +567,8 @@ class MainActivity : Activity() {
         }
         val name = TextView(this).apply {
             text = file.name.ifBlank { "(sem nome)" }
-            textSize = if (inGrid) 13f else if (viewMode == "Compacto") 14f else 16f
-            setTextColor(if (isSelected) 0xFFD8D3FF.toInt() else 0xFFF3F3F5.toInt())
+            textSize = if (inGrid) 13f else if (viewMode == "Compacto") 13f else 15f
+            setTextColor(if (isSelected) accentColor() else primaryTextColor())
             typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
             maxLines = if (inGrid) 2 else if (viewMode == "Detalhado") 2 else 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -440,7 +585,7 @@ class MainActivity : Activity() {
         if (metaText.isNotEmpty()) middle.addView(TextView(this).apply {
             text = metaText
             textSize = 12f
-            setTextColor(0xFFAAAAB4.toInt())
+            setTextColor(mutedTextColor())
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = if (inGrid) Gravity.CENTER else Gravity.START
@@ -480,14 +625,35 @@ class MainActivity : Activity() {
     }
 
     private fun iconForFile(file: File): Int {
-        if (file.isDirectory) return R.drawable.ic_folder
+        if (file.isDirectory) {
+            return when (file.name.lowercase(Locale.ROOT)) {
+                "android" -> R.drawable.ic_folder_android
+                "dcim", "pictures", "picture", "collage", "myalbums" -> R.drawable.ic_folder_camera
+                "download", "downloads" -> R.drawable.ic_folder_download
+                "music", "musicas" -> R.drawable.ic_folder_music
+                "movies", "videos" -> R.drawable.ic_folder_video
+                "documents", "documentos" -> R.drawable.ic_folder_documents
+                else -> R.drawable.ic_folder
+            }
+        }
         return when (extension(file.name)) {
-            "zip", "7z", "rar", "tar", "gz", "bz2" -> R.drawable.ic_archive
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> R.drawable.ic_image
-            "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus" -> R.drawable.ic_audio
-            "mp4", "mkv", "webm", "avi", "mov", "3gp" -> R.drawable.ic_video
-            "apk" -> R.drawable.ic_android_file
+            "zip" -> R.drawable.ic_zip_file
+            "7z" -> R.drawable.ic_7z_file
+            "rar" -> R.drawable.ic_rar_file
+            "tar", "tgz", "tbz" -> R.drawable.ic_tar_file
+            "gz", "bz2", "xz", "lz4", "zst", "iso", "cab", "arj" -> R.drawable.ic_archive
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff", "svg" -> R.drawable.ic_image
+            "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus", "wma", "mid", "midi" -> R.drawable.ic_audio
+            "mp4", "mkv", "webm", "avi", "mov", "3gp", "m4v", "mpeg", "mpg" -> R.drawable.ic_video
+            "apk", "aab", "apks", "xapk" -> R.drawable.ic_android_file
             "pdf" -> R.drawable.ic_pdf
+            "txt", "text", "md", "markdown", "log", "readme", "nfo" -> R.drawable.ic_text_file
+            "json", "xml", "yaml", "yml", "properties", "ini", "cfg", "conf", "toml",
+            "java", "kt", "kts", "js", "ts", "tsx", "jsx", "py", "html", "htm", "css",
+            "scss", "sql", "sh", "bat", "c", "cpp", "h", "hpp", "gradle", "gitignore" -> R.drawable.ic_code_file
+            "doc", "docx", "odt", "rtf", "pages", "epub" -> R.drawable.ic_document_file
+            "xls", "xlsx", "ods", "csv", "tsv" -> R.drawable.ic_spreadsheet_file
+            "glb", "gltf", "obj", "stl", "fbx", "3mf", "dae", "ply", "blend" -> R.drawable.ic_model3d_file
             else -> R.drawable.ic_file
         }
     }
@@ -549,7 +715,7 @@ class MainActivity : Activity() {
             "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisar em subpastas", "Favoritos",
             "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início"
         )
-        AlertDialog.Builder(this).setTitle("Opções").setItems(options) { _, which ->
+        AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
                 0 -> {
                     selected.clear()
@@ -573,9 +739,26 @@ class MainActivity : Activity() {
         }.show()
     }
 
+    private fun showSelectionActions() {
+        val options = arrayOf("Comprimir em ZIP", "Comprimir em 7Z", "Renomear", "Informações", "Limpar seleção")
+        AlertDialog.Builder(this)
+            .setTitle("${selected.size} selecionado(s)")
+            .setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
+                val items = chosen()
+                when (which) {
+                    0 -> promptArchive(items, "zip")
+                    1 -> promptArchive(items, "7z")
+                    2 -> if (items.size == 1) promptRename(items[0]) else toast("Para renomear, seleciona apenas um item.")
+                    3 -> if (items.size == 1) showInfo(items[0]) else toast("Seleciona apenas um item para ver as informações.")
+                    4 -> { selected.clear(); refreshFiles() }
+                }
+            }
+            .show()
+    }
+
     private fun showSortMenu() {
         val items = arrayOf("Nome", "Tamanho", "Data", "Tipo", if (descending) "Ordem crescente" else "Ordem decrescente")
-        AlertDialog.Builder(this).setTitle("Ordenar ficheiros").setItems(items) { _, which ->
+        AlertDialog.Builder(this).setTitle(tr("Ordenar ficheiros")).setItems(items.map { tr(it) }.toTypedArray()) { _, which ->
             if (which < 4) sortBy = items[which] else descending = !descending
             savePreferences()
             if (settingsOpen) renderSettingsScreen() else refreshFiles()
@@ -584,28 +767,35 @@ class MainActivity : Activity() {
 
     private fun showExplorerSettings() {
         settingsOpen = true
+        settingsCategory = null
         renderSettingsScreen()
     }
 
     private fun renderSettingsScreen() {
+        val category = settingsCategory
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF19191D.toInt())
+            setBackgroundColor(pageBackgroundColor())
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(12), 0)
-            setBackgroundColor(0xFF292D40.toInt())
+            setBackgroundColor(toolbarBackgroundColor())
         }
-        toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Voltar ao explorador") {
-            settingsOpen = false
-            renderBrowser()
+        toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, tr("Voltar")) {
+            if (settingsCategory != null) {
+                settingsCategory = null
+                renderSettingsScreen()
+            } else {
+                settingsOpen = false
+                renderBrowser()
+            }
         }, LinearLayout.LayoutParams(dp(48), dp(58)))
-        toolbar.addView(label("Explorador", 22, 0xFFFFFFFF.toInt(), true),
+        toolbar.addView(label(tr(category ?: "Configurações"), 22, primaryTextColor(), true),
             LinearLayout.LayoutParams(0, dp(58), 1f))
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
-        page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) },
+        page.addView(View(this).apply { setBackgroundColor(accentColor()) },
             LinearLayout.LayoutParams(-1, dp(2)))
 
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -616,21 +806,89 @@ class MainActivity : Activity() {
         scroll.addView(content)
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        addSettingChoice(content, "Ordenar arquivos", sortBy, "Escolher a ordem dos ficheiros") { showSortMenu() }
-        addSettingSwitch(content, "Decrescente", "Inverte a ordem de ordenação dos arquivos", descending) { descending = it }
-        addSettingSwitch(content, "Usar item \"..\" ", "Permite subir para o diretório anterior a partir da lista", useParentEntry) { useParentEntry = it }
-        addSettingSwitch(content, "Exibir arquivos ocultos", "Mostra ficheiros e diretórios cujo nome começa por ponto", showHidden) { showHidden = it }
-        addSettingChoice(content, "Modo de exibição", viewMode, "Detalhado, compacto ou grelha") { showViewModeMenu() }
-        addSettingSwitch(content, "Exibir tamanho", "Mostra o tamanho dos ficheiros na lista", showSize) { showSize = it }
-        addSettingSwitch(content, "Exibir data", "Mostra a data da última modificação", showDate) { showDate = it }
-        addSettingSwitch(content, "Exibir hora", "Mostra a hora da última modificação", showTime, showDate) { showTime = it }
-        addSettingSwitch(content, "Miniaturas", "Permite a exibição de miniaturas", showThumbnails) { showThumbnails = it }
-        addSettingSwitch(content, "Miniaturas do PDF", "Mostrar miniaturas de documentos PDF (pode causar erros em alguns dispositivos)", showPdfThumbnails) { showPdfThumbnails = it }
-        addSettingSwitch(content, "Miniaturas de vídeo", "Mostrar miniaturas de vídeo", showVideoThumbnails) { showVideoThumbnails = it }
-        addSettingSwitch(content, "Capa do álbum", "Mostrar a capa do álbum nos ficheiros de música", showAlbumCovers) { showAlbumCovers = it }
-        addSettingSwitch(content, "Ícones do APK", "Exibir os ícones das aplicações APK", showApkIcons) { showApkIcons = it }
-        addSettingSwitch(content, "Miniaturas quadradas", "Recorta as miniaturas para formato quadrado", squareThumbnails) { squareThumbnails = it }
-        addSettingChoice(content, "Nível de compressão", compressionName(), "ZIP e 7Z") { showCompressionMenu() }
+        when (category) {
+            null -> {
+                addSettingChoice(content, "Geral", "2 idiomas", "Idioma, notificações e informações") {
+                    settingsCategory = "Geral"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "Interface", uiTheme, "Tema, cor de destaque e aparência") {
+                    settingsCategory = "Interface"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "Explorador", tr(viewMode), "Ordenação, ficheiros ocultos e miniaturas") {
+                    settingsCategory = "Explorador"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "Compressão", compressionName(), "Formato, velocidade e opções de arquivos") {
+                    settingsCategory = "Compressão"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "ROOT", "Não configurado", "O acesso root não está ativo no Archiver") {
+                    settingsCategory = "ROOT"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "Plugins", "Nenhum", "O sistema de plugins ainda não está disponível") {
+                    settingsCategory = "Plugins"; renderSettingsScreen()
+                }
+            }
+            "Geral" -> {
+                addSettingChoice(content, "Idioma", if (appLanguage == "en") "English" else "Português",
+                    "Escolher o idioma da interface") { showLanguageMenu() }
+                val notificationsEnabled = Build.VERSION.SDK_INT < 33 ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                addSettingChoice(content, "Notificações", if (notificationsEnabled) "Ligado" else "Desligado",
+                    "Progresso e conclusão das operações de ficheiros") {
+                    if (Build.VERSION.SDK_INT >= 33 && !notificationsEnabled) {
+                        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 742)
+                    } else {
+                        toast(if (notificationsEnabled) "As notificações estão disponíveis." else "Ativa as notificações nas definições do Android.")
+                    }
+                }
+                addSettingChoice(content, "Sobre o Archiver", "0.4.0", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver 0.4.0")
+                        .setMessage("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso.")
+                        .setPositiveButton(tr("Fechar"), null).show()
+                }
+            }
+            "Interface" -> {
+                addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escuro, preto OLED ou claro") { showThemeMenu() }
+                addSettingChoice(content, "Cor de destaque", tr(accentName), "Personaliza os controlos e realces") { showAccentMenu() }
+                addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor no menu de cada pasta") {
+                    toast("Abre o menu de uma pasta e escolhe Cor da pasta.")
+                }
+            }
+            "Explorador" -> {
+                addSettingChoice(content, "Ordenar arquivos", tr(sortBy), "Escolher a ordem dos ficheiros") { showSortMenu() }
+                addSettingSwitch(content, "Decrescente", "Inverte a ordem de ordenação dos arquivos", descending) { descending = it }
+                addSettingSwitch(content, "Usar item \"..\" ", "Permite subir para o diretório anterior a partir da lista", useParentEntry) { useParentEntry = it }
+                addSettingSwitch(content, "Exibir arquivos ocultos", "Mostra ficheiros e diretórios cujo nome começa por ponto", showHidden) { showHidden = it }
+                addSettingChoice(content, "Modo de exibição", tr(viewMode), "Detalhado, compacto ou grelha") { showViewModeMenu() }
+                addSettingSwitch(content, "Exibir tamanho", "Mostra o tamanho dos ficheiros na lista", showSize) { showSize = it }
+                addSettingSwitch(content, "Exibir data", "Mostra a data da última modificação", showDate) { showDate = it }
+                addSettingSwitch(content, "Exibir hora", "Mostra a hora da última modificação", showTime, showDate) { showTime = it }
+                addSettingSwitch(content, "Miniaturas", "Permite a exibição de miniaturas", showThumbnails) { showThumbnails = it }
+                addSettingSwitch(content, "Miniaturas do PDF", "Mostrar miniaturas de documentos PDF", showPdfThumbnails) { showPdfThumbnails = it }
+                addSettingSwitch(content, "Miniaturas de vídeo", "Mostrar miniaturas de vídeo", showVideoThumbnails) { showVideoThumbnails = it }
+                addSettingSwitch(content, "Capa do álbum", "Mostrar a capa do álbum nos ficheiros de música", showAlbumCovers) { showAlbumCovers = it }
+                addSettingSwitch(content, "Ícones do APK", "Exibir os ícones das aplicações APK", showApkIcons) { showApkIcons = it }
+                addSettingSwitch(content, "Miniaturas quadradas", "Recorta as miniaturas para formato quadrado", squareThumbnails) { squareThumbnails = it }
+            }
+            "Compressão" -> {
+                addSettingChoice(content, "Nível de compressão", compressionName(), "Sem compressão, rápida, normal ou ultra") { showCompressionMenu() }
+                content.addView(label(
+                    "ZIP: suporta ZipCrypto, AES-256 e divisão em volumes. 7Z: criação e extração com níveis de compressão; palavra-passe e volumes não estão ligados nesta versão.",
+                    14, mutedTextColor(), false
+                ).apply { setPadding(dp(8), dp(16), dp(8), dp(16)) }, LinearLayout.LayoutParams(-1, -2))
+            }
+            "ROOT" -> {
+                content.addView(label(
+                    "O Archiver não implementa acesso ROOT nem Shizuku nesta versão. A permissão Android «Gerir todos os ficheiros» permite gerir o armazenamento partilhado, mas não desbloqueia as pastas privadas de outras aplicações nem concede root.",
+                    15, mutedTextColor(), false
+                ).apply { setPadding(dp(8), dp(20), dp(8), dp(20)) }, LinearLayout.LayoutParams(-1, -2))
+            }
+            "Plugins" -> {
+                content.addView(label(
+                    "Ainda não existe um sistema de plugins nesta versão. Os formatos e leitores disponíveis são os integrados na aplicação ou nas aplicações instaladas no dispositivo.",
+                    15, mutedTextColor(), false
+                ).apply { setPadding(dp(8), dp(20), dp(8), dp(20)) }, LinearLayout.LayoutParams(-1, -2))
+            }
+        }
         setContentView(page)
     }
 
@@ -647,15 +905,15 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        copy.addView(label(title, 16, 0xFFF0F0F3.toInt(), false))
-        copy.addView(label(value, 14, 0xFFD0CBFF.toInt(), false).apply { setPadding(0, dp(4), 0, 0) })
-        copy.addView(label(summary, 12, 0xFF9D9DA8.toInt(), false).apply { setPadding(0, dp(3), 0, 0) })
+        copy.addView(label(tr(title), 16, primaryTextColor(), false))
+        copy.addView(label(tr(value), 14, accentColor(), false).apply { setPadding(0, dp(4), 0, 0) })
+        copy.addView(label(tr(summary), 12, mutedTextColor(), false).apply { setPadding(0, dp(3), 0, 0) })
         row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(TextView(this).apply {
             text = "›"
             textSize = 28f
             gravity = Gravity.CENTER
-            setTextColor(0xFFB8B5FF.toInt())
+            setTextColor(accentColor())
         }, LinearLayout.LayoutParams(dp(32), dp(44)))
         container.addView(row, LinearLayout.LayoutParams(-1, -2))
         container.addView(View(this).apply { setBackgroundColor(0xFF333339.toInt()) }, LinearLayout.LayoutParams(-1, dp(1)))
@@ -680,8 +938,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        copy.addView(label(title, 16, if (enabled) 0xFFF0F0F3.toInt() else 0xFF777780.toInt(), false))
-        copy.addView(label(summary, 13, if (enabled) 0xFFABABB5.toInt() else 0xFF777780.toInt(), false).apply { setPadding(0, dp(4), 0, 0) })
+        copy.addView(label(tr(title), 16, if (enabled) primaryTextColor() else 0xFF777780.toInt(), false))
+        copy.addView(label(tr(summary), 13, if (enabled) mutedTextColor() else 0xFF777780.toInt(), false).apply { setPadding(0, dp(4), 0, 0) })
         row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
         val toggle = Switch(this).apply {
             isChecked = checked
@@ -770,12 +1028,20 @@ class MainActivity : Activity() {
             options += "Extrair aqui"
             options += "Extrair para nova pasta"
         }
+        if (ext in setOf("glb", "gltf")) options += "Inspecionar modelo 3D"
+        options += listOf("Comprimir para ZIP", "Comprimir para 7Z", "Comprimir…")
         options += listOf("Partilhar", "Copiar", "Recortar", "Renomear", "Eliminar", "Informações")
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
-        AlertDialog.Builder(this).setTitle(file.name).setItems(options.toTypedArray()) { _, which ->
+        if (file.isDirectory) options += "Cor da pasta"
+        AlertDialog.Builder(this).setTitle(file.name).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (options[which]) {
                 "Abrir pasta" -> { currentDir = file; selected.clear(); refreshFiles() }
+                "Cor da pasta" -> showFolderColorMenu(file)
                 "Abrir" -> openFile(file)
+                "Inspecionar modelo 3D" -> showModelInspector(file)
+                "Comprimir para ZIP" -> promptArchive(chosenOrSingle(file), "zip")
+                "Comprimir para 7Z" -> promptArchive(chosenOrSingle(file), "7z")
+                "Comprimir…" -> promptArchive(chosenOrSingle(file), if (ext == "7z") "7z" else "zip")
                 "Ver conteúdo" -> browseArchive(file)
                 "Testar arquivo" -> if (ext == "7z") testSevenZip(file) else testZip(file)
                 "Extrair aqui" -> if (ext == "7z") extractSevenZip(file, currentDir, false) else extractZip(file, currentDir, false)
@@ -793,16 +1059,254 @@ class MainActivity : Activity() {
     }
 
     private fun openFile(file: File) {
+        if (isEditableTextFile(file) && file.length() <= 4L * 1024L * 1024L) {
+            showTextEditor(file)
+            return
+        }
+        if (extension(file.name) in setOf("glb", "gltf")) {
+            showModelInspector(file)
+            return
+        }
+        openFileExternally(file)
+    }
+
+    private fun openFileExternally(file: File) {
         try {
             val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
-            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension(file.name)) ?: "*/*"
-            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(intent)
+            val mime = when (extension(file.name)) {
+                "glb" -> "model/gltf-binary"
+                "gltf" -> "model/gltf+json"
+                "obj" -> "text/plain"
+                "stl" -> "model/stl"
+                else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension(file.name)) ?: "*/*"
+            }
+            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(intent, tr("Abrir ficheiro")))
         } catch (_: ActivityNotFoundException) {
-            toast("Não existe uma aplicação para abrir este ficheiro.")
+            toast("Não existe uma aplicação compatível para abrir este ficheiro.")
         } catch (e: Exception) {
             toast("Não foi possível abrir: " + (e.message ?: "erro desconhecido"))
         }
+    }
+
+    private fun showModelInspector(file: File) {
+        try {
+            val jsonText = if (extension(file.name) == "gltf") {
+                if (file.length() > 32L * 1024L * 1024L) throw IOException("O manifesto GLTF excede o limite de leitura de 32 MB.")
+                file.readText(Charsets.UTF_8)
+            } else {
+                readGlbJsonChunk(file)
+            }
+            val json = JSONObject(jsonText)
+            val asset = json.optJSONObject("asset")
+            fun count(key: String): Int = json.optJSONArray(key)?.length() ?: 0
+            val formatLabel = if (extension(file.name) == "glb") "GLB (binário)" else "GLTF (JSON)"
+            val details = listOf(
+                "Formato: $formatLabel",
+                "Versão GLTF: " + (asset?.optString("version", "desconhecida") ?: "desconhecida"),
+                "Cenas: " + count("scenes"),
+                "Objetos/nós: " + count("nodes"),
+                "Meshes: " + count("meshes"),
+                "Materiais: " + count("materials"),
+                "Texturas: " + count("textures"),
+                "Imagens: " + count("images"),
+                "Animações: " + count("animations"),
+                "Buffers: " + count("buffers"),
+                "Tamanho do ficheiro: " + formatSize(file.length()),
+                "",
+                "Esta versão lê os metadados do modelo; a renderização 3D interativa ainda requer uma aplicação compatível."
+            ).joinToString("\n")
+            AlertDialog.Builder(this)
+                .setTitle("Leitor de modelo 3D")
+                .setMessage(details)
+                .setPositiveButton("Abrir noutra aplicação") { _, _ -> openFileExternally(file) }
+                .setNegativeButton(tr("Fechar"), null)
+                .show()
+        } catch (e: Exception) {
+            AlertDialog.Builder(this)
+                .setTitle("Modelo 3D")
+                .setMessage("Não foi possível ler os metadados do modelo.\n" + (e.message ?: "Formato inválido."))
+                .setPositiveButton("Tentar aplicação externa") { _, _ -> openFileExternally(file) }
+                .setNegativeButton(tr("Fechar"), null)
+                .show()
+        }
+    }
+
+    private fun readGlbJsonChunk(file: File): String {
+        java.io.DataInputStream(BufferedInputStream(FileInputStream(file))).use { input ->
+            val header = ByteArray(12)
+            input.readFully(header)
+            val headerBuffer = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            if (headerBuffer.int != 0x46546C67) throw IOException("Assinatura GLB inválida.")
+            val version = headerBuffer.int
+            if (version != 2) throw IOException("Só é suportado GLB 2.0.")
+            val declaredLength = headerBuffer.int.toLong() and 0xFFFFFFFFL
+            if (declaredLength < 20L || declaredLength > file.length()) throw IOException("Comprimento GLB inválido.")
+            var consumed = 12L
+            while (consumed + 8L <= declaredLength) {
+                val chunkHeader = ByteArray(8)
+                input.readFully(chunkHeader)
+                val chunkBuffer = java.nio.ByteBuffer.wrap(chunkHeader).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                val chunkLength = chunkBuffer.int.toLong() and 0xFFFFFFFFL
+                val chunkType = chunkBuffer.int
+                consumed += 8L
+                if (chunkLength > declaredLength - consumed || chunkLength > 32L * 1024L * 1024L) {
+                    throw IOException("Bloco JSON GLB demasiado grande ou inválido.")
+                }
+                if (chunkType == 0x4E4F534A) {
+                    val data = ByteArray(chunkLength.toInt())
+                    input.readFully(data)
+                    return String(data, Charsets.UTF_8).trimEnd('\u0000', ' ', '\r', '\n', '\t')
+                }
+                var remaining = chunkLength
+                val buffer = ByteArray(8192)
+                while (remaining > 0L) {
+                    val amount = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (amount < 0) throw IOException("O ficheiro GLB terminou inesperadamente.")
+                    remaining -= amount.toLong()
+                }
+                consumed += chunkLength
+            }
+        }
+        throw IOException("O ficheiro GLB não contém um bloco JSON válido.")
+    }
+
+    private fun isEditableTextFile(file: File): Boolean = extension(file.name) in setOf(
+        "txt", "text", "md", "markdown", "log", "nfo", "readme", "json", "xml", "yaml", "yml",
+        "properties", "ini", "cfg", "conf", "toml", "java", "kt", "kts", "js", "ts", "tsx",
+        "jsx", "py", "html", "htm", "css", "scss", "sql", "sh", "bat", "c", "cpp", "h",
+        "hpp", "gradle", "gitignore", "csv", "tsv"
+    )
+
+    private fun showTextEditor(file: File) {
+        val sourceText = try {
+            file.readText(Charsets.UTF_8)
+        } catch (e: Exception) {
+            toast("Não foi possível ler o ficheiro: " + (e.message ?: "erro"))
+            return
+        }
+        editorOpen = true
+        editorDirty = false
+        editorSavedText = sourceText
+        editorFile = file
+        closeEditorAfterSave = false
+
+        page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(pageBackgroundColor())
+        }
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, dp(8), 0)
+            setBackgroundColor(toolbarBackgroundColor())
+        }
+        toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Voltar ao gestor") { requestLeaveTextEditor() },
+            LinearLayout.LayoutParams(dp(48), dp(58)))
+        toolbar.addView(label(file.name, 16, 0xFFFFFFFF.toInt(), true).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        }, LinearLayout.LayoutParams(0, dp(58), 1f))
+        toolbar.addView(actionButton("Guardar") { saveTextEditor() }, LinearLayout.LayoutParams(-2, dp(44)))
+        page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
+        page.addView(View(this).apply { setBackgroundColor(accentColor()) }, LinearLayout.LayoutParams(-1, dp(2)))
+
+        val status = label("UTF-8  •  " + sourceText.count { it == '\n' }.plus(1) + " linhas", 11, 0xFFAAAAB4.toInt(), false)
+            .apply { setPadding(dp(14), dp(8), dp(14), dp(8)) }
+        val input = EditText(this).apply {
+            setText(sourceText)
+            setTextColor(primaryTextColor())
+            setHintTextColor(0xFF8F8F99.toInt())
+            textSize = 14f
+            typeface = android.graphics.Typeface.MONOSPACE
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(dp(14), dp(12), dp(14), dp(24))
+            setBackgroundColor(pageBackgroundColor())
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setHorizontallyScrolling(false)
+        }
+        editorInput = input
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
+                editorDirty = text?.toString() != editorSavedText
+                status.text = "UTF-8  •  " + (text?.count { it == '\n' } ?: 0).plus(1) + " linhas" +
+                    if (editorDirty) "  •  alterações por guardar" else ""
+            }
+            override fun afterTextChanged(text: android.text.Editable?) = Unit
+        })
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(input, FrameLayout.LayoutParams(-1, -1))
+        }
+        page.addView(status, LinearLayout.LayoutParams(-1, -2))
+        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+        input.requestFocus()
+    }
+
+    private fun saveTextEditor() {
+        val target = editorFile ?: return
+        val content = editorInput?.text?.toString() ?: return
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        runTask("A guardar texto…", bytes.size.toLong(), 1L) { meter ->
+            meter.show(target)
+            val parent = target.parentFile ?: throw IOException("A pasta do ficheiro não está disponível.")
+            val temp = File.createTempFile(".archiver-", ".tmp", parent)
+            val backup = File.createTempFile(".archiver-backup-", ".bak", parent)
+            backup.delete()
+            try {
+                FileOutputStream(temp).use { output ->
+                    var offset = 0
+                    while (offset < bytes.size) {
+                        val amount = minOf(32 * 1024, bytes.size - offset)
+                        output.write(bytes, offset, amount)
+                        offset += amount
+                        meter.bytesRead(amount.toLong(), target)
+                    }
+                }
+                if (!target.renameTo(backup)) throw IOException("Não foi possível proteger a versão anterior do ficheiro.")
+                if (!temp.renameTo(target)) {
+                    backup.renameTo(target)
+                    throw IOException("Não foi possível substituir o ficheiro original.")
+                }
+                backup.delete()
+                meter.itemDone(target)
+                "Ficheiro guardado: " + target.name
+            } finally {
+                temp.delete()
+                if (backup.exists() && target.exists()) backup.delete()
+            }
+        }
+    }
+
+    private fun requestLeaveTextEditor() {
+        if (!editorDirty) {
+            closeTextEditor()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Alterações por guardar")
+            .setMessage("Queres guardar as alterações antes de sair do editor?")
+            .setPositiveButton("Sair sem guardar") { _, _ -> closeTextEditor() }
+            .setNegativeButton("Continuar a editar", null)
+            .setNeutralButton("Guardar") { _, _ ->
+                closeEditorAfterSave = true
+                saveTextEditor()
+            }.show()
+    }
+
+    private fun closeTextEditor() {
+        editorOpen = false
+        editorDirty = false
+        editorSavedText = ""
+        editorFile = null
+        editorInput = null
+        closeEditorAfterSave = false
+        renderBrowser()
     }
 
     private fun shareFile(file: File) {
@@ -837,22 +1341,40 @@ class MainActivity : Activity() {
             .setMessage("Eliminar " + files.size + if (files.size == 1) " item? Esta ação não pode ser anulada." else " itens? Esta ação não pode ser anulada.")
             .setNegativeButton("Cancelar", null).setPositiveButton("Eliminar") { _, _ ->
                 selected.clear()
-                runTask("A eliminar ficheiros…") {
+                runTask("A eliminar ficheiros…", 0L, 1L) { meter ->
+                    val totals = measureFiles(files) { meter.show(it) }
+                    meter.setTotals(0L, totals.entries)
                     files.forEach { file ->
-                        if (!deleteRecursively(file)) throw IOException("Não foi possível eliminar " + file.name)
+                        meter.show(file)
+                        if (!deleteRecursively(
+                                file,
+                                onDeleting = { working -> meter.show(working) },
+                                onDeleted = { deleted -> meter.itemDone(deleted) }
+                            )) {
+                            throw IOException("Não foi possível eliminar " + file.name)
+                        }
                     }
-                    "Eliminação concluída."
+                    "Eliminação concluída: " + totals.entries + " itens."
                 }
             }.show()
     }
 
-    private fun deleteRecursively(file: File): Boolean {
+    private fun deleteRecursively(
+        file: File,
+        onDeleting: ((File) -> Unit)? = null,
+        onDeleted: ((File) -> Unit)? = null
+    ): Boolean {
         return try {
+            onDeleting?.invoke(file)
             if (file.isDirectory) {
                 val children = file.listFiles() ?: return false
-                for (child in children) if (!deleteRecursively(child)) return false
+                for (child in children) {
+                    if (!deleteRecursively(child, onDeleting, onDeleted)) return false
+                }
             }
-            file.delete()
+            val deleted = file.delete()
+            if (deleted) onDeleted?.invoke(file)
+            deleted
         } catch (_: Exception) { false }
     }
 
@@ -895,14 +1417,23 @@ class MainActivity : Activity() {
                 return
             }
         }
-        runTask(if (cut) "A mover…" else "A copiar…") {
+        val effectiveSources = sources.filterNot { cut && it.parentFile?.canonicalFile == target.canonicalFile }
+        if (effectiveSources.isEmpty()) { toast("Os itens já estão nesta pasta."); return }
+        runTask(if (cut) "A mover…" else "A copiar…", 0L, 1L) { meter ->
+            val totals = measureFiles(effectiveSources) { meter.show(it) }
+            meter.setTotals(totals.bytes, totals.entries * if (cut) 2L else 1L)
             var count = 0
-            for (source in sources) {
-                val targetName = uniqueName(target, source.name)
-                val destination = File(target, targetName)
-                if (cut && source.parentFile?.canonicalFile == target.canonicalFile) continue
-                copyFileTree(source, destination)
-                if (cut && !deleteRecursively(source)) throw IOException("Copiado, mas não foi possível remover a origem: " + source.name)
+            for (source in effectiveSources) {
+                val destination = File(target, uniqueName(target, source.name))
+                meter.show(source)
+                copyFileTree(source, destination, meter)
+                if (cut && !deleteRecursively(
+                    source,
+                    onDeleting = { working -> meter.show(working) },
+                    onDeleted = { deleted -> meter.itemDone(deleted) }
+                )) {
+                    throw IOException("Copiado, mas não foi possível remover a origem: " + source.name)
+                }
                 count++
             }
             clipboard = emptyList()
@@ -932,26 +1463,28 @@ class MainActivity : Activity() {
         throw IOException("Não foi possível gerar um nome único.")
     }
 
-    private fun copyFileTree(source: File, dest: File) {
+    private fun copyFileTree(source: File, dest: File, meter: TaskProgress? = null) {
         if (source.isDirectory) {
             if (!dest.mkdirs()) throw IOException("Não foi possível criar " + dest.name)
+            meter?.show(source)
+            meter?.itemDone(source)
             source.listFiles()?.forEach { child ->
-                copyFileTree(child, File(dest, child.name))
+                copyFileTree(child, File(dest, child.name), meter)
             } ?: throw IOException("Não foi possível ler a pasta " + source.name)
         } else {
             if (dest.exists()) throw IOException("O destino já existe: " + dest.name)
-            val input = BufferedInputStream(FileInputStream(source))
-            try {
-                val output = BufferedOutputStream(FileOutputStream(dest))
-                try {
+            BufferedInputStream(FileInputStream(source)).use { input ->
+                BufferedOutputStream(FileOutputStream(dest)).use { output ->
                     val buffer = ByteArray(32 * 1024)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
                         output.write(buffer, 0, count)
+                        meter?.bytesRead(count.toLong(), source)
                     }
-                } finally { output.close() }
-            } finally { input.close() }
+                }
+            }
+            meter?.itemDone(source)
         }
     }
 
@@ -962,16 +1495,18 @@ class MainActivity : Activity() {
                 val query = input.text.toString().trim().lowercase(Locale.ROOT)
                 if (query.isBlank()) { toast("Escreve um nome para pesquisar."); return@setPositiveButton }
                 val start = currentDir
-                runTask("A pesquisar…") { 
+                runTask("A pesquisar…", 0L, 1L) { meter ->
+                    val entries = countFilesForSearch(start) { meter.show(it) }
+                    meter.setTotals(0L, entries)
                     val hits = mutableListOf<File>()
-                    searchTree(start, query, hits, 0)
+                    searchTree(start, query, hits, 0, meter)
                     runOnUiThread { showSearchResults(hits) }
                     "Pesquisa concluída: " + hits.size + " resultado(s)."
                 }
             }.show()
     }
 
-    private fun searchTree(directory: File, query: String, hits: MutableList<File>, depth: Int) {
+    private fun searchTree(directory: File, query: String, hits: MutableList<File>, depth: Int, meter: TaskProgress? = null) {
         if (depth > 60 || hits.size >= 300) return
         val children = try { directory.listFiles() } catch (_: Exception) { null } ?: return
         for (child in children) {
@@ -979,11 +1514,12 @@ class MainActivity : Activity() {
             if (!showHidden && child.name.startsWith(".")) continue
             val name = child.name.lowercase(Locale.ROOT)
             val matches = if (query.contains('*') || query.contains('?')) {
-                val regex = query.replace(".", "\\\\.").replace("*", ".*").replace("?", ".")
+                val regex = query.replace(".", "\\.").replace("*", ".*").replace("?", ".")
                 name.matches(Regex("^" + regex + "$"))
             } else name.contains(query)
             if (matches) hits.add(child)
-            if (child.isDirectory) searchTree(child, query, hits, depth + 1)
+            if (child.isDirectory) searchTree(child, query, hits, depth + 1, meter)
+            meter?.itemDone(child)
         }
     }
 
@@ -1012,35 +1548,197 @@ class MainActivity : Activity() {
         }.setPositiveButton("Fechar", null).show()
     }
 
-    private fun promptArchive(files: List<File>, format: String) {
+    private fun promptArchive(files: List<File>, initialFormat: String) {
         if (files.isEmpty()) { toast("Seleciona pelo menos um ficheiro ou pasta."); return }
-        val suffix = if (format == "7z") ".7z" else ".zip"
+
+        val formatNames = arrayOf("ZIP", "7Z")
+        val formatPicker = makeSpinner(formatNames, if (initialFormat == "7z") 1 else 0)
+        val levelNames = arrayOf("Sem compressão", "Rápida", "Normal", "Ultra")
+        val levelPicker = makeSpinner(levelNames, compressionLevel.coerceIn(0, 3))
+        val encryptionNames = arrayOf("Nenhuma", "ZipCrypto", "AES-256")
+        val encryptionPicker = makeSpinner(encryptionNames)
+        val volumeNames = arrayOf("Não", "64 MB", "100 MB", "250 MB", "500 MB", "1 GB")
+        val volumeBytes = longArrayOf(
+            0L,
+            64L * 1024L * 1024L,
+            100L * 1024L * 1024L,
+            250L * 1024L * 1024L,
+            500L * 1024L * 1024L,
+            1024L * 1024L * 1024L
+        )
+        val volumePicker = makeSpinner(volumeNames)
+        val passwordInput = EditText(this).apply {
+            hint = "Palavra-passe (opcional)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        val suffix = if (initialFormat == "7z") ".7z" else ".zip"
         val input = EditText(this).apply {
             setSingleLine(true)
             val suggestion = if (files.size == 1) files[0].name else "Arquivo"
             setText(if (suggestion.lowercase(Locale.ROOT).endsWith(suffix)) suggestion else suggestion + suffix)
         }
         val deleteOriginals = CheckBox(this).apply { text = "Eliminar originais depois de comprimir com sucesso" }
-        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(input); addView(deleteOriginals) }
-        AlertDialog.Builder(this).setTitle(if (format == "7z") "Criar arquivo 7Z" else "Criar arquivo ZIP")
-            .setMessage("Compressão: " + compressionName()).setView(form)
-            .setNegativeButton("Cancelar", null).setPositiveButton("Criar") { _, _ ->
-                var name = input.text.toString().trim()
-                if (name.isBlank() || !validName(name)) { toast("Nome inválido."); return@setPositiveButton }
-                if (!name.lowercase(Locale.ROOT).endsWith(suffix)) name += suffix
-                try { name = uniqueName(currentDir, name) } catch (e: Exception) { toast("Nome de destino inválido."); return@setPositiveButton }
-                val destination = File(currentDir, name)
-                val removeSources = deleteOriginals.isChecked
-                val sources = files.toList()
-                runTask("A criar " + suffix + "…") {
-                    if (format == "7z") createSevenZip(sources, destination) else createZip(sources, destination)
-                    if (removeSources) sources.forEach { if (!deleteRecursively(it)) throw IOException("Arquivo criado, mas não foi possível eliminar " + it.name) }
-                    selected.clear()
-                    if (removeSources) "Arquivo criado; originais eliminados." else "Arquivo criado: " + destination.name
+        val separateArchives = CheckBox(this).apply { text = "Criar um arquivo separado por item selecionado" }
+
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(6))
+        }
+        fun addField(title: String, view: View) {
+            form.addView(label(title, 13, 0xFFAAAAB4.toInt(), false).apply {
+                setPadding(0, dp(9), 0, dp(3))
+            }, LinearLayout.LayoutParams(-1, -2))
+            form.addView(view, LinearLayout.LayoutParams(-1, dp(46)))
+        }
+        addField("Arquivo", input)
+        addField("Formato do arquivo", formatPicker)
+        addField("Nível de compressão", levelPicker)
+        addField("Criptografia (ZIP)", encryptionPicker)
+        form.addView(passwordInput, LinearLayout.LayoutParams(-1, dp(48)))
+        addField("Dividir em volumes (ZIP)", volumePicker)
+        form.addView(deleteOriginals, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        form.addView(separateArchives, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+
+        fun updateZipOptions() {
+            val zipSelected = formatPicker.selectedItemPosition == 0
+            encryptionPicker.isEnabled = zipSelected
+            volumePicker.isEnabled = zipSelected
+            passwordInput.isEnabled = zipSelected && encryptionPicker.selectedItemPosition > 0
+            if (!zipSelected) {
+                encryptionPicker.setSelection(0)
+                volumePicker.setSelection(0)
+                passwordInput.setText("")
+            }
+        }
+        formatPicker.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateZipOptions()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        encryptionPicker.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                passwordInput.isEnabled = formatPicker.selectedItemPosition == 0 && position > 0
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        updateZipOptions()
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(form, FrameLayout.LayoutParams(-1, -2))
+        }
+        AlertDialog.Builder(this).setTitle("Criação de arquivo")
+            .setMessage("Escolhe o formato, a compressão e, para ZIP, opções de segurança e volumes.")
+            .setView(scroll)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(tr("Criar"), null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val archiveFormat = if (formatPicker.selectedItemPosition == 1) "7z" else "zip"
+                        val chosenSuffix = if (archiveFormat == "7z") ".7z" else ".zip"
+                        val encryption = encryptionNames[encryptionPicker.selectedItemPosition]
+                        val password = passwordInput.text.toString()
+                        val splitSize = if (archiveFormat == "zip") volumeBytes[volumePicker.selectedItemPosition] else 0L
+                        if (archiveFormat == "7z" && (encryption != "Nenhuma" || splitSize > 0L)) {
+                            toast("Senha e volumes divididos estão disponíveis apenas para ZIP nesta versão.")
+                            return@setOnClickListener
+                        }
+                        if (encryption != "Nenhuma" && password.isBlank()) {
+                            passwordInput.error = "Escreve uma palavra-passe."
+                            passwordInput.requestFocus()
+                            return@setOnClickListener
+                        }
+
+                        var name = input.text.toString().trim()
+                        if (name.isBlank() || !validName(name)) { toast("Nome inválido."); return@setOnClickListener }
+                        name = name.removeSuffix(".zip").removeSuffix(".7z") + chosenSuffix
+                        val sources = files.toList()
+                        val removeSources = deleteOriginals.isChecked
+                        val separate = separateArchives.isChecked
+                        compressionLevel = levelPicker.selectedItemPosition
+                        savePreferences()
+
+                        val outputFiles = if (separate) {
+                            val reserved = linkedSetOf<String>()
+                            sources.map { source ->
+                                val stem = source.nameWithoutExtension.ifBlank { source.name }
+                                var candidate = stem + chosenSuffix
+                                var index = 2
+                                while (File(currentDir, candidate).exists() || !reserved.add(candidate)) {
+                                    candidate = "$stem ($index)$chosenSuffix"
+                                    index++
+                                }
+                                File(currentDir, candidate)
+                            }
+                        } else {
+                            val unique = try { uniqueName(currentDir, name) } catch (_: Exception) {
+                                toast("Nome de destino inválido.")
+                                return@setOnClickListener
+                            }
+                            listOf(File(currentDir, unique))
+                        }
+
+                        dialog.dismiss()
+                        runTask(if (separate) "A criar arquivos separados…" else "A criar $chosenSuffix…", 0L, 1L) { meter ->
+                            val totals = measureFiles(sources) { meter.show(it) }
+                            meter.setTotals(totals.bytes, totals.entries * if (removeSources) 2L else 1L)
+                            try {
+                                if (separate) {
+                                    sources.zip(outputFiles).forEach { (source, destination) ->
+                                        meter.show(source)
+                                        if (archiveFormat == "7z") createSevenZip(listOf(source), destination, meter)
+                                        else createZip(
+                                            listOf(source), destination, meter,
+                                            password.takeIf { encryption != "Nenhuma" }, encryption, splitSize
+                                        )
+                                    }
+                                } else {
+                                    val destination = outputFiles.single()
+                                    if (archiveFormat == "7z") createSevenZip(sources, destination, meter)
+                                    else createZip(
+                                        sources, destination, meter,
+                                        password.takeIf { encryption != "Nenhuma" }, encryption, splitSize
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                outputFiles.forEach { deleteArchiveOutputs(it) }
+                                throw e
+                            }
+
+                            if (removeSources) sources.forEach { source ->
+                                meter.show(source)
+                                if (!deleteRecursively(
+                                    source,
+                                    onDeleting = { working -> meter.show(working) },
+                                    onDeleted = { deleted -> meter.itemDone(deleted) }
+                                )) {
+                                    throw IOException("Arquivo criado, mas não foi possível eliminar " + source.name)
+                                }
+                            }
+                            selected.clear()
+                            val preview = outputFiles.take(3).joinToString(", ") { it.name }
+                            val more = if (outputFiles.size > 3) " e mais ${outputFiles.size - 3}" else ""
+                            if (removeSources) "Criado(s) ${outputFiles.size} arquivo(s); originais eliminados."
+                            else "Criado(s) ${outputFiles.size} arquivo(s): $preview$more"
+                        }
+                    }
                 }
-            }.show()
+                dialog.show()
+            }
     }
 
+    private fun makeSpinner(options: Array<String>, selectedIndex: Int = 0): Spinner =
+        Spinner(this).apply {
+            adapter = ArrayAdapter<String>(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                options.toList()
+            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            setSelection(selectedIndex.coerceIn(0, options.lastIndex))
+        }
     private fun compressionName(): String = when (compressionLevel) {
         0 -> "sem compressão"
         1 -> "rápida"
@@ -1048,7 +1746,18 @@ class MainActivity : Activity() {
         else -> "normal"
     }
 
-    private fun createZip(sources: List<File>, destination: File) {
+    private fun createZip(
+        sources: List<File>,
+        destination: File,
+        meter: TaskProgress,
+        password: String? = null,
+        encryption: String = "Nenhuma",
+        splitBytes: Long = 0L
+    ) {
+        if (!password.isNullOrBlank() || splitBytes > 0L) {
+            createZipWithZip4j(sources, destination, meter, password, encryption, splitBytes)
+            return
+        }
         ZipOutputStream(BufferedOutputStream(FileOutputStream(destination))).use { zip ->
             zip.setLevel(when (compressionLevel) {
                 0 -> java.util.zip.Deflater.NO_COMPRESSION
@@ -1057,19 +1766,154 @@ class MainActivity : Activity() {
                 else -> java.util.zip.Deflater.DEFAULT_COMPRESSION
             })
             sources.forEach { source ->
-                if (source.canonicalFile != destination.canonicalFile) addToZip(zip, source, source.name, destination)
+                if (source.canonicalFile != destination.canonicalFile) addToZip(zip, source, source.name, destination, meter)
             }
         }
     }
 
-    private fun addToZip(zip: ZipOutputStream, source: File, entryName: String, destination: File) {
+    private data class ZipFileSource(val file: File, val entryName: String)
+    private data class ZipFolderSource(val file: File, val entryName: String, val empty: Boolean)
+
+    private fun zip4jParameters(entryName: String? = null, encryption: String = "Nenhuma"): ZipParameters =
+        ZipParameters().apply {
+            setCompressionMethod(
+                if (this@MainActivity.compressionLevel == 0) net.lingala.zip4j.model.enums.CompressionMethod.STORE
+                else net.lingala.zip4j.model.enums.CompressionMethod.DEFLATE
+            )
+            if (this@MainActivity.compressionLevel != 0) {
+                setCompressionLevel(when (this@MainActivity.compressionLevel) {
+                    1 -> net.lingala.zip4j.model.enums.CompressionLevel.FASTEST
+                    3 -> net.lingala.zip4j.model.enums.CompressionLevel.ULTRA
+                    else -> net.lingala.zip4j.model.enums.CompressionLevel.NORMAL
+                })
+            }
+            if (entryName != null) setFileNameInZip(entryName)
+            if (encryption != "Nenhuma") {
+                setEncryptFiles(true)
+                setEncryptionMethod(
+                    if (encryption == "ZipCrypto") net.lingala.zip4j.model.enums.EncryptionMethod.ZIP_STANDARD
+                    else net.lingala.zip4j.model.enums.EncryptionMethod.AES
+                )
+                if (encryption == "AES-256") {
+                    setAesKeyStrength(net.lingala.zip4j.model.enums.AesKeyStrength.KEY_STRENGTH_256)
+                }
+            }
+        }
+
+    private fun createZipWithZip4j(
+        sources: List<File>,
+        destination: File,
+        meter: TaskProgress,
+        password: String?,
+        encryption: String,
+        splitBytes: Long
+    ) {
+        val archive = Zip4jFile(destination, password?.toCharArray())
+        archive.setRunInThread(true)
+        val parameters = zip4jParameters(encryption = encryption)
+
+        if (splitBytes > 0L) {
+            when {
+                sources.all { it.isFile } ->
+                    archive.createSplitZipFile(sources, parameters, true, splitBytes)
+                sources.size == 1 && sources[0].isDirectory ->
+                    archive.createSplitZipFileFromFolder(sources[0], parameters, true, splitBytes)
+                else -> throw IOException("Para dividir o ZIP, seleciona apenas ficheiros ou uma única pasta por arquivo.")
+            }
+            val monitor = archive.getProgressMonitor()
+            while (monitor.getState() == ProgressMonitor.State.BUSY) {
+                val current = monitor.getFileName()?.takeIf { it.isNotBlank() } ?: destination.name
+                meter.report(monitor.getPercentDone(), current)
+                Thread.sleep(120L)
+            }
+            if (monitor.getResult() == ProgressMonitor.Result.ERROR) {
+                throw IOException(monitor.getException()?.message ?: "Falha ao criar ZIP dividido.")
+            }
+            val visited = mutableListOf<File>()
+            measureFiles(sources) { visited.add(it) }
+            val totalBytes = visited.filter { it.isFile }.sumOf { it.length().coerceAtLeast(0L) }
+            if (totalBytes > 0L) meter.bytesRead(totalBytes, destination)
+            visited.forEach { meter.itemDone(it) }
+            return
+        }
+
+        val files = mutableListOf<ZipFileSource>()
+        val directories = mutableListOf<ZipFolderSource>()
+        val visited = HashSet<String>()
+        fun collect(file: File, entryName: String, depth: Int) {
+            if (depth > 80 || visited.size >= 200000) return
+            val key = pathKey(file)
+            if (!visited.add(key) || file.canonicalFile == destination.canonicalFile) return
+            if (file.isDirectory) {
+                val children = safeList(file)
+                directories.add(ZipFolderSource(file, entryName, children.isEmpty()))
+                children.forEach { child -> collect(child, entryName.trimEnd('/') + "/" + child.name, depth + 1) }
+            } else {
+                files.add(ZipFileSource(file, entryName))
+            }
+        }
+        sources.forEach { source -> collect(source, source.name, 0) }
+
+        val totalBytes = files.sumOf { it.file.length().coerceAtLeast(0L) }
+        var completedBytes = 0L
+        files.forEach { entry ->
+            val entryParameters = zip4jParameters(entry.entryName, encryption)
+            archive.addFile(entry.file, entryParameters)
+            val monitor = archive.getProgressMonitor()
+            var lastReported = 0L
+            while (monitor.getState() == ProgressMonitor.State.BUSY) {
+                val percent = monitor.getPercentDone().coerceIn(0, 100)
+                val estimated = (entry.file.length().toDouble() * percent / 100.0).toLong()
+                val delta = (estimated - lastReported).coerceAtLeast(0L)
+                if (delta > 0L) {
+                    meter.bytesRead(delta, entry.file)
+                    lastReported = estimated
+                } else {
+                    meter.show(entry.file)
+                }
+                Thread.sleep(100L)
+            }
+            if (monitor.getResult() == ProgressMonitor.Result.ERROR) {
+                throw IOException(monitor.getException()?.message ?: "Falha ao comprimir " + entry.file.name)
+            }
+            val remaining = (entry.file.length() - lastReported).coerceAtLeast(0L)
+            if (remaining > 0L) meter.bytesRead(remaining, entry.file)
+            completedBytes += entry.file.length().coerceAtLeast(0L)
+            meter.itemDone(entry.file)
+        }
+
+        directories.filter { it.empty }.forEach { directory ->
+            val folderParams = zip4jParameters(directory.entryName.trimEnd('/') + "/", "Nenhuma").apply {
+                setCompressionMethod(net.lingala.zip4j.model.enums.CompressionMethod.STORE)
+            }
+            archive.addFolder(directory.file, folderParams)
+            meter.itemDone(directory.file)
+        }
+        directories.filterNot { it.empty }.forEach { meter.itemDone(it.file) }
+        if (files.isEmpty() && directories.isEmpty()) throw IOException("Não existem ficheiros para adicionar ao ZIP.")
+        if (completedBytes < totalBytes) meter.bytesRead(totalBytes - completedBytes, destination)
+    }
+
+    private fun deleteArchiveOutputs(destination: File) {
+        destination.delete()
+        val parent = destination.parentFile ?: return
+        val stem = destination.nameWithoutExtension
+        val splitPattern = Regex(Regex.escape(stem) + "\\.z[0-9]{2,3}")
+        safeList(parent).filter { candidate ->
+            candidate.name == destination.name || splitPattern.matches(candidate.name)
+        }.forEach { it.delete() }
+    }
+
+    private fun addToZip(zip: ZipOutputStream, source: File, entryName: String, destination: File, meter: TaskProgress) {
         if (source.canonicalFile == destination.canonicalFile) return
+        meter.show(source)
         if (source.isDirectory) {
             val name = if (entryName.endsWith("/")) entryName else entryName + "/"
             zip.putNextEntry(ZipEntry(name))
             zip.closeEntry()
+            meter.itemDone(source)
             val children = source.listFiles() ?: throw IOException("Não foi possível ler " + source.name)
-            children.forEach { addToZip(zip, it, name + it.name, destination) }
+            children.forEach { addToZip(zip, it, name + it.name, destination, meter) }
         } else {
             zip.putNextEntry(ZipEntry(entryName))
             BufferedInputStream(FileInputStream(source)).use { input ->
@@ -1078,13 +1922,15 @@ class MainActivity : Activity() {
                     val n = input.read(buffer)
                     if (n < 0) break
                     zip.write(buffer, 0, n)
+                    meter.bytesRead(n.toLong(), source)
                 }
             }
             zip.closeEntry()
+            meter.itemDone(source)
         }
     }
 
-    private fun createSevenZip(sources: List<File>, destination: File) {
+    private fun createSevenZip(sources: List<File>, destination: File, meter: TaskProgress) {
         SevenZOutputFile(destination).use { seven ->
             when (compressionLevel) {
                 0 -> seven.setContentCompression(SevenZMethod.COPY)
@@ -1093,13 +1939,14 @@ class MainActivity : Activity() {
                 else -> seven.setContentCompression(SevenZMethod.LZMA2)
             }
             sources.forEach { source ->
-                if (source.canonicalFile != destination.canonicalFile) addToSevenZip(seven, source, source.name, destination)
+                if (source.canonicalFile != destination.canonicalFile) addToSevenZip(seven, source, source.name, destination, meter)
             }
         }
     }
 
-    private fun addToSevenZip(seven: SevenZOutputFile, source: File, entryName: String, destination: File) {
+    private fun addToSevenZip(seven: SevenZOutputFile, source: File, entryName: String, destination: File, meter: TaskProgress) {
         if (source.canonicalFile == destination.canonicalFile) return
+        meter.show(source)
         val entry = SevenZArchiveEntry()
         entry.name = entryName
         entry.lastModifiedDate = Date(maxOf(0L, source.lastModified()))
@@ -1108,8 +1955,9 @@ class MainActivity : Activity() {
             entry.setHasStream(false)
             seven.putArchiveEntry(entry)
             seven.closeArchiveEntry()
+            meter.itemDone(source)
             val children = source.listFiles() ?: throw IOException("Não foi possível ler " + source.name)
-            children.forEach { addToSevenZip(seven, it, entryName + "/" + it.name, destination) }
+            children.forEach { addToSevenZip(seven, it, entryName + "/" + it.name, destination, meter) }
         } else {
             entry.isDirectory = false
             entry.setHasStream(true)
@@ -1121,45 +1969,93 @@ class MainActivity : Activity() {
                     val n = input.read(buffer)
                     if (n < 0) break
                     seven.write(buffer, 0, n)
+                    meter.bytesRead(n.toLong(), source)
                 }
             }
             seven.closeArchiveEntry()
+            meter.itemDone(source)
         }
     }
 
     private fun extractZip(archive: File, destinationDir: File, makeSubfolder: Boolean) {
-        runTask("A extrair ZIP…") {
-            val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension)) else destinationDir
-            if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
-            var count = 0
-            ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
-                val buffer = ByteArray(32 * 1024)
-                while (true) {
-                    val entry = zip.nextEntry ?: break
-                    val output = safeArchiveTarget(destination, entry.name, entry.isDirectory)
-                    if (entry.isDirectory) {
-                        if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
+        val encrypted = try { Zip4jFile(archive).isEncrypted } catch (_: Exception) { false }
+        if (encrypted) {
+            val passwordInput = EditText(this).apply {
+                hint = "Palavra-passe do ZIP"
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            AlertDialog.Builder(this)
+                .setTitle("ZIP protegido por palavra-passe")
+                .setView(passwordInput)
+                .setNegativeButton(tr("Cancelar"), null)
+                .setPositiveButton("Extrair") { _, _ ->
+                    val password = passwordInput.text.toString()
+                    if (password.isEmpty()) {
+                        toast("Escreve a palavra-passe do arquivo.")
                     } else {
-                        output.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar uma pasta de destino.") }
-                        val finalOut = if (output.exists()) File(output.parentFile, uniqueName(output.parentFile!!, output.name)) else output
-                        BufferedOutputStream(FileOutputStream(finalOut)).use { stream ->
+                        extractZipContents(archive, destinationDir, makeSubfolder, password)
+                    }
+                }
+                .show()
+        } else {
+            extractZipContents(archive, destinationDir, makeSubfolder, null)
+        }
+    }
+
+    private fun extractZipContents(
+        archive: File,
+        destinationDir: File,
+        makeSubfolder: Boolean,
+        password: String?
+    ) {
+        runTask("A extrair ZIP…", 0L, 1L) { meter ->
+            val zip = if (password.isNullOrEmpty()) Zip4jFile(archive) else Zip4jFile(archive, password.toCharArray())
+            val headers = zip.fileHeaders ?: throw IOException("Não foi possível ler o índice do ZIP.")
+            if (headers.isEmpty()) return@runTask "O arquivo ZIP está vazio."
+            val totalBytes = headers.sumOf { if (it.isDirectory) 0L else it.uncompressedSize.coerceAtLeast(0L) }
+            meter.setTotals(totalBytes, headers.size.toLong())
+            val destination = if (makeSubfolder) {
+                File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension))
+            } else destinationDir
+            if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
+
+            var count = 0
+            headers.forEach { entry ->
+                val output = safeArchiveTarget(destination, entry.fileName, entry.isDirectory)
+                meter.show(output)
+                if (entry.isDirectory) {
+                    if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
+                } else {
+                    output.parentFile?.let {
+                        if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar uma pasta de destino.")
+                    }
+                    val target = if (output.exists()) File(output.parentFile, uniqueName(output.parentFile!!, output.name)) else output
+                    zip.getInputStream(entry).use { input ->
+                        BufferedOutputStream(FileOutputStream(target)).use { stream ->
+                            val buffer = ByteArray(32 * 1024)
                             while (true) {
-                                val n = zip.read(buffer)
-                                if (n <= 0) break
-                                stream.write(buffer, 0, n)
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                if (n > 0) {
+                                    stream.write(buffer, 0, n)
+                                    meter.bytesRead(n.toLong(), target)
+                                }
                             }
                         }
                     }
-                    zip.closeEntry()
-                    count++
                 }
+                meter.itemDone(output)
+                count++
             }
-            "Extração ZIP concluída: " + count + " entradas."
+            "Extração ZIP concluída: $count entradas."
         }
     }
 
     private fun extractSevenZip(archive: File, destinationDir: File, makeSubfolder: Boolean) {
-        runTask("A extrair 7Z…") {
+        runTask("A extrair 7Z…", 0L, 1L) { meter ->
+            val totals = try { measureSevenZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+            meter.setTotals(totals.bytes, totals.entries)
             val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension)) else destinationDir
             if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
             var count = 0
@@ -1168,6 +2064,7 @@ class MainActivity : Activity() {
                 while (true) {
                     val entry = seven.nextEntry ?: break
                     val output = safeArchiveTarget(destination, entry.name, entry.isDirectory)
+                    meter.show(output)
                     if (entry.isDirectory) {
                         if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
                     } else {
@@ -1178,9 +2075,11 @@ class MainActivity : Activity() {
                                 val n = seven.read(buffer, 0, buffer.size)
                                 if (n < 0) break
                                 stream.write(buffer, 0, n)
+                                meter.bytesRead(n.toLong(), finalOut)
                             }
                         }
                     }
+                    meter.itemDone(output)
                     count++
                 }
             }
@@ -1203,14 +2102,23 @@ class MainActivity : Activity() {
     }
 
     private fun testZip(archive: File) {
-        runTask("A testar ZIP…") {
+        runTask("A testar ZIP…", 0L, 1L) { meter ->
+            val totals = try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+            meter.setTotals(totals.bytes, totals.entries)
             var count = 0
             ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
                 val buffer = ByteArray(32 * 1024)
                 while (true) {
                     val entry = zip.nextEntry ?: break
-                    while (zip.read(buffer) >= 0) { }
+                    val current = File(archive.parentFile, entry.name)
+                    meter.show(current)
+                    while (true) {
+                        val n = zip.read(buffer)
+                        if (n < 0) break
+                        if (n > 0) meter.bytesRead(n.toLong(), current)
+                    }
                     zip.closeEntry()
+                    meter.itemDone(current)
                     count++
                 }
             }
@@ -1219,13 +2127,22 @@ class MainActivity : Activity() {
     }
 
     private fun testSevenZip(archive: File) {
-        runTask("A testar 7Z…") {
+        runTask("A testar 7Z…", 0L, 1L) { meter ->
+            val totals = try { measureSevenZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+            meter.setTotals(totals.bytes, totals.entries)
             var count = 0
             SevenZFile(archive).use { seven ->
                 val buffer = ByteArray(32 * 1024)
                 while (true) {
                     val entry = seven.nextEntry ?: break
-                    while (seven.read(buffer, 0, buffer.size) >= 0) { }
+                    val current = File(archive.parentFile, entry.name)
+                    meter.show(current)
+                    while (true) {
+                        val n = seven.read(buffer, 0, buffer.size)
+                        if (n < 0) break
+                        if (n > 0) meter.bytesRead(n.toLong(), current)
+                    }
+                    meter.itemDone(current)
                     count++
                 }
             }
@@ -1282,50 +2199,62 @@ class MainActivity : Activity() {
     }
 
     private fun extractArchiveEntry(archive: File, item: ArchiveItem) {
-        runTask("A extrair item…") {
+        runTrackedTask("A extrair item…", item.size.coerceAtLeast(0L), 1L) { meter ->
             val destination = safeArchiveTarget(currentDir, item.name, item.directory)
             if (item.directory) {
                 if (!destination.exists() && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta.")
             } else {
-                destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.") }
-                val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
                 when (extension(archive.name)) {
                     "zip" -> ZipFile(archive).use { zip ->
-                        val en = zip.entries()
-                        var index = 0
-                        var entry: ZipEntry? = null
-                        while (en.hasMoreElements()) {
-                            val candidate = en.nextElement()
-                            if (index++ == item.index) { entry = candidate; break }
-                        }
-                        val chosenEntry = entry ?: throw IOException("A entrada já não existe.")
-                        zip.getInputStream(chosenEntry).use { input -> BufferedOutputStream(FileOutputStream(target)).use { input.copyTo(it) } }
-                    }
-                    "7z" -> SevenZFile(archive).use { seven ->
-                        val buffer = ByteArray(32 * 1024)
-                        var index = 0
-                        var found = false
-                        while (true) {
-                            val e = seven.nextEntry ?: break
-                            if (index++ != item.index) {
-                                while (seven.read(buffer, 0, buffer.size) >= 0) { }
-                                continue
-                            }
-                            found = true
-                            BufferedOutputStream(FileOutputStream(target)).use { out ->
+                        val entry = zip.getEntry(item.name) ?: throw IOException("A entrada já não existe.")
+                        val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
+                        target.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
+                        BufferedInputStream(zip.getInputStream(entry)).use { input ->
+                            BufferedOutputStream(FileOutputStream(target)).use { output ->
+                                val buffer = ByteArray(32 * 1024)
                                 while (true) {
-                                    val n = seven.read(buffer, 0, buffer.size)
+                                    val n = input.read(buffer)
                                     if (n < 0) break
-                                    out.write(buffer, 0, n)
+                                    output.write(buffer, 0, n)
+                                    meter.bytesRead(n.toLong(), target)
                                 }
                             }
-                            break
+                        }
+                    }
+                    "7z" -> {
+                        var found = false
+                        SevenZFile(archive).use { seven ->
+                            var index = 0
+                            while (true) {
+                                val entry = seven.nextEntry ?: break
+                                if (index++ != item.index) {
+                                    if (!entry.isDirectory) {
+                                        val buffer = ByteArray(32 * 1024)
+                                        while (seven.read(buffer, 0, buffer.size) >= 0) { }
+                                    }
+                                    continue
+                                }
+                                found = true
+                                val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
+                                target.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
+                                BufferedOutputStream(FileOutputStream(target)).use { out ->
+                                    val buffer = ByteArray(32 * 1024)
+                                    while (true) {
+                                        val n = seven.read(buffer, 0, buffer.size)
+                                        if (n < 0) break
+                                        out.write(buffer, 0, n)
+                                        meter.bytesRead(n.toLong(), target)
+                                    }
+                                }
+                                break
+                            }
                         }
                         if (!found) throw IOException("A entrada já não existe.")
                     }
                     else -> throw IOException("Formato não suportado.")
                 }
             }
+            meter.itemDone(destination)
             "Item extraído: " + item.name
         }
     }
@@ -1333,9 +2262,14 @@ class MainActivity : Activity() {
     private fun showInfoPlaceholder() {}
 
     private fun shouldLoadThumbnail(file: File): Boolean {
-        if (file.isDirectory || !showThumbnails) return false
+        if (!showThumbnails) return false
+        if (file.isDirectory) {
+            return safeList(file).any { child ->
+                !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff")
+            }
+        }
         return when (extension(file.name)) {
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> true
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff" -> true
             "pdf" -> showPdfThumbnails
             "mp4", "mkv", "webm", "3gp", "avi", "mov", "m4v" -> showVideoThumbnails
             "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus" -> showAlbumCovers
@@ -1350,7 +2284,7 @@ class MainActivity : Activity() {
         val key = thumbnailKey(file)
         view.tag = key
         thumbnailCache.get(key)?.let { view.setImageBitmap(it); return }
-        worker.execute {
+        thumbnailWorker.execute {
             val bitmap = try { loadThumbnail(file) } catch (_: Exception) { null }
             if (bitmap != null) thumbnailCache.put(key, bitmap)
             runOnUiThread { if (!isFinishing && view.tag == key && bitmap != null) view.setImageBitmap(bitmap) }
@@ -1358,8 +2292,9 @@ class MainActivity : Activity() {
     }
 
     private fun loadThumbnail(file: File): Bitmap? {
+        if (file.isDirectory) return folderThumbnail(file)
         return when (extension(file.name)) {
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> {
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff" -> {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(file.absolutePath, bounds)
                 if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else {
@@ -1376,6 +2311,34 @@ class MainActivity : Activity() {
             "apk" -> if (showApkIcons) apkThumbnail(file) else null
             else -> null
         }
+    }
+
+    private fun folderThumbnail(directory: File): Bitmap? {
+        val sample = safeList(directory).firstOrNull { child ->
+            !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff")
+        } ?: return null
+        val preview = loadThumbnail(sample) ?: return null
+        val size = dp(64)
+        val folderBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(folderBitmap)
+        val folderDrawable: Drawable = getDrawable(R.drawable.ic_folder) ?: return null
+        folderColorValue(directory)?.let { folderDrawable.setColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
+        folderDrawable.setBounds(0, 0, size, size)
+        folderDrawable.draw(canvas)
+        val target = android.graphics.Rect(size / 3, size / 3, size * 3 / 4, size * 3 / 4)
+        val framePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF24242A.toInt() }
+        val targetRect = android.graphics.RectF(target)
+        canvas.drawRoundRect(targetRect, dp(3).toFloat(), dp(3).toFloat(), framePaint)
+        canvas.save()
+        canvas.clipRect(target)
+        canvas.drawBitmap(preview, null, target, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG))
+        canvas.restore()
+        framePaint.style = android.graphics.Paint.Style.STROKE
+        framePaint.strokeWidth = dp(1).toFloat()
+        framePaint.color = 0xFFFFFFFF.toInt()
+        canvas.drawRoundRect(targetRect, dp(3).toFloat(), dp(3).toFloat(), framePaint)
+        preview.recycle()
+        return folderBitmap
     }
 
     private fun scaleThumbnail(source: Bitmap?): Bitmap? {
@@ -1440,32 +2403,261 @@ class MainActivity : Activity() {
         return bitmap
     }
 
+    private data class TaskTotals(val bytes: Long, val entries: Long)
+
+    private inner class TaskProgress(
+        totalBytes: Long,
+        totalEntries: Long,
+        private val publish: (Int, String) -> Unit
+    ) {
+        private var totalBytes: Long = totalBytes.coerceAtLeast(0L)
+        private var totalEntries: Long = totalEntries.coerceAtLeast(1L)
+        private var completedBytes = 0L
+        private var completedEntries = 0L
+        private var totalUnits = (this.totalBytes + this.totalEntries).coerceAtLeast(1L)
+
+        @Synchronized
+        fun setTotals(bytes: Long, entries: Long) {
+            totalBytes = bytes.coerceAtLeast(0L)
+            totalEntries = entries.coerceAtLeast(1L)
+            completedBytes = 0L
+            completedEntries = 0L
+            totalUnits = (totalBytes + totalEntries).coerceAtLeast(1L)
+            publish(0, "A preparar operação…")
+        }
+
+        private fun detailFor(file: File): String =
+            "${completedEntries.coerceAtMost(totalEntries)}/${totalEntries}  •  ${file.absolutePath}"
+
+        @Synchronized
+        fun show(file: File) = publish(progressPercent(), detailFor(file))
+
+        @Synchronized
+        fun bytesRead(count: Long, file: File) {
+            if (count > 0L) completedBytes = (completedBytes + count).coerceAtMost(totalBytes.coerceAtLeast(0L))
+            publish(progressPercent(), detailFor(file))
+        }
+
+        @Synchronized
+        fun itemDone(file: File) {
+            completedEntries = (completedEntries + 1L).coerceAtMost(totalEntries.coerceAtLeast(1L))
+            publish(progressPercent(), detailFor(file))
+        }
+
+        private fun progressPercent(): Int {
+            val done = completedBytes + completedEntries
+            return ((done.toDouble() / totalUnits.toDouble()) * 100.0).toInt().coerceIn(0, 99)
+        }
+
+        @Synchronized
+        fun report(percent: Int, detail: String) =
+            publish(percent.coerceIn(0, 99), "${completedEntries.coerceAtMost(totalEntries)}/${totalEntries}  •  $detail")
+
+        fun finish(detail: String) = publish(100, detail)
+    }
+
+    private fun measureFiles(files: List<File>, onVisit: ((File) -> Unit)? = null): TaskTotals {
+        var bytes = 0L
+        var entries = 0L
+        val visited = HashSet<String>()
+        fun walk(file: File, depth: Int) {
+            if (depth > 80 || entries >= 200000L) return
+            val key = pathKey(file)
+            if (!visited.add(key)) return
+            onVisit?.invoke(file)
+            entries++
+            if (file.isFile) {
+                bytes += file.length().coerceAtLeast(0L)
+            } else if (file.isDirectory) {
+                safeList(file).forEach { walk(it, depth + 1) }
+            }
+        }
+        files.forEach { walk(it, 0) }
+        return TaskTotals(bytes, entries.coerceAtLeast(1L))
+    }
+
+    private fun countFilesForSearch(directory: File, onVisit: ((File) -> Unit)? = null): Long = measureFiles(listOf(directory), onVisit).entries
+
+    private fun measureZipArchive(archive: File): TaskTotals {
+        var bytes = 0L
+        var entries = 0L
+        ZipFile(archive).use { zip ->
+            val all = zip.entries()
+            while (all.hasMoreElements()) {
+                val entry = all.nextElement()
+                entries++
+                if (!entry.isDirectory && entry.size > 0L) bytes += entry.size
+            }
+        }
+        return TaskTotals(bytes, entries.coerceAtLeast(1L))
+    }
+
+    private fun measureSevenZipArchive(archive: File): TaskTotals {
+        var bytes = 0L
+        var entries = 0L
+        SevenZFile(archive).use { seven ->
+            while (true) {
+                val entry = seven.nextEntry ?: break
+                entries++
+                if (!entry.isDirectory && entry.size > 0L) bytes += entry.size
+            }
+        }
+        return TaskTotals(bytes, entries.coerceAtLeast(1L))
+    }
+
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                notificationChannelId,
+                "Operações de ficheiros",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Progresso e conclusão das operações do Archiver." }
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+    }
+
+    private fun showOperationNotification(title: String, detail: String, percent: Int?, finished: Boolean = false, failed: Boolean = false) {
+        try {
+            ensureNotificationChannel()
+            val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            val pendingIntent = PendingIntent.getActivity(
+                this, operationNotificationId, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val builder = NotificationCompat.Builder(this, notificationChannelId)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentIntent(pendingIntent)
+                .setContentTitle(if (finished) if (failed) "Archiver — erro" else "Archiver — concluído" else title)
+                .setContentText(detail)
+                .setOnlyAlertOnce(true)
+                .setOngoing(!finished)
+                .setAutoCancel(finished)
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            if (finished || percent == null) builder.setProgress(0, 0, false)
+            else builder.setProgress(100, percent.coerceIn(0, 100), false)
+            getSystemService(NotificationManager::class.java).notify(operationNotificationId, builder.build())
+        } catch (_: SecurityException) {
+            // Android 13+: notifications may be denied; in-app progress still works.
+        } catch (_: Exception) { }
+    }
+
     private fun runTask(message: String, action: () -> String) {
+        runTrackedTask(message, 0L, 1L) { meter ->
+            meter.show(currentDir)
+            val result = action()
+            meter.itemDone(currentDir)
+            result
+        }
+    }
+
+    private fun runTask(message: String, totalBytes: Long, totalEntries: Long, action: (TaskProgress) -> String) {
+        runTrackedTask(message, totalBytes, totalEntries, action)
+    }
+
+    private fun runTrackedTask(message: String, totalBytes: Long, totalEntries: Long, action: (TaskProgress) -> String) {
         if (!workActive.compareAndSet(false, true)) {
             toast("Já existe uma operação em curso. Aguarda que termine.")
             return
         }
-        val progress = ProgressDialog(this).apply {
-            setMessage(message)
-            setIndeterminate(true)
-            setCancelable(false)
-            show()
+        ensureNotificationChannel()
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !prefs.getBoolean("notification_permission_requested", false)
+        ) {
+            prefs.edit().putBoolean("notification_permission_requested", true).apply()
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 742)
         }
+
+        val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+        }
+        val percentView = label("0%", 14, 0xFFD8D3FF.toInt(), true).apply { gravity = Gravity.END }
+        val detailView = label(message, 12, 0xFFB9B9C3.toInt(), false).apply {
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            setPadding(0, dp(10), 0, 0)
+        }
+        val dialogContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(12), dp(22), dp(12))
+            minimumWidth = dp(280)
+            addView(progressBar, LinearLayout.LayoutParams(-1, dp(8)))
+            addView(percentView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            addView(detailView, LinearLayout.LayoutParams(-1, -2))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(message)
+            .setView(dialogContent)
+            .setCancelable(false)
+            .setPositiveButton(tr("Fechar"), null)
+            .create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+        var latestPercent = 0
+        var lastPercent = -1
+        var lastDetail = ""
+        var lastNoticeAt = 0L
+        val meter = TaskProgress(totalBytes, totalEntries) { percent, detail ->
+            latestPercent = percent.coerceIn(0, 99)
+            runOnUiThread {
+                if (!isFinishing && dialog.isShowing) {
+                    progressBar.progress = percent
+                    percentView.text = "$percent%"
+                    detailView.text = detail
+                }
+            }
+            val now = android.os.SystemClock.elapsedRealtime()
+            val notificationDue = synchronized(this) {
+                val due = percent != lastPercent || (detail != lastDetail && now - lastNoticeAt >= 800L)
+                if (due) {
+                    lastPercent = percent
+                    lastDetail = detail
+                    lastNoticeAt = now
+                }
+                due
+            }
+            if (notificationDue) showOperationNotification(message, detail, percent)
+        }
+        showOperationNotification(message, currentDir.absolutePath, 0)
         worker.execute {
             var result: String
             try {
-                result = action()
+                result = action(meter)
             } catch (e: Exception) {
                 result = "Erro: " + (e.message ?: e.javaClass.simpleName)
-            } finally {
-                workActive.set(false)
             }
+            val finalResult = result
+            val failed = finalResult.startsWith("Erro:")
             runOnUiThread {
-                if (!isFinishing) {
-                    if (progress.isShowing) progress.dismiss()
-                    toast(result)
-                    if (hasStorageAccess() && browserRendered) refreshFiles()
+                workActive.set(false)
+                if (finalResult.startsWith("Ficheiro guardado:")) {
+                    editorSavedText = editorInput?.text?.toString() ?: editorSavedText
+                    editorDirty = false
+                    if (closeEditorAfterSave) closeTextEditor()
+                } else if (finalResult.startsWith("Erro:")) {
+                    closeEditorAfterSave = false
                 }
+                if (!isFinishing) {
+                    if (failed) {
+                        progressBar.progress = latestPercent
+                        percentView.text = "$latestPercent%"
+                    } else {
+                        progressBar.progress = 100
+                        percentView.text = "100%"
+                    }
+                    detailView.text = finalResult
+                    dialog.setTitle(if (failed) tr("Falha na operação") else tr("Operação concluída"))
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+                        text = tr("Fechar")
+                        isEnabled = true
+                    }
+                    Toast.makeText(this, tr(finalResult), Toast.LENGTH_LONG).show()
+                    if (hasStorageAccess() && browserRendered && !settingsOpen && !editorOpen) refreshFiles()
+                } else {
+                    dialog.dismiss()
+                }
+                showOperationNotification(message, tr(finalResult), null, finished = true, failed = failed)
             }
         }
     }
@@ -1474,6 +2666,7 @@ class MainActivity : Activity() {
         ImageButton(this).apply {
             setImageResource(resource)
             contentDescription = description
+            imageTintList = android.content.res.ColorStateList.valueOf(primaryTextColor())
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(dp(11), dp(11), dp(11), dp(11))
             background = GradientDrawable().apply {
@@ -1485,6 +2678,32 @@ class MainActivity : Activity() {
             setOnClickListener { click() }
         }
 
+    private fun selectionAction(symbol: String, title: String, click: () -> Unit): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(1), dp(2), dp(1), dp(2))
+            addView(TextView(this@MainActivity).apply {
+                text = symbol
+                textSize = if (symbol == "ZIP") 13f else 22f
+                gravity = Gravity.CENTER
+                setTextColor(accentColor())
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                maxLines = 1
+            }, LinearLayout.LayoutParams(-1, dp(30)))
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 10f
+                gravity = Gravity.CENTER
+                setTextColor(primaryTextColor())
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(-1, dp(22)))
+            setOnClickListener { click() }
+        }
+
     private fun roundedBackground(color: Int, radiusDp: Int): GradientDrawable =
         GradientDrawable().apply {
             setColor(color)
@@ -1492,9 +2711,9 @@ class MainActivity : Activity() {
         }
 
     private fun label(text: String, size: Int, color: Int, bold: Boolean): TextView = TextView(this).apply {
-        this.text = text
+        this.text = tr(text)
         textSize = size.toFloat()
-        setTextColor(color)
+        setTextColor(resolveTextColor(color))
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
 
@@ -1504,17 +2723,222 @@ class MainActivity : Activity() {
             contentDescription = description
             textSize = 27f
             gravity = Gravity.CENTER
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(if (uiTheme == "Claro") primaryTextColor() else 0xFFFFFFFF.toInt())
             isClickable = true
             isFocusable = true
             setOnClickListener { click() }
         }
 
     private fun actionButton(text: String, click: () -> Unit): Button = Button(this).apply {
-        this.text = text
+        this.text = tr(text)
         textSize = 12f
         isAllCaps = false
         setOnClickListener { click() }
+    }
+
+
+    private fun tr(text: String): String {
+        if (appLanguage != "en") return text
+        return mapOf(
+            "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
+            "Configurações" to "Settings", "Geral" to "General", "Interface" to "Interface",
+            "Compressão" to "Compression", "2 idiomas" to "2 languages",
+            "Idioma, notificações e informações" to "Language, notifications and app information",
+            "Tema, cor de destaque e aparência" to "Theme, accent color and appearance",
+            "Ordenação, ficheiros ocultos e miniaturas" to "Sorting, hidden files and thumbnails",
+            "Formato, velocidade e opções de arquivos" to "Formats, speed and archive options",
+            "Não configurado" to "Not configured", "Nenhum" to "None",
+            "O sistema de plugins ainda não está disponível" to "The plugin system is not available yet",
+            "Notificações" to "Notifications", "Sobre o Archiver" to "About Archiver",
+            "Progresso e conclusão das operações de ficheiros" to "File operation progress and completion",
+            "Gestor de ficheiros Android nativo em Kotlin" to "Native Kotlin Android file manager",
+            "Personaliza os controlos e realces" to "Customize controls and highlights",
+            "Cores das pastas" to "Folder colors", "Por pasta" to "Per folder",
+            "Escolhe uma cor no menu de cada pasta" to "Choose a color from each folder's menu",
+            "Abre o menu de uma pasta e escolhe Cor da pasta." to "Open a folder menu and choose Folder color.",
+            "O Archiver não implementa acesso ROOT nem Shizuku nesta versão. A permissão Android «Gerir todos os ficheiros» permite gerir o armazenamento partilhado, mas não desbloqueia as pastas privadas de outras aplicações nem concede root." to "Root or Shizuku access is not implemented in this version. Android's all-files permission manages shared storage, but it does not unlock other apps' private folders or grant root access.",
+            "Ainda não existe um sistema de plugins nesta versão. Os formatos e leitores disponíveis são os integrados na aplicação ou nas aplicações instaladas no dispositivo." to "A plugin system is not available yet. Supported formats and readers are built into Archiver or provided by apps installed on the device.",
+            "ZIP: suporta ZipCrypto, AES-256 e divisão em volumes. 7Z: criação e extração com níveis de compressão; palavra-passe e volumes não estão ligados nesta versão." to "ZIP supports ZipCrypto, AES-256 and split volumes. 7Z supports create/extract and compression levels; password protection and split volumes are not wired up for 7Z in this version.",
+            "Leitor de modelo 3D" to "3D model inspector", "Abrir noutra aplicação" to "Open in another app",
+            "Tentar aplicação externa" to "Try external app", "Modelo 3D" to "3D model",
+            "Abrir ficheiro" to "Open file", "Formato" to "Format", "Versão GLTF" to "GLTF version",
+            "Cenas" to "Scenes", "Objetos/nós" to "Objects/nodes", "Materiais" to "Materials",
+            "Texturas" to "Textures", "Imagens" to "Images", "Animações" to "Animations",
+            "Buffers" to "Buffers", "Tamanho do ficheiro" to "File size",
+            "Esta versão lê os metadados do modelo; a renderização 3D interativa ainda requer uma aplicação compatível." to "This version reads model metadata; interactive 3D rendering still requires a compatible app.",
+            "Não foi possível ler os metadados do modelo." to "Could not read model metadata.",
+            "O ficheiro é demasiado grande para o editor integrado e não existe outra aplicação para o abrir." to "The file is too large for the built-in editor and no other app can open it.",
+            "ZIP protegido por palavra-passe" to "Password-protected ZIP",
+            "Palavra-passe do ZIP" to "ZIP password", "Escreve a palavra-passe do arquivo." to "Enter the archive password.",
+            "Inspecionar modelo 3D" to "Inspect 3D model",
+            "Comprimir para ZIP" to "Compress to ZIP", "Comprimir para 7Z" to "Compress to 7Z",
+            "Comprimir…" to "Compress…", "text" to "text",
+            "Conceder acesso aos ficheiros" to "Grant file access", "Opções" to "Options",
+            "Selecionar tudo" to "Select all", "Limpar seleção" to "Clear selection",
+            "Copiar seleção" to "Copy selection", "Recortar seleção" to "Cut selection",
+            "Colar" to "Paste", "Criar novo…" to "Create new…", "Comprimir em ZIP" to "Compress to ZIP",
+            "Comprimir em 7Z" to "Compress to 7Z", "Pesquisar em subpastas" to "Search subfolders",
+            "Favoritos" to "Favorites", "Ordenar" to "Sort", "Definições do explorador" to "Explorer settings",
+            "Atualizar" to "Refresh", "Pasta de início" to "Home folder", "Ordenar ficheiros" to "Sort files",
+            "Nome" to "Name", "Tamanho" to "Size", "Data" to "Date", "Tipo" to "Type",
+            "Ordem crescente" to "Ascending", "Ordem decrescente" to "Descending",
+            "Detalhado" to "Detailed", "Compacto" to "Compact", "Grelha" to "Grid",
+            "Idioma" to "Language", "Tema da interface" to "Interface theme", "Cor de destaque" to "Accent color",
+            "Cores das pastas" to "Folder colors", "Escolher o idioma da interface" to "Choose interface language",
+            "Escuro" to "Dark", "Preto OLED" to "OLED black", "Claro" to "Light",
+            "Lavanda" to "Lavender", "Azul" to "Blue", "Verde" to "Green", "Laranja" to "Orange",
+            "Rosa" to "Pink", "Vermelho" to "Red", "Amarelo" to "Yellow",
+            "Miniaturas" to "Thumbnails", "Miniaturas do PDF" to "PDF thumbnails",
+            "Miniaturas de vídeo" to "Video thumbnails", "Capa do álbum" to "Album covers",
+            "Ícones do APK" to "APK icons", "Miniaturas quadradas" to "Square thumbnails",
+            "Nível de compressão" to "Compression level", "Escolher a ordem dos ficheiros" to "Choose file sorting",
+            "Inverte a ordem de ordenação dos arquivos" to "Reverse the sort order",
+            "Usar item \"..\" " to "Show parent-directory entry",
+            "Permite subir para o diretório anterior a partir da lista" to "Show parent directory in the list",
+            "Exibir arquivos ocultos" to "Show hidden files",
+            "Mostra ficheiros e diretórios cujo nome começa por ponto" to "Show files and folders beginning with a dot",
+            "Modo de exibição" to "View mode", "Detalhado, compacto ou grelha" to "Detailed, compact or grid",
+            "Exibir tamanho" to "Show size", "Mostra o tamanho dos ficheiros na lista" to "Show file sizes",
+            "Exibir data" to "Show date", "Mostra a data da última modificação" to "Show last modified date",
+            "Exibir hora" to "Show time", "Mostra a hora da última modificação" to "Show last modified time",
+            "Permite a exibição de miniaturas" to "Enable file thumbnails",
+            "Mostrar miniaturas de documentos PDF" to "Show PDF previews",
+            "Mostrar miniaturas de vídeo" to "Show video previews",
+            "Mostrar a capa do álbum nos ficheiros de música" to "Show music album art",
+            "Exibir os ícones das aplicações APK" to "Show APK application icons",
+            "Recorta as miniaturas para formato quadrado" to "Crop previews to a square",
+            "Copiar" to "Copy", "Mover" to "Move", "Eliminar" to "Delete", "Renomear" to "Rename",
+            "Informações" to "Information", "Abrir" to "Open", "Abrir pasta" to "Open folder",
+            "Partilhar" to "Share", "Recortar" to "Cut", "Ver conteúdo" to "Browse archive",
+            "Testar arquivo" to "Test archive", "Extrair aqui" to "Extract here",
+            "Extrair para nova pasta" to "Extract to new folder", "Adicionar aos Favoritos" to "Add to Favorites",
+            "Remover dos Favoritos" to "Remove from Favorites", "Cor da pasta" to "Folder color",
+            "Predefinida" to "Default", "Pasta vazia" to "Empty folder",
+            "Armazenamento interno" to "Internal storage", "Guardar" to "Save", "Cancelar" to "Cancel",
+            "Continuar a editar" to "Continue editing", "Sair sem guardar" to "Discard changes",
+            "Alterações por guardar" to "Unsaved changes",
+            "Queres guardar as alterações antes de sair do editor?" to "Would you like to save changes before leaving the editor?",
+            "Já existe uma operação em curso. Aguarda que termine." to "Another operation is running. Please wait.",
+            "A operação está em curso. Acompanha o progresso na janela ou na notificação." to "An operation is running. Follow progress in the dialog or notification."
+        )[text] ?: text
+    }
+
+    private fun accentColor(): Int = when (accentName) {
+        "Azul" -> 0xFF64B5F6.toInt()
+        "Verde" -> 0xFF81C784.toInt()
+        "Laranja" -> 0xFFFFB74D.toInt()
+        "Rosa" -> 0xFFF48FB1.toInt()
+        "Vermelho" -> 0xFFE57373.toInt()
+        "Amarelo" -> 0xFFFFD54F.toInt()
+        else -> 0xFFB8B5FF.toInt()
+    }
+
+    private fun pageBackgroundColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFF5F6FA.toInt()
+        "Preto OLED" -> 0xFF000000.toInt()
+        else -> 0xFF19191D.toInt()
+    }
+
+    private fun panelBackgroundColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFE7E8EF.toInt()
+        "Preto OLED" -> 0xFF08080A.toInt()
+        else -> 0xFF202025.toInt()
+    }
+
+    private fun toolbarBackgroundColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFE0E3F0.toInt()
+        "Preto OLED" -> 0xFF050507.toInt()
+        else -> 0xFF292D40.toInt()
+    }
+
+    private fun rowSurfaceColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFECEEF4.toInt()
+        "Preto OLED" -> 0xFF08080A.toInt()
+        else -> 0xFF24242A.toInt()
+    }
+
+    private fun selectedRowColor(): Int = when (uiTheme) {
+        "Claro" -> 0xFFD9DCF1.toInt()
+        "Preto OLED" -> 0xFF242033.toInt()
+        else -> 0xFF353348.toInt()
+    }
+
+    private fun primaryTextColor(): Int = if (uiTheme == "Claro") 0xFF22232A.toInt() else 0xFFF3F3F5.toInt()
+    private fun mutedTextColor(): Int = if (uiTheme == "Claro") 0xFF676A75.toInt() else 0xFFAAAAB4.toInt()
+
+    private fun resolveTextColor(requested: Int): Int = when (requested) {
+        0xFFFFFFFF.toInt(), 0xFFF4F4F6.toInt(), 0xFFF3F3F5.toInt(), 0xFFF1F1F4.toInt(),
+        0xFFF0F0F3.toInt(), 0xFFE3E3E8.toInt(), 0xFFE2E2E8.toInt() -> primaryTextColor()
+        0xFFAAAAB4.toInt(), 0xFFACACB6.toInt(), 0xFF9999A4.toInt(), 0xFF9D9DA8.toInt(),
+        0xFFB9B9C3.toInt(), 0xFFABABB5.toInt() -> mutedTextColor()
+        0xFFB8B5FF.toInt(), 0xFFD8D3FF.toInt(), 0xFFD0CBFF.toInt() -> accentColor()
+        else -> requested
+    }
+
+    private fun applyPaletteToWindow() {
+        window.statusBarColor = toolbarBackgroundColor()
+        window.navigationBarColor = if (uiTheme == "Preto OLED") 0xFF000000.toInt() else 0xFF101014.toInt()
+        window.decorView.systemUiVisibility = if (uiTheme == "Claro") {
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        } else 0
+    }
+
+    private fun showLanguageMenu() {
+        val options = arrayOf("Português", "English")
+        AlertDialog.Builder(this).setTitle(tr("Idioma"))
+            .setSingleChoiceItems(options, if (appLanguage == "en") 1 else 0) { dialog, which ->
+                appLanguage = if (which == 1) "en" else "pt"
+                savePreferences()
+                dialog.dismiss()
+                if (settingsOpen) renderSettingsScreen() else renderBrowser()
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showThemeMenu() {
+        val options = arrayOf("Escuro", "Preto OLED", "Claro")
+        AlertDialog.Builder(this).setTitle(tr("Tema da interface"))
+            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(uiTheme).coerceAtLeast(0)) { dialog, which ->
+                uiTheme = options[which]
+                savePreferences()
+                applyPaletteToWindow()
+                dialog.dismiss()
+                if (settingsOpen) renderSettingsScreen() else renderBrowser()
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showAccentMenu() {
+        val options = arrayOf("Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
+        AlertDialog.Builder(this).setTitle(tr("Cor de destaque"))
+            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(accentName).coerceAtLeast(0)) { dialog, which ->
+                accentName = options[which]
+                savePreferences()
+                dialog.dismiss()
+                if (settingsOpen) renderSettingsScreen() else renderBrowser()
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun showFolderColorMenu(file: File) {
+        val options = arrayOf("Predefinida", "Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
+        AlertDialog.Builder(this).setTitle(tr("Cor da pasta"))
+            .setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
+                val key = pathKey(file)
+                if (which == 0) folderColors.remove(key) else folderColors[key] = options[which]
+                savePreferences()
+                refreshFiles()
+            }.setNegativeButton(tr("Cancelar"), null).show()
+    }
+
+    private fun folderColorValue(file: File): Int? = folderColors[pathKey(file)]?.let { color ->
+        when (color) {
+            "Lavanda" -> 0xFFB8B5FF.toInt()
+            "Azul" -> 0xFF64B5F6.toInt()
+            "Verde" -> 0xFF81C784.toInt()
+            "Laranja" -> 0xFFFFB74D.toInt()
+            "Rosa" -> 0xFFF48FB1.toInt()
+            "Vermelho" -> 0xFFE57373.toInt()
+            "Amarelo" -> 0xFFFFD54F.toInt()
+            else -> null
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
@@ -1531,13 +2955,26 @@ class MainActivity : Activity() {
     private fun onOff(value: Boolean): String = if (value) "Ligado" else "Desligado"
 
     private fun toast(message: String) {
-        runOnUiThread { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
+        runOnUiThread { Toast.makeText(this, tr(message), Toast.LENGTH_LONG).show() }
     }
 
     override fun onBackPressed() {
+        if (workActive.get()) {
+            toast("A operação está em curso. Acompanha o progresso na janela ou na notificação.")
+            return
+        }
+        if (editorOpen) {
+            requestLeaveTextEditor()
+            return
+        }
         if (settingsOpen) {
-            settingsOpen = false
-            renderBrowser()
+            if (settingsCategory != null) {
+                settingsCategory = null
+                renderSettingsScreen()
+            } else {
+                settingsOpen = false
+                renderBrowser()
+            }
             return
         }
 
@@ -1553,6 +2990,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         worker.shutdown()
+        thumbnailWorker.shutdown()
         super.onDestroy()
     }
 }
