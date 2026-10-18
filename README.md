@@ -1,28 +1,30 @@
-# Archiver 0.5.0 — Android File Manager
+# Archiver 0.6.0 — Android File Manager
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
 
 ## Highlights
 
 - Shared-storage browsing with breadcrumb navigation, favorites, sorting, hidden files, multi-selection and detailed, compact or grid views.
-- Fast in-place selection: selecting an item no longer redraws the entire visible file list.
-- Scoped search starts in the current folder and never searches outside it. Searching subfolders is optional. Filters cover folders, documents, images, video, audio, archives and apps; wildcard patterns such as `*.zip` are supported.
-- Search results show the file/folder name, parent path and size, with tap-to-open and contextual actions.
-- File actions include create, open/share, rename, copy, move, delete, information, copy path, favorites and SHA-256 checksum calculation.
-- ZIP and 7Z creation, browsing, testing and extraction. ZIP supports ZipCrypto/AES-256 password protection and split volumes; compression levels are configurable.
-- Operation progress with percentage, current path/item and status. The completion dialog and operation notification are removed automatically when the operation ends.
+- Fast in-place selection: selecting an item does not redraw the entire visible file list.
+- Scoped, bounded search starts in the current folder and never searches outside it. Searching subfolders is optional. Results include the file name, parent path and size; wildcard patterns such as `*.zip` are supported. Recursive scans stop after 10,000 visited entries or 100 matches to keep the interface responsive.
+- File actions include create, open/share, rename, copy, move, delete, information, copy path, favorites, folder colours and SHA-256 checksums.
+- Archive creation, browsing, verification and extraction for ZIP, 7Z, TAR, TAR.GZ and TAR.BZ2. TAR formats support long file names. ZIP supports ZipCrypto/AES-256 password protection and split volumes; compression levels are configurable where supported.
+- Archive browsing is hierarchical: open virtual directories and extract one file or the current archived folder without extracting the whole archive.
+- Operation progress with percentage, current path/item and status. The completion dialog and operation notification are removed automatically when an operation ends.
+- Built-in PDF reader with page navigation, basic raster-image viewer and audio playback for device-supported formats. If an embedded reader cannot handle a particular file, an installed compatible app remains available from the viewer.
 - File-type icons, image thumbnails and optional PDF/video/music/APK previews.
-- Built-in UTF-8 text editor for common files up to 4 MiB.
+- Built-in UTF-8 text editor for common text and code files up to 4 MiB, including HTML, CSS, Java, Kotlin, JavaScript, JSON, XML, Python, SQL and more. The editor provides text editing, not a full IDE or code execution environment.
 - GLB/GLTF metadata inspector; interactive 3D rendering is handed off to a compatible external viewer.
-- Twelve selectable interface languages: Portuguese, English, Spanish, French, German, Simplified Chinese, Hindi, Arabic, Japanese, Russian, Bengali and Indonesian. Arabic uses a right-to-left layout. Navigation, common file actions, search filters, theme controls and sharing prompts have localized labels; uncommon diagnostic strings may still fall back to English.
-- Theme presets with a visual preview (Dark, OLED black and Light), clearer accent-color selection, custom folder colors and thumbnail preferences.
-- Optional one-time invitation asking the user to share the app.
+- Twelve selectable interface languages: Portuguese, English, Spanish, French, German, Simplified Chinese, Hindi, Arabic, Japanese, Russian, Bengali and Indonesian. The selected language is shown by its native name; Arabic uses a right-to-left layout. Some legacy/rare strings may still use English fallback where a translation has not been added.
+- Theme presets (Dark, OLED black and Light), accent-color selection, custom folder colours and thumbnail preferences.
 
-## Archive formats and current limits
+## Format and platform limits
 
-The built-in archive engine focuses on ZIP and 7Z. ZIP supports encryption and split volumes; those features are not implemented for 7Z. RAR/TAR-family operations, root/Shizuku access, a plugin system, and embedded interactive 3D rendering are not implemented in this preview.
-
-Android may restrict access to private app directories such as `Android/data`, even when broad shared-storage access is granted.
+- Archive operations are built in for ZIP, 7Z, TAR, TAR.GZ and TAR.BZ2. RAR, ISO, CAB, ARJ and other formats may be identified by their file icons but are not yet supported for archive extraction. A file icon does not imply that the format can be decompressed.
+- ZIP supports encryption and split volumes. Password protection and split volumes are not implemented for 7Z or TAR-family archives.
+- Root/Shizuku access and a plugin system are not implemented and are intentionally not presented as available settings.
+- PDF rendering uses Android's `PdfRenderer`; audio playback depends on the codecs supported by the Android device. SVG, Office documents and unsupported image/audio/video formats can be opened through a compatible installed app.
+- Android may restrict access to private app directories such as `Android/data`, even when broad shared-storage access is granted. All-files permission does not grant root and does not bypass other apps' private storage protections.
 
 ## Website
 
