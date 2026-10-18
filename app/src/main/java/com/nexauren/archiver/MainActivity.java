@@ -30,6 +30,7 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -249,7 +250,7 @@ public class MainActivity extends Activity {
     }
 
     private void showMainMenu() {
-        String[] options = {"Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Excluir seleção", "Ordenar", "Mostrar/ocultar ficheiros ocultos", "Mostrar/ocultar tamanho", "Mostrar/ocultar data", "Compressão ZIP", "Atualizar"};
+        String[] options = {"Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Excluir seleção", "Ordenar", "Mostrar/ocultar ficheiros ocultos", "Mostrar/ocultar tamanho", "Mostrar/ocultar data", "Compressão ZIP", "Atualizar", "Pesquisar em subpastas"};
         new AlertDialog.Builder(this).setTitle("Opções").setItems(options, (d, which) -> {
             switch (which) {
                 case 0:
@@ -266,6 +267,7 @@ public class MainActivity extends Activity {
                 case 8: showDate = !showDate; prefs.edit().putBoolean("date", showDate).apply(); refresh(); break;
                 case 9: showCompressionMenu(); break;
                 case 10: refresh(); break;
+                case 11: promptSearch(); break;
             }
         }).show();
     }
@@ -299,6 +301,90 @@ public class MainActivity extends Activity {
                     postResult("Seleção eliminada.", true);
                 });
             }).show();
+    }
+
+    private static final class SearchResult {
+        final DocumentFile file;
+        final String path;
+        final List<DocumentFile> parents;
+        SearchResult(DocumentFile file, String path, List<DocumentFile> parents) {
+            this.file = file;
+            this.path = path;
+            this.parents = parents;
+        }
+    }
+
+    private void promptSearch() {
+        if (current() == null) { toast("Escolha uma pasta primeiro."); return; }
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Nome ou padrão, por exemplo *.zip");
+        new AlertDialog.Builder(this).setTitle("Pesquisar ficheiros")
+            .setMessage("Pesquisa dentro da pasta atual e das respetivas subpastas.")
+            .setView(input).setNegativeButton("Cancelar", null).setPositiveButton("Pesquisar", (d,w) -> {
+                String query = input.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
+                if (query.isEmpty()) { toast("Escreva um nome ou padrão."); return; }
+                final DocumentFile root = current();
+                final List<DocumentFile> baseStack = new ArrayList<>(stack);
+                toast("A pesquisar…");
+                worker.execute(() -> {
+                    List<SearchResult> hits = new ArrayList<>();
+                    searchTree(root, query, "", new ArrayList<>(), hits, 0);
+                    runOnUiThread(() -> {
+                        if (hits.isEmpty()) { toast("Nenhum resultado encontrado."); return; }
+                        String[] labels = new String[hits.size()];
+                        for (int i = 0; i < hits.size(); i++) {
+                            SearchResult hit = hits.get(i);
+                            labels[i] = (hit.file.isDirectory() ? "[Pasta] " : "[Ficheiro] ") + hit.path;
+                        }
+                        new AlertDialog.Builder(this).setTitle("Resultados (" + hits.size() + ")")
+                            .setItems(labels, (dialog, which) -> {
+                                SearchResult hit = hits.get(which);
+                                stack.clear();
+                                stack.addAll(baseStack);
+                                stack.addAll(hit.parents);
+                                selected.clear();
+                                refresh();
+                                showFileActions(hit.file);
+                            }).setPositiveButton("Fechar", null).show();
+                    });
+                });
+            }).show();
+    }
+
+    private void searchTree(DocumentFile directory, String query, String prefix,
+                            List<DocumentFile> parentPath, List<SearchResult> hits, int depth) {
+        if (depth > 60 || hits.size() >= 300) return;
+        DocumentFile[] children;
+        try { children = directory.listFiles(); }
+        catch (Exception e) { return; }
+        if (children == null) return;
+        for (DocumentFile child : children) {
+            if (hits.size() >= 300) return;
+            String name = child.getName() == null ? "" : child.getName();
+            if (!showHidden && name.startsWith(".")) continue;
+            String fullPath = prefix.isEmpty() ? name : prefix + "/" + name;
+            if (matchesSearch(name.toLowerCase(java.util.Locale.ROOT), query)) {
+                hits.add(new SearchResult(child, fullPath, new ArrayList<>(parentPath)));
+            }
+            if (child.isDirectory()) {
+                List<DocumentFile> parents = new ArrayList<>(parentPath);
+                parents.add(child);
+                searchTree(child, query, fullPath, parents, hits, depth + 1);
+            }
+        }
+    }
+
+    private boolean matchesSearch(String name, String query) {
+        String wildcard = query.indexOf('*') >= 0 ? query : "*" + query + "*";
+        StringBuilder regex = new StringBuilder("^");
+        for (int i = 0; i < wildcard.length(); i++) {
+            char ch = wildcard.charAt(i);
+            if (ch == '*') regex.append(".*");
+            else regex.append(Pattern.quote(String.valueOf(ch)));
+        }
+        regex.append("$");
+        return Pattern.matches(regex.toString(), name);
     }
 
     private void showSortMenu() {
