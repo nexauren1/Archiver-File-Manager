@@ -25,6 +25,8 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
@@ -47,6 +49,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
@@ -1293,6 +1296,7 @@ class MainActivity : Activity() {
 
     private fun showAudioPlayer(file: File) {
         val status = label("A preparar áudio…", 14, mutedTextColor(), false)
+        val seek = SeekBar(this).apply { max = 1000; isEnabled = false; contentDescription = tr("Posição do áudio") }
         val play = Button(this).apply { text = tr("Reproduzir"); isAllCaps = false; isEnabled = false }
         val stop = Button(this).apply { text = tr("Parar"); isAllCaps = false; isEnabled = false }
         val controls = LinearLayout(this).apply {
@@ -1309,7 +1313,8 @@ class MainActivity : Activity() {
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(16), dp(20), dp(8))
-            addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+            addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+            addView(seek, LinearLayout.LayoutParams(-1, dp(42)))
             addView(controls, LinearLayout.LayoutParams(-1, -2))
             addView(backgroundPlay, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         }
@@ -1320,8 +1325,36 @@ class MainActivity : Activity() {
             .setNegativeButton(tr("Fechar"), null)
             .create()
         val player = MediaPlayer()
+        val progressHandler = Handler(Looper.getMainLooper())
         var prepared = false
+        var dragging = false
         var handedOffToService = false
+        val progressUpdate = object : Runnable {
+            override fun run() {
+                if (prepared && !dragging) {
+                    val duration = player.duration.coerceAtLeast(1)
+                    seek.max = duration
+                    seek.progress = player.currentPosition.coerceIn(0, duration)
+                    val current = (player.currentPosition / 1000).coerceAtLeast(0)
+                    val total = (duration / 1000).coerceAtLeast(0)
+                    status.text = "${current / 60}:${(current % 60).toString().padStart(2, '0')} / ${total / 60}:${(total % 60).toString().padStart(2, '0')}"
+                }
+                if (dialog.isShowing && prepared && !handedOffToService) progressHandler.postDelayed(this, 400L)
+            }
+        }
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                if (fromUser && prepared) {
+                    val seconds = (value / 1000).coerceAtLeast(0)
+                    status.text = "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+                }
+            }
+            override fun onStartTrackingTouch(bar: SeekBar?) { dragging = true }
+            override fun onStopTrackingTouch(bar: SeekBar?) {
+                if (prepared && bar != null) runCatching { player.seekTo(bar.progress) }
+                dragging = false
+            }
+        })
         backgroundPlay.setOnClickListener {
             if (!prepared) return@setOnClickListener
             try {
@@ -1363,8 +1396,12 @@ class MainActivity : Activity() {
             play.isEnabled = true
             stop.isEnabled = true
             backgroundPlay.isEnabled = true
+            seek.isEnabled = true
+            seek.max = preparedPlayer.duration.coerceAtLeast(1)
+            seek.progress = 0
             val seconds = (preparedPlayer.duration / 1000).coerceAtLeast(0)
-            status.text = tr("Pronto") + " • ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+            status.text = "0:00 / ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+            progressHandler.post(progressUpdate)"
         }
         player.setOnCompletionListener {
             play.text = tr("Reproduzir")
@@ -1377,6 +1414,7 @@ class MainActivity : Activity() {
             true
         }
         dialog.setOnDismissListener {
+            progressHandler.removeCallbacks(progressUpdate)
             if (!handedOffToService) {
                 runCatching { if (player.isPlaying) player.stop() }
                 runCatching { player.release() }
