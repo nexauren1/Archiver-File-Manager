@@ -476,7 +476,7 @@ public class MainActivity extends Activity {
     }
     private void confirmDelete(DocumentFile file) {
         new AlertDialog.Builder(this).setTitle("Excluir")
-            .setMessage("Eliminar "" + file.getName() + ""? Esta ação não pode ser anulada.")
+            .setMessage("Eliminar o item " + file.getName() + "? Esta ação não pode ser anulada.")
             .setNegativeButton("Cancelar", null).setPositiveButton("Excluir", (d,w) -> runWork(() -> {
                 boolean ok = deleteRecursively(file);
                 postResult(ok ? "Item eliminado." : "Não foi possível eliminar o item.", ok);
