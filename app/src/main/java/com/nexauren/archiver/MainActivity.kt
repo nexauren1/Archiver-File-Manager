@@ -4627,7 +4627,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "This folder has no subfolders to customize.",
                 "Atualização automática" to "Automatic refresh", "Atualiza a lista quando os ficheiros mudam" to "Refresh the list when files change",
                 "Atualização automática ativada." to "Automatic refresh enabled.", "Atualização automática desativada." to "Automatic refresh disabled.",
-                "Armazenamento" to "Storage", "livres" to "free", "Armazenamento indisponível" to "Storage unavailable"
+                "Armazenamento" to "Storage", "livres" to "free", "Armazenamento indisponível" to "Storage unavailable", "Voltar" to "Back", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "Independent Android file manager inspired by classic explorers. ZIP/7Z, text editor, thumbnails and progress-tracked operations.", "Nome ou padrão, por exemplo *.zip" to "Name or pattern, e.g. *.zip", "Resultados da pesquisa" to "Search results", "Criar" to "Create", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "This folder contains no subfolders. Open the desired folder and use its menu to choose a color."
             )
             "es" -> mapOf(
                 "Fundo da interface" to "Fondo de la interfaz", "Escolhe uma paleta de fundo para a aplicação" to "Elige una paleta de fondo para la aplicación",
@@ -4638,7 +4638,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "Esta carpeta no contiene subcarpetas para personalizar.",
                 "Atualização automática" to "Actualización automática", "Atualiza a lista quando os ficheiros mudam" to "Actualiza la lista cuando cambian los archivos",
                 "Atualização automática ativada." to "Actualización automática activada.", "Atualização automática desativada." to "Actualización automática desactivada.",
-                "Armazenamento" to "Almacenamiento", "livres" to "libres", "Armazenamento indisponível" to "Almacenamiento no disponible"
+                "Armazenamento" to "Almacenamiento", "livres" to "libres", "Armazenamento indisponível" to "Almacenamiento no disponible", "Voltar" to "Volver", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "Gestor de archivos Android independiente inspirado en exploradores clásicos. ZIP/7Z, editor de texto, miniaturas y operaciones con progreso.", "Nome ou padrão, por exemplo *.zip" to "Nombre o patrón, por ejemplo *.zip", "Resultados da pesquisa" to "Resultados de búsqueda", "Criar" to "Crear", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "Esta carpeta no contiene subcarpetas. Abre la carpeta deseada y usa su menú para elegir un color."
             )
             "fr" -> mapOf(
                 "Fundo da interface" to "Arrière-plan de l’interface", "Escolhe uma paleta de fundo para a aplicação" to "Choisissez une palette de fond pour l’application",
@@ -4649,7 +4649,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "Ce dossier ne contient aucun sous-dossier à personnaliser.",
                 "Atualização automática" to "Actualisation automatique", "Atualiza a lista quando os ficheiros mudam" to "Actualise la liste lorsque les fichiers changent",
                 "Atualização automática ativada." to "Actualisation automatique activée.", "Atualização automática desativada." to "Actualisation automatique désactivée.",
-                "Armazenamento" to "Stockage", "livres" to "libres", "Armazenamento indisponível" to "Stockage indisponible"
+                "Armazenamento" to "Stockage", "livres" to "libres", "Armazenamento indisponível" to "Stockage indisponible", "Voltar" to "Retour", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "Gestionnaire de fichiers Android indépendant inspiré des explorateurs classiques. ZIP/7Z, éditeur de texte, miniatures et opérations avec suivi de progression.", "Nome ou padrão, por exemplo *.zip" to "Nom ou motif, par exemple *.zip", "Resultados da pesquisa" to "Résultats de recherche", "Criar" to "Créer", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "Ce dossier ne contient aucun sous-dossier. Ouvrez le dossier souhaité et utilisez son menu pour choisir une couleur."
             )
             "de" -> mapOf(
                 "Fundo da interface" to "Oberflächenhintergrund", "Escolhe uma paleta de fundo para a aplicação" to "Wähle eine Hintergrundpalette für die App",
@@ -4660,7 +4660,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "Dieser Ordner enthält keine anpassbaren Unterordner.",
                 "Atualização automática" to "Automatische Aktualisierung", "Atualiza a lista quando os ficheiros mudam" to "Liste bei Dateiänderungen aktualisieren",
                 "Atualização automática ativada." to "Automatische Aktualisierung aktiviert.", "Atualização automática desativada." to "Automatische Aktualisierung deaktiviert.",
-                "Armazenamento" to "Speicher", "livres" to "frei", "Armazenamento indisponível" to "Speicher nicht verfügbar"
+                "Armazenamento" to "Speicher", "livres" to "frei", "Armazenamento indisponível" to "Speicher nicht verfügbar", "Voltar" to "Zurück", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "Unabhängiger Android-Dateimanager, inspiriert von klassischen Dateimanagern. ZIP/7Z, Texteditor, Vorschaubilder und Vorgänge mit Fortschrittsanzeige.", "Nome ou padrão, por exemplo *.zip" to "Name oder Muster, z. B. *.zip", "Resultados da pesquisa" to "Suchergebnisse", "Criar" to "Erstellen", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "Dieser Ordner enthält keine Unterordner. Öffne den gewünschten Ordner und wähle im Menü eine Farbe."
             )
             "zh" -> mapOf(
                 "Fundo da interface" to "界面背景", "Escolhe uma paleta de fundo para a aplicação" to "选择应用背景配色",
@@ -4671,7 +4671,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "此文件夹没有可自定义的子文件夹。",
                 "Atualização automática" to "自动刷新", "Atualiza a lista quando os ficheiros mudam" to "文件变化时刷新列表",
                 "Atualização automática ativada." to "自动刷新已启用。", "Atualização automática desativada." to "自动刷新已关闭。",
-                "Armazenamento" to "存储空间", "livres" to "可用", "Armazenamento indisponível" to "存储空间不可用"
+                "Armazenamento" to "存储空间", "livres" to "可用", "Armazenamento indisponível" to "存储空间不可用", "Voltar" to "返回", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "独立的 Android 文件管理器，灵感来自经典文件管理器。支持 ZIP/7Z、文本编辑、缩略图和进度显示。", "Nome ou padrão, por exemplo *.zip" to "名称或模式，例如 *.zip", "Resultados da pesquisa" to "搜索结果", "Criar" to "创建", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "此文件夹没有子文件夹。请打开目标文件夹并从其菜单中选择颜色。"
             )
             "hi" -> mapOf(
                 "Fundo da interface" to "इंटरफ़ेस पृष्ठभूमि", "Escolhe uma paleta de fundo para a aplicação" to "ऐप की पृष्ठभूमि का रंग चुनें",
@@ -4682,7 +4682,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "इस फ़ोल्डर में अनुकूलित करने के लिए उप-फ़ोल्डर नहीं हैं।",
                 "Atualização automática" to "स्वचालित रीफ़्रेश", "Atualiza a lista quando os ficheiros mudam" to "फ़ाइल बदलने पर सूची रीफ़्रेश करें",
                 "Atualização automática ativada." to "स्वचालित रीफ़्रेश चालू है।", "Atualização automática desativada." to "स्वचालित रीफ़्रेश बंद है।",
-                "Armazenamento" to "स्टोरेज", "livres" to "खाली", "Armazenamento indisponível" to "स्टोरेज उपलब्ध नहीं"
+                "Armazenamento" to "स्टोरेज", "livres" to "खाली", "Armazenamento indisponível" to "स्टोरेज उपलब्ध नहीं", "Voltar" to "वापस", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "क्लासिक फ़ाइल मैनेजर से प्रेरित स्वतंत्र Android फ़ाइल प्रबंधक। ZIP/7Z, टेक्स्ट एडिटर, थंबनेल और प्रगति संकेतक वाले काम।", "Nome ou padrão, por exemplo *.zip" to "नाम या पैटर्न, जैसे *.zip", "Resultados da pesquisa" to "खोज परिणाम", "Criar" to "बनाएँ", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "इस फ़ोल्डर में उप-फ़ोल्डर नहीं हैं। इच्छित फ़ोल्डर खोलें और रंग चुनने के लिए उसका मेनू उपयोग करें।"
             )
             "ar" -> mapOf(
                 "Fundo da interface" to "خلفية الواجهة", "Escolhe uma paleta de fundo para a aplicação" to "اختر لوحة ألوان لخلفية التطبيق",
@@ -4693,7 +4693,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "لا يحتوي هذا المجلد على مجلدات فرعية للتخصيص.",
                 "Atualização automática" to "التحديث التلقائي", "Atualiza a lista quando os ficheiros mudam" to "تحديث القائمة عند تغيّر الملفات",
                 "Atualização automática ativada." to "تم تفعيل التحديث التلقائي.", "Atualização automática desativada." to "تم تعطيل التحديث التلقائي.",
-                "Armazenamento" to "التخزين", "livres" to "متاح", "Armazenamento indisponível" to "التخزين غير متاح"
+                "Armazenamento" to "التخزين", "livres" to "متاح", "Armazenamento indisponível" to "التخزين غير متاح", "Voltar" to "رجوع", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "مدير ملفات مستقل لأندرويد مستوحى من مستعرضات الملفات الكلاسيكية. يدعم ZIP/7Z ومحرر النصوص والصور المصغرة والعمليات مع عرض التقدم.", "Nome ou padrão, por exemplo *.zip" to "الاسم أو النمط، مثل *.zip", "Resultados da pesquisa" to "نتائج البحث", "Criar" to "إنشاء", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "لا يحتوي هذا المجلد على مجلدات فرعية. افتح المجلد المطلوب واستخدم قائمته لاختيار لون."
             )
             "ja" -> mapOf(
                 "Fundo da interface" to "画面の背景", "Escolhe uma paleta de fundo para a aplicação" to "アプリの背景配色を選択",
@@ -4704,7 +4704,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "カスタマイズできるサブフォルダーはありません。",
                 "Atualização automática" to "自動更新", "Atualiza a lista quando os ficheiros mudam" to "ファイルの変更時に一覧を更新",
                 "Atualização automática ativada." to "自動更新を有効にしました。", "Atualização automática desativada." to "自動更新を無効にしました。",
-                "Armazenamento" to "ストレージ", "livres" to "空き", "Armazenamento indisponível" to "ストレージを利用できません"
+                "Armazenamento" to "ストレージ", "livres" to "空き", "Armazenamento indisponível" to "ストレージを利用できません", "Voltar" to "戻る", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "クラシックなファイル管理アプリに着想を得た独立した Android ファイルマネージャー。ZIP/7Z、テキスト編集、サムネイル、進捗表示に対応。", "Nome ou padrão, por exemplo *.zip" to "名前またはパターン（例：*.zip）", "Resultados da pesquisa" to "検索結果", "Criar" to "作成", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "このフォルダーにはサブフォルダーがありません。対象のフォルダーを開き、メニューから色を選択してください。"
             )
             "ru" -> mapOf(
                 "Fundo da interface" to "Фон интерфейса", "Escolhe uma paleta de fundo para a aplicação" to "Выберите цветовую тему фона приложения",
@@ -4715,7 +4715,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "В этой папке нет подпапок для настройки.",
                 "Atualização automática" to "Автообновление", "Atualiza a lista quando os ficheiros mudam" to "Обновлять список при изменении файлов",
                 "Atualização automática ativada." to "Автообновление включено.", "Atualização automática desativada." to "Автообновление выключено.",
-                "Armazenamento" to "Хранилище", "livres" to "свободно", "Armazenamento indisponível" to "Хранилище недоступно"
+                "Armazenamento" to "Хранилище", "livres" to "свободно", "Armazenamento indisponível" to "Хранилище недоступно", "Voltar" to "Назад", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "Независимый файловый менеджер для Android, вдохновлённый классическими приложениями. ZIP/7Z, текстовый редактор, миниатюры и операции с отображением прогресса.", "Nome ou padrão, por exemplo *.zip" to "Имя или шаблон, например *.zip", "Resultados da pesquisa" to "Результаты поиска", "Criar" to "Создать", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "В этой папке нет подпапок. Откройте нужную папку и выберите цвет в её меню."
             )
             "bn" -> mapOf(
                 "Fundo da interface" to "ইন্টারফেসের পটভূমি", "Escolhe uma paleta de fundo para a aplicação" to "অ্যাপের পটভূমির রঙ নির্বাচন করুন",
@@ -4726,7 +4726,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "এই ফোল্ডারে কাস্টমাইজ করার মতো কোনো সাবফোল্ডার নেই।",
                 "Atualização automática" to "স্বয়ংক্রিয় রিফ্রেশ", "Atualiza a lista quando os ficheiros mudam" to "ফাইল বদলালে তালিকা রিফ্রেশ করুন",
                 "Atualização automática ativada." to "স্বয়ংক্রিয় রিফ্রেশ চালু হয়েছে।", "Atualização automática desativada." to "স্বয়ংক্রিয় রিফ্রেশ বন্ধ হয়েছে।",
-                "Armazenamento" to "স্টোরেজ", "livres" to "খালি", "Armazenamento indisponível" to "স্টোরেজ উপলব্ধ নয়"
+                "Armazenamento" to "স্টোরেজ", "livres" to "খালি", "Armazenamento indisponível" to "স্টোরেজ উপলব্ধ নয়", "Voltar" to "ফিরে যান", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "ক্লাসিক ফাইল ম্যানেজার থেকে অনুপ্রাণিত স্বতন্ত্র Android ফাইল ম্যানেজার। ZIP/7Z, টেক্সট এডিটর, থাম্বনেইল এবং অগ্রগতি-দেখানো অপারেশন।", "Nome ou padrão, por exemplo *.zip" to "নাম বা প্যাটার্ন, যেমন *.zip", "Resultados da pesquisa" to "অনুসন্ধানের ফলাফল", "Criar" to "তৈরি করুন", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "এই ফোল্ডারে কোনো সাবফোল্ডার নেই। পছন্দের ফোল্ডার খুলে তার মেনু থেকে রং নির্বাচন করুন।"
             )
             "id" -> mapOf(
                 "Fundo da interface" to "Latar belakang antarmuka", "Escolhe uma paleta de fundo para a aplicação" to "Pilih palet latar belakang aplikasi",
@@ -4737,7 +4737,7 @@ class MainActivity : Activity() {
                 "Esta pasta não contém subpastas para personalizar." to "Folder ini tidak memiliki subfolder untuk disesuaikan.",
                 "Atualização automática" to "Penyegaran otomatis", "Atualiza a lista quando os ficheiros mudam" to "Segarkan daftar saat berkas berubah",
                 "Atualização automática ativada." to "Penyegaran otomatis diaktifkan.", "Atualização automática desativada." to "Penyegaran otomatis dinonaktifkan.",
-                "Armazenamento" to "Penyimpanan", "livres" to "tersedia", "Armazenamento indisponível" to "Penyimpanan tidak tersedia"
+                "Armazenamento" to "Penyimpanan", "livres" to "tersedia", "Armazenamento indisponível" to "Penyimpanan tidak tersedia", "Voltar" to "Kembali", "Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso." to "Pengelola file Android independen yang terinspirasi pengelola file klasik. ZIP/7Z, editor teks, pratinjau, dan operasi dengan indikator progres.", "Nome ou padrão, por exemplo *.zip" to "Nama atau pola, misalnya *.zip", "Resultados da pesquisa" to "Hasil pencarian", "Criar" to "Buat", "Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor." to "Folder ini tidak memiliki subfolder. Buka folder yang diinginkan dan pilih warna dari menunya."
             )
             else -> emptyMap()
         }
