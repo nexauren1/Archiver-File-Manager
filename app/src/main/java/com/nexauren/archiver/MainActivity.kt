@@ -148,6 +148,7 @@ class MainActivity : Activity() {
         window.navigationBarColor = 0xFF101014.toInt()
         prefs = getSharedPreferences("archiver_preferences", MODE_PRIVATE)
         loadPreferences()
+        applyLanguageDirection()
         rootDir = Environment.getExternalStorageDirectory().canonicalFile
         currentDir = rootDir
         if (hasStorageAccess()) renderBrowser() else showPermissionScreen()
@@ -295,6 +296,7 @@ class MainActivity : Activity() {
 
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
             setBackgroundColor(pageBackgroundColor())
         }
         val toolbar = LinearLayout(this).apply {
@@ -807,6 +809,7 @@ class MainActivity : Activity() {
         val category = settingsCategory
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
             setBackgroundColor(pageBackgroundColor())
         }
         val toolbar = LinearLayout(this).apply {
@@ -840,7 +843,7 @@ class MainActivity : Activity() {
 
         when (category) {
             null -> {
-                addSettingChoice(content, "Geral", "2 idiomas", "Idioma, notificações e informações") {
+                addSettingChoice(content, "Geral", "8 idiomas", "Idioma, notificações e informações") {
                     settingsCategory = "Geral"; renderSettingsScreen()
                 }
                 addSettingChoice(content, "Interface", uiTheme, "Tema, cor de destaque e aparência") {
@@ -860,7 +863,7 @@ class MainActivity : Activity() {
                 }
             }
             "Geral" -> {
-                addSettingChoice(content, "Idioma", if (appLanguage == "en") "English" else "Português",
+                addSettingChoice(content, "Idioma", languageDisplayName(),
                     "Escolher o idioma da interface") { showLanguageMenu() }
                 val notificationsEnabled = Build.VERSION.SDK_INT < 33 ||
                     ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -1226,6 +1229,7 @@ class MainActivity : Activity() {
 
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            layoutDirection = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
             setBackgroundColor(pageBackgroundColor())
         }
         val toolbar = LinearLayout(this).apply {
@@ -3066,8 +3070,7 @@ class MainActivity : Activity() {
 
 
     private fun tr(text: String): String {
-        if (appLanguage != "en") return text
-        return mapOf(
+        val english = mapOf(
             "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
             "Configurações" to "Settings", "Geral" to "General", "Interface" to "Interface",
             "Compressão" to "Compression", "2 idiomas" to "2 languages",
@@ -3155,6 +3158,194 @@ class MainActivity : Activity() {
             "Já existe uma operação em curso. Aguarda que termine." to "Another operation is running. Please wait.",
             "A operação está em curso. Acompanha o progresso na janela ou na notificação." to "An operation is running. Follow progress in the dialog or notification."
         )[text] ?: text
+        if (appLanguage == "pt") return text
+        if (appLanguage == "en") return english
+        val localized = when (appLanguage) {
+            "es" -> mapOf(
+                "Explorer" to "Explorador", "Settings" to "Ajustes", "General" to "General", "Interface" to "Interfaz",
+                "Compression" to "Compresión", "Language" to "Idioma", "Notifications" to "Notificaciones",
+                "Internal storage" to "Almacenamiento interno", "Options" to "Opciones", "Select all" to "Seleccionar todo",
+                "Clear selection" to "Quitar selección", "Copy selection" to "Copiar selección", "Cut selection" to "Cortar selección",
+                "Paste" to "Pegar", "Create new…" to "Crear nuevo…", "Compress to ZIP" to "Comprimir en ZIP",
+                "Compress to 7Z" to "Comprimir en 7Z", "Search subfolders" to "Buscar en subcarpetas", "Favorites" to "Favoritos",
+                "Sort" to "Ordenar", "Explorer settings" to "Ajustes del explorador", "Refresh" to "Actualizar",
+                "Home folder" to "Carpeta de inicio", "Search" to "Buscar", "Search this folder" to "Buscar en esta carpeta",
+                "Search results" to "Resultados de búsqueda", "Close" to "Cerrar", "Stop" to "Detener", "Cancel" to "Cancelar",
+                "Name" to "Nombre", "Size" to "Tamaño", "Date" to "Fecha", "Type" to "Tipo", "Detailed" to "Detallado",
+                "Compact" to "Compacto", "Grid" to "Cuadrícula", "Dark" to "Oscuro", "OLED black" to "Negro OLED",
+                "Light" to "Claro", "Accent color" to "Color de acento", "Folder colors" to "Colores de carpeta",
+                "Lavender" to "Lavanda", "Blue" to "Azul", "Green" to "Verde", "Orange" to "Naranja",
+                "Pink" to "Rosa", "Red" to "Rojo", "Yellow" to "Amarillo", "Thumbnails" to "Miniaturas",
+                "PDF thumbnails" to "Miniaturas PDF", "Video thumbnails" to "Miniaturas de vídeo", "Album covers" to "Carátulas",
+                "APK icons" to "Iconos APK", "Copy" to "Copiar", "Move" to "Mover", "Delete" to "Eliminar",
+                "Rename" to "Cambiar nombre", "Information" to "Información", "Open" to "Abrir", "Share" to "Compartir",
+                "Test archive" to "Probar archivo", "Extract here" to "Extraer aquí", "Save" to "Guardar",
+                "Compression level" to "Nivel de compresión", "Todos os tipos" to "Todos los tipos", "Pastas" to "Carpetas",
+                "Imagens" to "Imágenes", "Vídeos" to "Vídeos", "Áudio" to "Audio", "Documentos" to "Documentos",
+                "Texto e código" to "Texto y código", "Arquivos comprimidos" to "Archivos comprimidos", "Aplicações APK" to "Aplicaciones APK",
+                "Outros ficheiros" to "Otros archivos", "Incluir subpastas" to "Incluir subcarpetas",
+                "Âmbito da pesquisa" to "Ámbito de búsqueda", "Pesquisar nesta pasta" to "Buscar en esta carpeta",
+                "Resultados da pesquisa" to "Resultados de búsqueda", "A pesquisa começa nesta pasta e nunca sai dela." to "La búsqueda se limita a esta carpeta.",
+                "Nome, parte do nome ou padrão (*.zip)" to "Nombre, parte del nombre o patrón (*.zip)", "Filtrar resultados" to "Filtrar resultados",
+                "Nenhum resultado encontrado nesta pasta." to "No se encontraron resultados en esta carpeta.",
+                "Pesquisa concluída" to "Búsqueda completada", "Pesquisa interrompida" to "Búsqueda detenida",
+                "Limite de 500 resultados; afina a pesquisa." to "Límite de 500 resultados; concreta la búsqueda.",
+                "itens analisados" to "elementos analizados", "pastas sem acesso" to "carpetas sin acceso",
+                "Mais ações" to "Más acciones", "Gostas do Archiver?" to "¿Te gusta Archiver?", "Agora não" to "Ahora no",
+                "Partilhar aplicação" to "Compartir aplicación", "Partilhar Archiver" to "Compartir Archiver", "8 idiomas" to "8 idiomas",
+                "Muda o fundo, os painéis, os botões e o contraste do texto." to "Cambia el fondo, los paneles, los botones y el contraste del texto."
+            )
+            "fr" -> mapOf(
+                "Explorer" to "Explorateur", "Settings" to "Paramètres", "General" to "Général", "Interface" to "Interface",
+                "Compression" to "Compression", "Language" to "Langue", "Notifications" to "Notifications",
+                "Internal storage" to "Stockage interne", "Options" to "Options", "Select all" to "Tout sélectionner",
+                "Clear selection" to "Effacer la sélection", "Copy selection" to "Copier la sélection", "Cut selection" to "Couper la sélection",
+                "Paste" to "Coller", "Create new…" to "Créer…", "Compress to ZIP" to "Compresser en ZIP",
+                "Compress to 7Z" to "Compresser en 7Z", "Search subfolders" to "Rechercher dans les sous-dossiers",
+                "Favorites" to "Favoris", "Sort" to "Trier", "Explorer settings" to "Paramètres de l’explorateur",
+                "Refresh" to "Actualiser", "Home folder" to "Dossier d’accueil", "Search" to "Rechercher",
+                "Search this folder" to "Rechercher dans ce dossier", "Search results" to "Résultats de recherche",
+                "Close" to "Fermer", "Stop" to "Arrêter", "Cancel" to "Annuler", "Name" to "Nom", "Size" to "Taille",
+                "Date" to "Date", "Type" to "Type", "Detailed" to "Détaillé", "Compact" to "Compact", "Grid" to "Grille",
+                "Dark" to "Sombre", "OLED black" to "Noir OLED", "Light" to "Clair", "Accent color" to "Couleur d’accent",
+                "Folder colors" to "Couleurs des dossiers", "Lavender" to "Lavande", "Blue" to "Bleu", "Green" to "Vert",
+                "Orange" to "Orange", "Pink" to "Rose", "Red" to "Rouge", "Yellow" to "Jaune", "Thumbnails" to "Miniatures",
+                "PDF thumbnails" to "Miniatures PDF", "Video thumbnails" to "Miniatures vidéo", "Album covers" to "Pochettes d’album",
+                "APK icons" to "Icônes APK", "Copy" to "Copier", "Move" to "Déplacer", "Delete" to "Supprimer",
+                "Rename" to "Renommer", "Information" to "Informations", "Open" to "Ouvrir", "Share" to "Partager",
+                "Test archive" to "Tester l’archive", "Extract here" to "Extraire ici", "Save" to "Enregistrer",
+                "Compression level" to "Niveau de compression", "Todos os tipos" to "Tous les types", "Pastas" to "Dossiers",
+                "Imagens" to "Images", "Vídeos" to "Vidéos", "Áudio" to "Audio", "Documentos" to "Documents",
+                "Texto e código" to "Texte et code", "Arquivos comprimidos" to "Archives compressées", "Aplicações APK" to "Applications APK",
+                "Outros ficheiros" to "Autres fichiers", "Incluir subpastas" to "Inclure les sous-dossiers",
+                "Âmbito da pesquisa" to "Portée de la recherche", "Pesquisar nesta pasta" to "Rechercher dans ce dossier",
+                "Resultados da pesquisa" to "Résultats de recherche", "A pesquisa começa nesta pasta e nunca sai dela." to "La recherche reste dans ce dossier.",
+                "Nome, parte do nome ou padrão (*.zip)" to "Nom, partie du nom ou motif (*.zip)", "Filtrar resultados" to "Filtrer les résultats",
+                "Nenhum resultado encontrado nesta pasta." to "Aucun résultat dans ce dossier.",
+                "Pesquisa concluída" to "Recherche terminée", "Pesquisa interrompida" to "Recherche arrêtée",
+                "Limite de 500 resultados; afina a pesquisa." to "Limite de 500 résultats ; affinez la recherche.",
+                "itens analisados" to "éléments analysés", "pastas sem acesso" to "dossiers inaccessibles", "Mais ações" to "Plus d’actions",
+                "Gostas do Archiver?" to "Archiver vous plaît ?", "Agora não" to "Pas maintenant",
+                "Partilhar aplicação" to "Partager l’application", "Partilhar Archiver" to "Partager Archiver", "8 idiomas" to "8 langues"
+            )
+            "zh" -> mapOf(
+                "Explorer" to "文件管理器", "Settings" to "设置", "General" to "通用", "Interface" to "界面",
+                "Compression" to "压缩", "Language" to "语言", "Notifications" to "通知", "Internal storage" to "内部存储",
+                "Options" to "选项", "Select all" to "全选", "Clear selection" to "清除选择", "Copy selection" to "复制所选项",
+                "Cut selection" to "剪切所选项", "Paste" to "粘贴", "Create new…" to "新建…", "Compress to ZIP" to "压缩为 ZIP",
+                "Compress to 7Z" to "压缩为 7Z", "Search subfolders" to "搜索子文件夹", "Favorites" to "收藏夹",
+                "Sort" to "排序", "Explorer settings" to "文件管理器设置", "Refresh" to "刷新", "Home folder" to "主文件夹",
+                "Search" to "搜索", "Search this folder" to "搜索此文件夹", "Search results" to "搜索结果", "Close" to "关闭",
+                "Stop" to "停止", "Cancel" to "取消", "Name" to "名称", "Size" to "大小", "Date" to "日期", "Type" to "类型",
+                "Detailed" to "详细", "Compact" to "紧凑", "Grid" to "网格", "Dark" to "深色", "OLED black" to "OLED 黑色",
+                "Light" to "浅色", "Accent color" to "强调色", "Folder colors" to "文件夹颜色", "Lavender" to "薰衣草紫",
+                "Blue" to "蓝色", "Green" to "绿色", "Orange" to "橙色", "Pink" to "粉色", "Red" to "红色", "Yellow" to "黄色",
+                "Thumbnails" to "缩略图", "PDF thumbnails" to "PDF 缩略图", "Video thumbnails" to "视频缩略图",
+                "Album covers" to "专辑封面", "APK icons" to "APK 图标", "Copy" to "复制", "Move" to "移动", "Delete" to "删除",
+                "Rename" to "重命名", "Information" to "信息", "Open" to "打开", "Share" to "分享", "Test archive" to "测试压缩包",
+                "Extract here" to "解压到此处", "Save" to "保存", "Compression level" to "压缩级别", "Todos os tipos" to "所有类型",
+                "Pastas" to "文件夹", "Imagens" to "图片", "Vídeos" to "视频", "Áudio" to "音频", "Documentos" to "文档",
+                "Texto e código" to "文本和代码", "Arquivos comprimidos" to "压缩文件", "Aplicações APK" to "APK 应用",
+                "Outros ficheiros" to "其他文件", "Incluir subpastas" to "包含子文件夹", "Âmbito da pesquisa" to "搜索范围",
+                "Pesquisar nesta pasta" to "搜索此文件夹", "Resultados da pesquisa" to "搜索结果",
+                "A pesquisa começa nesta pasta e nunca sai dela." to "搜索仅在当前文件夹范围内进行。",
+                "Nome, parte do nome ou padrão (*.zip)" to "输入名称、部分名称或模式（*.zip）", "Filtrar resultados" to "筛选结果",
+                "Nenhum resultado encontrado nesta pasta." to "当前文件夹中没有找到结果。", "Pesquisa concluída" to "搜索完成",
+                "Pesquisa interrompida" to "搜索已停止", "Limite de 500 resultados; afina a pesquisa." to "结果最多显示 500 项，请缩小搜索范围。",
+                "itens analisados" to "个项目已扫描", "pastas sem acesso" to "个文件夹无法访问", "Mais ações" to "更多操作",
+                "Gostas do Archiver?" to "喜欢 Archiver 吗？", "Agora não" to "暂不", "Partilhar aplicação" to "分享应用",
+                "Partilhar Archiver" to "分享 Archiver", "8 idiomas" to "8 种语言"
+            )
+            "hi" -> mapOf(
+                "Explorer" to "फ़ाइल प्रबंधक", "Settings" to "सेटिंग", "General" to "सामान्य", "Interface" to "इंटरफ़ेस",
+                "Compression" to "कम्प्रेशन", "Language" to "भाषा", "Notifications" to "सूचनाएँ", "Internal storage" to "आंतरिक संग्रहण",
+                "Options" to "विकल्प", "Select all" to "सभी चुनें", "Clear selection" to "चयन हटाएँ", "Copy selection" to "चयन कॉपी करें",
+                "Cut selection" to "चयन काटें", "Paste" to "पेस्ट करें", "Create new…" to "नया बनाएँ…",
+                "Compress to ZIP" to "ZIP में संपीड़ित करें", "Compress to 7Z" to "7Z में संपीड़ित करें",
+                "Search subfolders" to "उपफ़ोल्डर खोजें", "Favorites" to "पसंदीदा", "Sort" to "क्रमबद्ध करें",
+                "Explorer settings" to "फ़ाइल प्रबंधक सेटिंग", "Refresh" to "रीफ़्रेश", "Home folder" to "मुख्य फ़ोल्डर",
+                "Search" to "खोजें", "Search this folder" to "इस फ़ोल्डर में खोजें", "Search results" to "खोज परिणाम",
+                "Close" to "बंद करें", "Stop" to "रोकें", "Cancel" to "रद्द करें", "Name" to "नाम", "Size" to "आकार",
+                "Date" to "तारीख", "Type" to "प्रकार", "Detailed" to "विस्तृत", "Compact" to "कॉम्पैक्ट", "Grid" to "ग्रिड",
+                "Dark" to "डार्क", "OLED black" to "OLED काला", "Light" to "लाइट", "Accent color" to "एक्सेंट रंग",
+                "Folder colors" to "फ़ोल्डर रंग", "Blue" to "नीला", "Green" to "हरा", "Orange" to "नारंगी", "Pink" to "गुलाबी",
+                "Red" to "लाल", "Yellow" to "पीला", "Thumbnails" to "थंबनेल", "Copy" to "कॉपी", "Move" to "स्थानांतरित करें",
+                "Delete" to "हटाएँ", "Rename" to "नाम बदलें", "Information" to "जानकारी", "Open" to "खोलें",
+                "Share" to "साझा करें", "Test archive" to "आर्काइव जाँचें", "Extract here" to "यहाँ निकालें", "Save" to "सहेजें",
+                "Compression level" to "कम्प्रेशन स्तर", "Todos os tipos" to "सभी प्रकार", "Pastas" to "फ़ोल्डर", "Imagens" to "चित्र",
+                "Vídeos" to "वीडियो", "Áudio" to "ऑडियो", "Documentos" to "दस्तावेज़", "Texto e código" to "टेक्स्ट और कोड",
+                "Arquivos comprimidos" to "संपीड़ित फ़ाइलें", "Aplicações APK" to "APK ऐप", "Outros ficheiros" to "अन्य फ़ाइलें",
+                "Incluir subpastas" to "उपफ़ोल्डर शामिल करें", "Âmbito da pesquisa" to "खोज का दायरा",
+                "Pesquisar nesta pasta" to "इस फ़ोल्डर में खोजें", "Resultados da pesquisa" to "खोज परिणाम",
+                "A pesquisa começa nesta pasta e nunca sai dela." to "खोज इसी फ़ोल्डर में सीमित रहेगी।",
+                "Nome, parte do nome ou padrão (*.zip)" to "नाम, नाम का हिस्सा या पैटर्न (*.zip) लिखें", "Filtrar resultados" to "खोज फ़िल्टर",
+                "Nenhum resultado encontrado nesta pasta." to "इस फ़ोल्डर में कोई परिणाम नहीं मिला।", "Pesquisa concluída" to "खोज पूरी हुई",
+                "Pesquisa interrompida" to "खोज रोक दी गई", "Limite de 500 resultados; afina a pesquisa." to "500 परिणामों की सीमा; खोज को संकीर्ण करें।",
+                "itens analisados" to "आइटम जाँचे गए", "pastas sem acesso" to "अनुमति रहित फ़ोल्डर",
+                "Mais ações" to "अधिक कार्रवाइयाँ", "Gostas do Archiver?" to "Archiver पसंद आ रहा है?", "Agora não" to "अभी नहीं",
+                "Partilhar aplicação" to "ऐप साझा करें", "Partilhar Archiver" to "Archiver साझा करें", "8 idiomas" to "8 भाषाएँ"
+            )
+            "ar" -> mapOf(
+                "Explorer" to "مدير الملفات", "Settings" to "الإعدادات", "General" to "عام", "Interface" to "الواجهة",
+                "Compression" to "الضغط", "Language" to "اللغة", "Notifications" to "الإشعارات", "Internal storage" to "التخزين الداخلي",
+                "Options" to "الخيارات", "Select all" to "تحديد الكل", "Clear selection" to "إلغاء التحديد", "Copy selection" to "نسخ المحدد",
+                "Cut selection" to "قص المحدد", "Paste" to "لصق", "Create new…" to "إنشاء جديد…", "Compress to ZIP" to "ضغط إلى ZIP",
+                "Compress to 7Z" to "ضغط إلى 7Z", "Search subfolders" to "البحث في المجلدات الفرعية", "Favorites" to "المفضلة",
+                "Sort" to "ترتيب", "Explorer settings" to "إعدادات مدير الملفات", "Refresh" to "تحديث", "Home folder" to "المجلد الرئيسي",
+                "Search" to "بحث", "Search this folder" to "البحث في هذا المجلد", "Search results" to "نتائج البحث", "Close" to "إغلاق",
+                "Stop" to "إيقاف", "Cancel" to "إلغاء", "Name" to "الاسم", "Size" to "الحجم", "Date" to "التاريخ", "Type" to "النوع",
+                "Detailed" to "تفصيلي", "Compact" to "مضغوط", "Grid" to "شبكة", "Dark" to "داكن", "OLED black" to "أسود OLED",
+                "Light" to "فاتح", "Accent color" to "لون التمييز", "Folder colors" to "ألوان المجلدات", "Blue" to "أزرق",
+                "Green" to "أخضر", "Orange" to "برتقالي", "Pink" to "وردي", "Red" to "أحمر", "Yellow" to "أصفر",
+                "Thumbnails" to "صور مصغرة", "Copy" to "نسخ", "Move" to "نقل", "Delete" to "حذف", "Rename" to "إعادة تسمية",
+                "Information" to "معلومات", "Open" to "فتح", "Share" to "مشاركة", "Test archive" to "اختبار الأرشيف",
+                "Extract here" to "استخراج هنا", "Save" to "حفظ", "Compression level" to "مستوى الضغط",
+                "Todos os tipos" to "كل الأنواع", "Pastas" to "مجلدات", "Imagens" to "صور", "Vídeos" to "فيديو",
+                "Áudio" to "صوت", "Documentos" to "مستندات", "Texto e código" to "نص وبرمجة", "Arquivos comprimidos" to "ملفات مضغوطة",
+                "Aplicações APK" to "تطبيقات APK", "Outros ficheiros" to "ملفات أخرى", "Incluir subpastas" to "تضمين المجلدات الفرعية",
+                "Âmbito da pesquisa" to "نطاق البحث", "Pesquisar nesta pasta" to "البحث في هذا المجلد", "Resultados da pesquisa" to "نتائج البحث",
+                "A pesquisa começa nesta pasta e nunca sai dela." to "يبدأ البحث في هذا المجلد ولا يتجاوزه.",
+                "Nome, parte do nome ou padrão (*.zip)" to "أدخل الاسم أو جزءاً منه أو نمطاً مثل *.zip",
+                "Filtrar resultados" to "تصفية النتائج", "Nenhum resultado encontrado nesta pasta." to "لم يتم العثور على نتائج في هذا المجلد.",
+                "Pesquisa concluída" to "اكتمل البحث", "Pesquisa interrompida" to "تم إيقاف البحث",
+                "Limite de 500 resultados; afina a pesquisa." to "الحد الأقصى 500 نتيجة؛ حدّد البحث أكثر.",
+                "itens analisados" to "عناصر تم فحصها", "pastas sem acesso" to "مجلدات لا يمكن الوصول إليها",
+                "Mais ações" to "إجراءات أخرى", "Gostas do Archiver?" to "هل يعجبك Archiver؟", "Agora não" to "ليس الآن",
+                "Partilhar aplicação" to "مشاركة التطبيق", "Partilhar Archiver" to "مشاركة Archiver", "8 idiomas" to "8 لغات"
+            )
+            "ru" -> mapOf(
+                "Explorer" to "Файловый менеджер", "Settings" to "Настройки", "General" to "Общие", "Interface" to "Интерфейс",
+                "Compression" to "Сжатие", "Language" to "Язык", "Notifications" to "Уведомления", "Internal storage" to "Внутренняя память",
+                "Options" to "Параметры", "Select all" to "Выбрать всё", "Clear selection" to "Снять выделение",
+                "Copy selection" to "Копировать выбранное", "Cut selection" to "Вырезать выбранное", "Paste" to "Вставить",
+                "Create new…" to "Создать…", "Compress to ZIP" to "Сжать в ZIP", "Compress to 7Z" to "Сжать в 7Z",
+                "Search subfolders" to "Искать во вложенных папках", "Favorites" to "Избранное", "Sort" to "Сортировка",
+                "Explorer settings" to "Настройки проводника", "Refresh" to "Обновить", "Home folder" to "Домашняя папка",
+                "Search" to "Поиск", "Search this folder" to "Поиск в этой папке", "Search results" to "Результаты поиска",
+                "Close" to "Закрыть", "Stop" to "Остановить", "Cancel" to "Отмена", "Name" to "Имя", "Size" to "Размер",
+                "Date" to "Дата", "Type" to "Тип", "Detailed" to "Подробно", "Compact" to "Компактно", "Grid" to "Сетка",
+                "Dark" to "Тёмная", "OLED black" to "Чёрная OLED", "Light" to "Светлая", "Accent color" to "Акцентный цвет",
+                "Folder colors" to "Цвета папок", "Blue" to "Синий", "Green" to "Зелёный", "Orange" to "Оранжевый",
+                "Pink" to "Розовый", "Red" to "Красный", "Yellow" to "Жёлтый", "Thumbnails" to "Миниатюры",
+                "Copy" to "Копировать", "Move" to "Переместить", "Delete" to "Удалить", "Rename" to "Переименовать",
+                "Information" to "Информация", "Open" to "Открыть", "Share" to "Поделиться", "Test archive" to "Проверить архив",
+                "Extract here" to "Извлечь сюда", "Save" to "Сохранить", "Compression level" to "Уровень сжатия",
+                "Todos os tipos" to "Все типы", "Pastas" to "Папки", "Imagens" to "Изображения", "Vídeos" to "Видео",
+                "Áudio" to "Аудио", "Documentos" to "Документы", "Texto e código" to "Текст и код", "Arquivos comprimidos" to "Архивы",
+                "Aplicações APK" to "Приложения APK", "Outros ficheiros" to "Другие файлы", "Incluir subpastas" to "Включать подпапки",
+                "Âmbito da pesquisa" to "Область поиска", "Pesquisar nesta pasta" to "Поиск в этой папке", "Resultados da pesquisa" to "Результаты поиска",
+                "A pesquisa começa nesta pasta e nunca sai dela." to "Поиск выполняется только в этой папке.",
+                "Nome, parte do nome ou padrão (*.zip)" to "Введите имя, часть имени или шаблон (*.zip)",
+                "Filtrar resultados" to "Фильтры поиска", "Nenhum resultado encontrado nesta pasta." to "В этой папке ничего не найдено.",
+                "Pesquisa concluída" to "Поиск завершён", "Pesquisa interrompida" to "Поиск остановлен",
+                "Limite de 500 resultados; afina a pesquisa." to "Предел 500 результатов; уточните поиск.",
+                "itens analisados" to "элементов просмотрено", "pastas sem acesso" to "папок без доступа",
+                "Mais ações" to "Другие действия", "Gostas do Archiver?" to "Нравится Archiver?", "Agora não" to "Не сейчас",
+                "Partilhar aplicação" to "Поделиться приложением", "Partilhar Archiver" to "Поделиться Archiver", "8 idiomas" to "8 языков"
+            )
+            else -> emptyMap()
+        }
+        return localized[text] ?: localized[english] ?: english
     }
 
     private fun accentColor(): Int = when (accentName) {
@@ -3217,12 +3408,31 @@ class MainActivity : Activity() {
         } else 0
     }
 
+    private fun languageDisplayName(): String = when (appLanguage) {
+        "en" -> "English"
+        "es" -> "Español"
+        "fr" -> "Français"
+        "zh" -> "中文 (简体)"
+        "hi" -> "हिन्दी"
+        "ar" -> "العربية"
+        "ru" -> "Русский"
+        else -> "Português"
+    }
+
+    private fun applyLanguageDirection() {
+        val direction = if (appLanguage == "ar") View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
+        window.decorView.layoutDirection = direction
+        if (::page.isInitialized) page.layoutDirection = direction
+    }
+
     private fun showLanguageMenu() {
-        val options = arrayOf("Português", "English")
+        val tags = arrayOf("pt", "en", "es", "fr", "zh", "hi", "ar", "ru")
+        val names = arrayOf("Português", "English", "Español", "Français", "中文 (简体)", "हिन्दी", "العربية", "Русский")
         AlertDialog.Builder(this).setTitle(tr("Idioma"))
-            .setSingleChoiceItems(options, if (appLanguage == "en") 1 else 0) { dialog, which ->
-                appLanguage = if (which == 1) "en" else "pt"
+            .setSingleChoiceItems(names, tags.indexOf(appLanguage).coerceAtLeast(0)) { dialog, which ->
+                appLanguage = tags[which]
                 savePreferences()
+                applyLanguageDirection()
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
             }.setNegativeButton(tr("Cancelar"), null).show()
