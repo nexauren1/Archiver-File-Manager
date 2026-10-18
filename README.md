@@ -8,7 +8,7 @@ A lightweight Android file manager project focused on practical file operations 
 - Navigate folders and sort by name, size, date, or type.
 - Search recursively by filename, including wildcard patterns such as `*.zip`.
 - Show or hide dot-prefixed files; optionally show size and modification date.
-- Choose detailed, compact, or grid views.
+- Choose detailed, compact, or grid views, including an optional `..` row to move to the parent directory.
 - Optional on-device thumbnails for images, PDF pages, video frames, music album art, and APK icons.
 - Create folders and empty files, open/share files, and inspect item information.
 - Rename, recursively delete, copy, move, and paste files/folders, with safeguards against recursive copies and name collisions.
