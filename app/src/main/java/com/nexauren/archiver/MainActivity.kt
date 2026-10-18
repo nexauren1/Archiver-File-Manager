@@ -828,8 +828,14 @@ class MainActivity : Activity() {
                 }
             }
             "Geral" -> {
-                addSettingChoice(content, "Idioma", if (appLanguage == "en") "English" else "Português",
-                    "Escolher o idioma da interface") { showLanguageMenu() }
+                val activeLanguage = mapOf(
+                    "pt" to "Português", "en" to "English", "es" to "Español",
+                    "fr" to "Français", "de" to "Deutsch", "zh" to "中文",
+                    "hi" to "हिन्दी", "ar" to "العربية", "bn" to "বাংলা",
+                    "ru" to "Русский", "ja" to "日本語", "id" to "Bahasa Indonesia"
+                )[appLanguage] ?: "Português"
+                addSettingChoice(content, "Idioma", activeLanguage,
+                    "12 idiomas disponíveis; escolhe para aplicar à interface") { showLanguageMenu() }
                 val notificationsEnabled = Build.VERSION.SDK_INT < 33 ||
                     ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
                 addSettingChoice(content, "Notificações", if (notificationsEnabled) "Ligado" else "Desligado",
@@ -2852,6 +2858,20 @@ class MainActivity : Activity() {
 
 
     private fun tr(text: String): String {
+        val commonTranslations = when (appLanguage) {
+            "es" -> mapOf("Pesquisar nesta pasta" to "Buscar en esta carpeta", "Incluir subpastas" to "Incluir subcarpetas", "Pasta" to "Carpeta", "Ações" to "Acciones", "resultados" to "resultados", "Resultados da pesquisa" to "Resultados de búsqueda", "Partilhar aplicação" to "Compartir aplicación", "Abrir pasta" to "Abrir carpeta", "Partilhar" to "Compartir", "Eliminar" to "Eliminar", "Renomear" to "Cambiar nombre", "Informações" to "Información", "Escuro" to "Oscuro", "Preto OLED" to "Negro OLED", "Claro" to "Claro", "Tema da interface" to "Tema de la interfaz", "Cor de destaque" to "Color de acento")
+            "fr" -> mapOf("Pesquisar nesta pasta" to "Rechercher dans ce dossier", "Incluir subpastas" to "Inclure les sous-dossiers", "Pasta" to "Dossier", "Ações" to "Actions", "resultados" to "résultats", "Resultados da pesquisa" to "Résultats de recherche", "Partilhar aplicação" to "Partager l’application", "Abrir pasta" to "Ouvrir le dossier", "Partilhar" to "Partager", "Eliminar" to "Supprimer", "Renomear" to "Renommer", "Informações" to "Informations", "Escuro" to "Sombre", "Preto OLED" to "Noir OLED", "Claro" to "Clair", "Tema da interface" to "Thème de l’interface", "Cor de destaque" to "Couleur d’accentuation")
+            "de" -> mapOf("Pesquisar nesta pasta" to "In diesem Ordner suchen", "Incluir subpastas" to "Unterordner einbeziehen", "Pasta" to "Ordner", "Ações" to "Aktionen", "resultados" to "Ergebnisse", "Resultados da pesquisa" to "Suchergebnisse", "Partilhar aplicação" to "App teilen", "Abrir pasta" to "Ordner öffnen", "Partilhar" to "Teilen", "Eliminar" to "Löschen", "Renomear" to "Umbenennen", "Informações" to "Informationen", "Escuro" to "Dunkel", "Preto OLED" to "OLED-Schwarz", "Claro" to "Hell", "Tema da interface" to "Oberflächenthema", "Cor de destaque" to "Akzentfarbe")
+            "zh" -> mapOf("Pesquisar nesta pasta" to "在此文件夹中搜索", "Incluir subpastas" to "包含子文件夹", "Pasta" to "文件夹", "Ações" to "操作", "resultados" to "个结果", "Resultados da pesquisa" to "搜索结果", "Partilhar aplicação" to "分享应用", "Abrir pasta" to "打开文件夹", "Partilhar" to "分享", "Eliminar" to "删除", "Renomear" to "重命名", "Informações" to "信息", "Escuro" to "深色", "Preto OLED" to "OLED 黑色", "Claro" to "浅色", "Tema da interface" to "界面主题", "Cor de destaque" to "强调色")
+            "hi" -> mapOf("Pesquisar nesta pasta" to "इस फ़ोल्डर में खोजें", "Incluir subpastas" to "सबफ़ोल्डर शामिल करें", "Pasta" to "फ़ोल्डर", "Ações" to "कार्रवाइयाँ", "resultados" to "परिणाम", "Resultados da pesquisa" to "खोज परिणाम", "Partilhar aplicação" to "ऐप साझा करें", "Abrir pasta" to "फ़ोल्डर खोलें", "Partilhar" to "साझा करें", "Eliminar" to "हटाएँ", "Renomear" to "नाम बदलें", "Informações" to "जानकारी", "Escuro" to "गहरा", "Preto OLED" to "OLED काला", "Claro" to "हल्का", "Tema da interface" to "इंटरफ़ेस थीम", "Cor de destaque" to "उभार रंग")
+            "ar" -> mapOf("Pesquisar nesta pasta" to "البحث في هذا المجلد", "Incluir subpastas" to "تضمين المجلدات الفرعية", "Pasta" to "مجلد", "Ações" to "إجراءات", "resultados" to "نتائج", "Resultados da pesquisa" to "نتائج البحث", "Partilhar aplicação" to "مشاركة التطبيق", "Abrir pasta" to "فتح المجلد", "Partilhar" to "مشاركة", "Eliminar" to "حذف", "Renomear" to "إعادة التسمية", "Informações" to "معلومات", "Escuro" to "داكن", "Preto OLED" to "أسود OLED", "Claro" to "فاتح", "Tema da interface" to "مظهر الواجهة", "Cor de destaque" to "لون التمييز")
+            "bn" -> mapOf("Pesquisar nesta pasta" to "এই ফোল্ডারে খুঁজুন", "Incluir subpastas" to "সাবফোল্ডার অন্তর্ভুক্ত করুন", "Pasta" to "ফোল্ডার", "Ações" to "কাজ", "resultados" to "টি ফলাফল", "Resultados da pesquisa" to "অনুসন্ধানের ফলাফল", "Partilhar aplicação" to "অ্যাপ শেয়ার করুন", "Abrir pasta" to "ফোল্ডার খুলুন", "Partilhar" to "শেয়ার", "Eliminar" to "মুছুন", "Renomear" to "নাম পরিবর্তন", "Informações" to "তথ্য", "Escuro" to "গাঢ়", "Preto OLED" to "OLED কালো", "Claro" to "হালকা", "Tema da interface" to "ইন্টারফেস থিম", "Cor de destaque" to "হাইলাইট রং")
+            "ru" -> mapOf("Pesquisar nesta pasta" to "Поиск в этой папке", "Incluir subpastas" to "Включить подпапки", "Pasta" to "Папка", "Ações" to "Действия", "resultados" to "результатов", "Resultados da pesquisa" to "Результаты поиска", "Partilhar aplicação" to "Поделиться приложением", "Abrir pasta" to "Открыть папку", "Partilhar" to "Поделиться", "Eliminar" to "Удалить", "Renomear" to "Переименовать", "Informações" to "Информация", "Escuro" to "Тёмная", "Preto OLED" to "OLED-чёрная", "Claro" to "Светлая", "Tema da interface" to "Тема интерфейса", "Cor de destaque" to "Цвет акцента")
+            "ja" -> mapOf("Pesquisar nesta pasta" to "このフォルダー内を検索", "Incluir subpastas" to "サブフォルダーを含める", "Pasta" to "フォルダー", "Ações" to "操作", "resultados" to "件の結果", "Resultados da pesquisa" to "検索結果", "Partilhar aplicação" to "アプリを共有", "Abrir pasta" to "フォルダーを開く", "Partilhar" to "共有", "Eliminar" to "削除", "Renomear" to "名前を変更", "Informações" to "情報", "Escuro" to "ダーク", "Preto OLED" to "OLED ブラック", "Claro" to "ライト", "Tema da interface" to "インターフェーステーマ", "Cor de destaque" to "アクセントカラー")
+            "id" -> mapOf("Pesquisar nesta pasta" to "Cari di folder ini", "Incluir subpastas" to "Sertakan subfolder", "Pasta" to "Folder", "Ações" to "Tindakan", "resultados" to "hasil", "Resultados da pesquisa" to "Hasil pencarian", "Partilhar aplicação" to "Bagikan aplikasi", "Abrir pasta" to "Buka folder", "Partilhar" to "Bagikan", "Eliminar" to "Hapus", "Renomear" to "Ganti nama", "Informações" to "Informasi", "Escuro" to "Gelap", "Preto OLED" to "Hitam OLED", "Claro" to "Terang", "Tema da interface" to "Tema antarmuka", "Cor de destaque" to "Warna aksen")
+            else -> null
+        }?.get(text)
+        if (commonTranslations != null) return commonTranslations
         if (appLanguage != "en") return text
         return mapOf(
             "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
@@ -2998,10 +3018,17 @@ class MainActivity : Activity() {
     }
 
     private fun showLanguageMenu() {
-        val options = arrayOf("Português", "English")
+        val languages = arrayOf(
+            "pt" to "Português", "en" to "English", "es" to "Español",
+            "fr" to "Français", "de" to "Deutsch", "zh" to "中文",
+            "hi" to "हिन्दी", "ar" to "العربية", "bn" to "বাংলা",
+            "ru" to "Русский", "ja" to "日本語", "id" to "Bahasa Indonesia"
+        )
+        val labels = languages.map { it.second }.toTypedArray()
+        val selectedIndex = languages.indexOfFirst { it.first == appLanguage }.coerceAtLeast(0)
         AlertDialog.Builder(this).setTitle(tr("Idioma"))
-            .setSingleChoiceItems(options, if (appLanguage == "en") 1 else 0) { dialog, which ->
-                appLanguage = if (which == 1) "en" else "pt"
+            .setSingleChoiceItems(labels, selectedIndex) { dialog, which ->
+                appLanguage = languages[which].first
                 savePreferences()
                 dialog.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
