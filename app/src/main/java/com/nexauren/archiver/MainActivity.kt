@@ -1301,11 +1301,17 @@ class MainActivity : Activity() {
             addView(play, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(6) })
             addView(stop, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(6) })
         }
+        val backgroundPlay = Button(this).apply {
+            text = tr("Continuar em segundo plano")
+            isAllCaps = false
+            isEnabled = false
+        }
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(16), dp(20), dp(8))
             addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
             addView(controls, LinearLayout.LayoutParams(-1, -2))
+            addView(backgroundPlay, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         }
         val dialog = AlertDialog.Builder(this)
             .setTitle(tr("Leitor de áudio") + " — " + file.name)
@@ -1315,6 +1321,24 @@ class MainActivity : Activity() {
             .create()
         val player = MediaPlayer()
         var prepared = false
+        var handedOffToService = false
+        backgroundPlay.setOnClickListener {
+            if (!prepared) return@setOnClickListener
+            try {
+                runCatching { if (player.isPlaying) player.stop() }
+                runCatching { player.release() }
+                prepared = false
+                handedOffToService = true
+                val intent = Intent(this, AudioPlaybackService::class.java)
+                    .setAction(AudioPlaybackService.ACTION_PLAY)
+                    .putExtra(AudioPlaybackService.EXTRA_PATH, file.absolutePath)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                dialog.dismiss()
+                toast("O áudio continua a tocar em segundo plano. Usa a notificação para parar.")
+            } catch (e: Exception) {
+                toast("Não foi possível iniciar a reprodução em segundo plano: " + (e.message ?: ""))
+            }
+        }
         play.setOnClickListener {
             if (!prepared) return@setOnClickListener
             try {
@@ -1338,6 +1362,7 @@ class MainActivity : Activity() {
             prepared = true
             play.isEnabled = true
             stop.isEnabled = true
+            backgroundPlay.isEnabled = true
             val seconds = (preparedPlayer.duration / 1000).coerceAtLeast(0)
             status.text = tr("Pronto") + " • ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
         }
@@ -1352,8 +1377,10 @@ class MainActivity : Activity() {
             true
         }
         dialog.setOnDismissListener {
-            runCatching { if (player.isPlaying) player.stop() }
-            runCatching { player.release() }
+            if (!handedOffToService) {
+                runCatching { if (player.isPlaying) player.stop() }
+                runCatching { player.release() }
+            }
         }
         dialog.show()
         try {
