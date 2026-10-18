@@ -691,7 +691,7 @@ class MainActivity : Activity() {
             setImageResource(iconForFile(file))
             contentDescription = if (file.isDirectory) "Pasta " + file.name else file.name
             scaleType = if (squareThumbnails) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
-            if (file.isDirectory && !shouldLoadThumbnail(file)) {
+            if (file.isDirectory && (!shouldLoadThumbnail(file) || folderIcons.containsKey(key))) {
                 folderColorValue(file)?.let { setColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
             }
         }
@@ -699,7 +699,7 @@ class MainActivity : Activity() {
         val iconHeight = dp(if (inGrid) 66 else 48)
         if (inGrid) item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { gravity = Gravity.CENTER_HORIZONTAL })
         else item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { rightMargin = dp(8) })
-        if (shouldLoadThumbnail(file)) loadThumbnailAsync(file, icon)
+        if (shouldLoadThumbnail(file) && !(file.isDirectory && folderIcons.containsKey(key))) loadThumbnailAsync(file, icon)
 
         // Do not enumerate every child folder while drawing the list; that blocks scrolling on large directories.
         val details = if (file.isDirectory) tr("Pasta") else formatSize(file.length())
