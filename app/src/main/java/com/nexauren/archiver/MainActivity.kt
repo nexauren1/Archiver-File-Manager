@@ -545,7 +545,9 @@ class MainActivity : Activity() {
             setImageResource(iconForFile(file))
             contentDescription = if (file.isDirectory) "Pasta " + file.name else file.name
             scaleType = if (squareThumbnails) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
-            if (file.isDirectory) folderColorValue(file)?.let { setColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
+            if (file.isDirectory && !shouldLoadThumbnail(file)) {
+                folderColorValue(file)?.let { setColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
+            }
         }
         val iconWidth = dp(if (inGrid) 72 else 48)
         val iconHeight = dp(if (inGrid) 66 else 48)
@@ -641,7 +643,7 @@ class MainActivity : Activity() {
             "mp4", "mkv", "webm", "avi", "mov", "3gp", "m4v", "mpeg", "mpg" -> R.drawable.ic_video
             "apk", "aab", "apks", "xapk" -> R.drawable.ic_android_file
             "pdf" -> R.drawable.ic_pdf
-            "txt", "md", "markdown", "log", "readme", "nfo" -> R.drawable.ic_text_file
+            "txt", "text", "md", "markdown", "log", "readme", "nfo" -> R.drawable.ic_text_file
             "json", "xml", "yaml", "yml", "properties", "ini", "cfg", "conf", "toml",
             "java", "kt", "kts", "js", "ts", "tsx", "jsx", "py", "html", "htm", "css",
             "scss", "sql", "sh", "bat", "c", "cpp", "h", "hpp", "gradle", "gitignore" -> R.drawable.ic_code_file
@@ -1163,7 +1165,7 @@ class MainActivity : Activity() {
     }
 
     private fun isEditableTextFile(file: File): Boolean = extension(file.name) in setOf(
-        "txt", "md", "markdown", "log", "nfo", "readme", "json", "xml", "yaml", "yml",
+        "txt", "text", "md", "markdown", "log", "nfo", "readme", "json", "xml", "yaml", "yml",
         "properties", "ini", "cfg", "conf", "toml", "java", "kt", "kts", "js", "ts", "tsx",
         "jsx", "py", "html", "htm", "css", "scss", "sql", "sh", "bat", "c", "cpp", "h",
         "hpp", "gradle", "gitignore", "csv", "tsv"
@@ -1336,7 +1338,11 @@ class MainActivity : Activity() {
                     meter.setTotals(0L, totals.entries)
                     files.forEach { file ->
                         meter.show(file)
-                        if (!deleteRecursively(file) { deleted -> meter.itemDone(deleted) }) {
+                        if (!deleteRecursively(
+                                file,
+                                onDeleting = { working -> meter.show(working) },
+                                onDeleted = { deleted -> meter.itemDone(deleted) }
+                            )) {
                             throw IOException("Não foi possível eliminar " + file.name)
                         }
                     }
@@ -1345,11 +1351,18 @@ class MainActivity : Activity() {
             }.show()
     }
 
-    private fun deleteRecursively(file: File, onDeleted: ((File) -> Unit)? = null): Boolean {
+    private fun deleteRecursively(
+        file: File,
+        onDeleting: ((File) -> Unit)? = null,
+        onDeleted: ((File) -> Unit)? = null
+    ): Boolean {
         return try {
+            onDeleting?.invoke(file)
             if (file.isDirectory) {
                 val children = file.listFiles() ?: return false
-                for (child in children) if (!deleteRecursively(child, onDeleted)) return false
+                for (child in children) {
+                    if (!deleteRecursively(child, onDeleting, onDeleted)) return false
+                }
             }
             val deleted = file.delete()
             if (deleted) onDeleted?.invoke(file)
@@ -1406,7 +1419,11 @@ class MainActivity : Activity() {
                 val destination = File(target, uniqueName(target, source.name))
                 meter.show(source)
                 copyFileTree(source, destination, meter)
-                if (cut && !deleteRecursively(source) { deleted -> meter.itemDone(deleted) }) {
+                if (cut && !deleteRecursively(
+                    source,
+                    onDeleting = { working -> meter.show(working) },
+                    onDeleted = { deleted -> meter.itemDone(deleted) }
+                )) {
                     throw IOException("Copiado, mas não foi possível remover a origem: " + source.name)
                 }
                 count++
@@ -1685,7 +1702,11 @@ class MainActivity : Activity() {
 
                             if (removeSources) sources.forEach { source ->
                                 meter.show(source)
-                                if (!deleteRecursively(source) { deleted -> meter.itemDone(deleted) }) {
+                                if (!deleteRecursively(
+                                    source,
+                                    onDeleting = { working -> meter.show(working) },
+                                    onDeleted = { deleted -> meter.itemDone(deleted) }
+                                )) {
                                     throw IOException("Arquivo criado, mas não foi possível eliminar " + source.name)
                                 }
                             }
@@ -2237,11 +2258,11 @@ class MainActivity : Activity() {
         if (!showThumbnails) return false
         if (file.isDirectory) {
             return safeList(file).any { child ->
-                !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif")
+                !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff")
             }
         }
         return when (extension(file.name)) {
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif" -> true
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff" -> true
             "pdf" -> showPdfThumbnails
             "mp4", "mkv", "webm", "3gp", "avi", "mov", "m4v" -> showVideoThumbnails
             "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus" -> showAlbumCovers
@@ -2266,7 +2287,7 @@ class MainActivity : Activity() {
     private fun loadThumbnail(file: File): Bitmap? {
         if (file.isDirectory) return folderThumbnail(file)
         return when (extension(file.name)) {
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> {
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff" -> {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(file.absolutePath, bounds)
                 if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else {
@@ -2287,7 +2308,7 @@ class MainActivity : Activity() {
 
     private fun folderThumbnail(directory: File): Bitmap? {
         val sample = safeList(directory).firstOrNull { child ->
-            !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif")
+            !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff")
         } ?: return null
         val preview = loadThumbnail(sample) ?: return null
         val size = dp(64)
