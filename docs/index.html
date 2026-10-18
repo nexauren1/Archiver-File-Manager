@@ -27,8 +27,8 @@ header{display:flex;align-items:center;justify-content:space-between;gap:22px;mi
 <div class="eyebrow" data-t="eyebrow">Gestor de ficheiros · 0.8.0 em preparação · estável: 0.7.2</div>
 <h1 data-t="heroTitle">Os teus ficheiros.<br>Ao teu ritmo.</h1>
 <p data-t="heroDesc">Organiza, pesquisa, visualiza e comprime ficheiros numa aplicação Android nativa, pensada para ser rápida, clara e personalizável.</p>
-<div class="actions"><a class="btn primary" href="https://github.com/nexauren1/Archiver-File-Manager/releases/download/v0.7.2/app-release.apk" data-t="download">Obter a versão mais recente ↗</a><a class="btn secondary" href="#features" data-t="featuresBtn">Explorar funcionalidades</a></div>
-<div class="downloadNote"><span class="dot"></span><span data-t="downloadNote">Distribuição oficial através da página de versões.</span></div>
+<div class="actions"><a class="btn primary" href="https://github.com/nexauren1/Archiver-File-Manager/releases/download/v0.7.2/app-release.apk" data-t="download">Descarregar versão estável 0.7.2 ↗</a><a class="btn secondary" href="#features" data-t="featuresBtn">Explorar funcionalidades</a></div>
+<div class="downloadNote"><span class="dot"></span><span data-t="downloadNote">A versão 0.8.0 está em preparação. A versão estável 0.7.2 está disponível para download.</span></div>
 </div>
 <div class="device" aria-label="Pré-visualização ilustrativa da aplicação">
 <div class="screen"><div class="screenHead"><div class="screenIcon">▤</div><div><div class="screenHeading" data-t="screenStorage">Armazenamento interno</div><div class="screenSub">Archiver · 0.7.2</div></div><div style="margin-left:auto;color:#c5c3ff">⌕　⋮</div></div>
@@ -59,7 +59,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:22px;mi
 <div class="notice" data-t="notice">O Archiver é um projeto independente e não é afiliado a outras aplicações de gestão de arquivos. Antes de operações destrutivas, confirma os itens selecionados e mantém cópias de segurança dos ficheiros importantes.</div>
 </section>
 <section class="section">
-<div class="cta"><div><h2 data-t="ctaTitle">Pronto para organizar melhor?</h2><p data-t="ctaDesc">Consulta as versões disponíveis e as respetivas notas de lançamento.</p></div><div class="actions"><a class="btn primary" href="https://github.com/nexauren1/Archiver-File-Manager/releases/download/v0.7.2/app-release.apk" data-t="ctaDownload">Ver a versão mais recente ↗</a><a class="btn secondary" href="terms.html" data-t="ctaTerms">Termos de utilização</a></div></div>
+<div class="cta"><div><h2 data-t="ctaTitle">Pronto para organizar melhor?</h2><p data-t="ctaDesc">Consulta as versões disponíveis e as respetivas notas de lançamento.</p></div><div class="actions"><a class="btn primary" href="https://github.com/nexauren1/Archiver-File-Manager/releases/download/v0.7.2/app-release.apk" data-t="ctaDownload">Descarregar versão estável 0.7.2 ↗</a><a class="btn secondary" href="terms.html" data-t="ctaTerms">Termos de utilização</a></div></div>
 </section>
 </main>
 <footer><div class="wrap foot"><span>© <span id="year"></span> Archiver · <span data-t="footerTag">Gestor de ficheiros Android</span></span><div class="footLinks"><a href="privacy.html" data-t="footerPrivacy">Privacidade</a><a href="terms.html" data-t="footerTerms">Termos</a></div><span data-t="footerNote">Feito para organizar. Pensado para o teu controlo.</span></div></footer>
@@ -80,6 +80,7 @@ id:{navFeatures:"Fitur",navPrivacy:"Privasi",navTerms:"Ketentuan",eyebrow:"Penge
 };
 const language = document.getElementById("language");
 function applyLanguage(code){const t=translations[code]||translations.en;document.documentElement.lang=code==="zh"?"zh-Hans":code;document.documentElement.dir=code==="ar"?"rtl":"ltr";document.querySelectorAll("[data-t]").forEach(el=>{const key=el.dataset.t;if(t[key]!==undefined)el.innerHTML=t[key]});document.title=(code==="pt"?"Archiver — Os teus ficheiros, no teu ritmo":t.heroTitle.replace("<br>"," ")+" · Archiver");}
+applyLanguage(language.value);
 language.addEventListener("change",()=>applyLanguage(language.value));
 document.getElementById("year").textContent=new Date().getFullYear();
 </script>
