@@ -1,11 +1,14 @@
-# Archiver 0.7.2 — Android File Manager
+# Archiver 0.8.0 — Android File Manager
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
 
-## Archiver 0.7.2
+## Archiver 0.8.0 release candidate
 
-- Fix release builds by including XZ for Java explicitly, allowing R8 to resolve the optional classes used by Apache Commons Compress.
-- Version code: 9.
+- Adds per-folder icon presets and a choice of coordinated interface background palettes.
+- Shows used and available storage at the top of the browser, with a compact capacity meter.
+- Watches the open directory for file changes, debounces refreshes, and refreshes again when returning to the app. Automatic refresh can be disabled in Explorer settings.
+- Expands the language coverage for the new controls across all 12 supported interface languages.
+- Version code: 10. This candidate should be built and tested before it replaces the stable 0.7.2 release.
 
 ## Highlights
 
@@ -20,8 +23,8 @@ Archiver is a native Android file manager written in Kotlin. It is an independen
 - File-type icons, image thumbnails and optional PDF/video/music/APK previews.
 - Built-in UTF-8 text editor for common text and code files up to 4 MiB, including HTML, CSS, Java, Kotlin, JavaScript, JSON, XML, Python, SQL and more. The editor provides text editing, not a full IDE or code execution environment.
 - GLB/GLTF metadata inspector; interactive 3D rendering is handed off to a compatible external viewer.
-- Twelve selectable interface languages: Portuguese, English, Spanish, French, German, Simplified Chinese, Hindi, Arabic, Japanese, Russian, Bengali and Indonesian. The selected language is shown by its native name; Arabic uses a right-to-left layout. Some legacy/rare strings may still use English fallback where a translation has not been added.
-- Theme presets (Dark, OLED black and Light), accent-color selection, custom folder colours and thumbnail preferences. A user-controlled “Smooth animations” option adds short, lightweight file-list entrance effects; touch ripples indicate selection and taps. Animations are skipped for large lists to preserve responsiveness.
+- Twelve selectable interface languages: Portuguese, English, Spanish, French, German, Simplified Chinese, Hindi, Arabic, Japanese, Russian, Bengali and Indonesian. The selected language is shown by its native name; Arabic uses a right-to-left layout. Some legacy or rare strings may still use English fallback where a translation has not been added.
+- Theme presets (Dark, OLED black and Light), accent-color selection, custom folder colours and folder icon presets, coordinated background palettes, storage capacity meter, automatic folder change detection and thumbnail preferences. A user-controlled “Smooth animations” option adds short, lightweight file-list entrance effects; touch ripples indicate selection and taps. Animations are skipped for large lists to preserve responsiveness.
 
 ## Format and platform limits
 
