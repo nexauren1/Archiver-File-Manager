@@ -21,6 +21,7 @@ import android.graphics.Canvas
 import android.graphics.drawable.Drawable
 import android.graphics.pdf.PdfRenderer
 import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -56,6 +57,13 @@ import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import org.apache.commons.compress.archivers.sevenz.SevenZMethod
 import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream
 import net.lingala.zip4j.ZipFile as Zip4jFile
 import net.lingala.zip4j.model.ZipParameters
 import net.lingala.zip4j.progress.ProgressMonitor
@@ -676,7 +684,7 @@ class MainActivity : Activity() {
     private fun fileGlyph(file: File): String {
         if (file.isDirectory) return "📁"
         return when (extension(file.name)) {
-            "zip", "7z", "rar", "tar", "gz", "bz2" -> "🗜"
+            "zip", "7z", "rar", "tar", "gz", "bz2", "tgz", "tbz", "tbz2" -> "🗜"
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> "🖼"
             "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus" -> "♫"
             "mp4", "mkv", "webm", "avi", "mov", "3gp" -> "▶"
@@ -850,15 +858,9 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Compressão", compressionName(), "Formato, velocidade e opções de arquivos") {
                     settingsCategory = "Compressão"; renderSettingsScreen()
                 }
-                addSettingChoice(content, "ROOT", "Não configurado", "O acesso root não está ativo no Archiver") {
-                    settingsCategory = "ROOT"; renderSettingsScreen()
-                }
-                addSettingChoice(content, "Plugins", "Nenhum", "O sistema de plugins ainda não está disponível") {
-                    settingsCategory = "Plugins"; renderSettingsScreen()
-                }
             }
             "Geral" -> {
-                addSettingChoice(content, "Idioma", if (appLanguage == "en") "English" else "Português",
+                addSettingChoice(content, "Idioma", languageDisplayName(appLanguage),
                     "Escolher o idioma da interface") { showLanguageMenu() }
                 val notificationsEnabled = Build.VERSION.SDK_INT < 33 ||
                     ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -908,18 +910,6 @@ class MainActivity : Activity() {
                     "ZIP: suporta ZipCrypto, AES-256 e divisão em volumes. 7Z: criação e extração com níveis de compressão; palavra-passe e volumes não estão ligados nesta versão.",
                     14, mutedTextColor(), false
                 ).apply { setPadding(dp(8), dp(16), dp(8), dp(16)) }, LinearLayout.LayoutParams(-1, -2))
-            }
-            "ROOT" -> {
-                content.addView(label(
-                    "O Archiver não implementa acesso ROOT nem Shizuku nesta versão. A permissão Android «Gerir todos os ficheiros» permite gerir o armazenamento partilhado, mas não desbloqueia as pastas privadas de outras aplicações nem concede root.",
-                    15, mutedTextColor(), false
-                ).apply { setPadding(dp(8), dp(20), dp(8), dp(20)) }, LinearLayout.LayoutParams(-1, -2))
-            }
-            "Plugins" -> {
-                content.addView(label(
-                    "Ainda não existe um sistema de plugins nesta versão. Os formatos e leitores disponíveis são os integrados na aplicação ou nas aplicações instaladas no dispositivo.",
-                    15, mutedTextColor(), false
-                ).apply { setPadding(dp(8), dp(20), dp(8), dp(20)) }, LinearLayout.LayoutParams(-1, -2))
             }
         }
         setContentView(page)
@@ -1055,7 +1045,8 @@ class MainActivity : Activity() {
         val ext = extension(file.name)
         val options = mutableListOf<String>()
         if (file.isDirectory) options += "Abrir pasta" else options += "Abrir"
-        if (ext == "zip" || ext == "7z") {
+        val archiveKind = archiveKind(file)
+        if (archiveKind.isNotEmpty()) {
             options += "Ver conteúdo"
             options += "Testar arquivo"
             options += "Extrair aqui"
@@ -1079,9 +1070,21 @@ class MainActivity : Activity() {
                 "Comprimir para 7Z" -> promptArchive(chosenOrSingle(file), "7z")
                 "Comprimir…" -> promptArchive(chosenOrSingle(file), if (ext == "7z") "7z" else "zip")
                 "Ver conteúdo" -> browseArchive(file)
-                "Testar arquivo" -> if (ext == "7z") testSevenZip(file) else testZip(file)
-                "Extrair aqui" -> if (ext == "7z") extractSevenZip(file, currentDir, false) else extractZip(file, currentDir, false)
-                "Extrair para nova pasta" -> if (ext == "7z") extractSevenZip(file, currentDir, true) else extractZip(file, currentDir, true)
+                "Testar arquivo" -> when (archiveKind) {
+                    "7z" -> testSevenZip(file)
+                    "zip" -> testZip(file)
+                    else -> testTarArchive(file)
+                }
+                "Extrair aqui" -> when (archiveKind) {
+                    "7z" -> extractSevenZip(file, currentDir, false)
+                    "zip" -> extractZip(file, currentDir, false)
+                    else -> extractTarArchive(file, currentDir, false)
+                }
+                "Extrair para nova pasta" -> when (archiveKind) {
+                    "7z" -> extractSevenZip(file, currentDir, true)
+                    "zip" -> extractZip(file, currentDir, true)
+                    else -> extractTarArchive(file, currentDir, true)
+                }
                 "Partilhar" -> shareFile(file)
                 "Copiar caminho" -> copyPath(file)
                 "Calcular SHA-256" -> calculateSha256(file)
@@ -1097,15 +1100,253 @@ class MainActivity : Activity() {
     }
 
     private fun openFile(file: File) {
+        val ext = extension(file.name)
         if (isEditableTextFile(file) && file.length() <= 4L * 1024L * 1024L) {
             showTextEditor(file)
             return
         }
-        if (extension(file.name) in setOf("glb", "gltf")) {
+        if (ext in setOf("glb", "gltf")) {
             showModelInspector(file)
             return
         }
+        if (ext == "pdf") {
+            showPdfReader(file)
+            return
+        }
+        if (ext in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp")) {
+            showImageViewer(file)
+            return
+        }
+        if (ext in setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "opus", "wma", "mid", "midi")) {
+            showAudioPlayer(file)
+            return
+        }
         openFileExternally(file)
+    }
+
+    private fun showPdfReader(file: File) {
+        val image = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            adjustViewBounds = true
+            setBackgroundColor(0xFF303036.toInt())
+        }
+        val status = label("A abrir PDF…", 13, mutedTextColor(), false)
+        val previous = Button(this).apply { text = tr("Anterior"); isAllCaps = false; isEnabled = false }
+        val next = Button(this).apply { text = tr("Seguinte"); isAllCaps = false; isEnabled = false }
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(previous, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(6) })
+            addView(next, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            addView(image, FrameLayout.LayoutParams(-1, -2))
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(6), dp(8), dp(8))
+            addView(status, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(6); leftMargin = dp(4); rightMargin = dp(4)
+            })
+            addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(controls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        }
+        var dialog: AlertDialog? = null
+        var requestedPage = 0
+        var pageCount = 0
+        fun renderPage(index: Int) {
+            requestedPage = index
+            status.text = tr("A abrir PDF…")
+            previous.isEnabled = false
+            next.isEnabled = false
+            image.setImageDrawable(null)
+            thumbnailWorker.execute {
+                var count = 0
+                var rendered: Bitmap? = null
+                var error: String? = null
+                try {
+                    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        PdfRenderer(descriptor).use { renderer ->
+                            count = renderer.pageCount
+                            if (index !in 0 until count) throw IOException("Página PDF inválida.")
+                            renderer.openPage(index).use { pdfPage ->
+                                val width = (resources.displayMetrics.widthPixels - dp(48)).coerceIn(320, 1200)
+                                val height = (width.toDouble() * pdfPage.height / pdfPage.width).toInt().coerceIn(1, 2600)
+                                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                bitmap.eraseColor(0xFFFFFFFF.toInt())
+                                pdfPage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                rendered = bitmap
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    error = e.message ?: tr("Não foi possível abrir PDF.")
+                }
+                runOnUiThread {
+                    if (dialog?.isShowing == true && requestedPage == index) {
+                        pageCount = count
+                        if (rendered != null) {
+                            image.setImageBitmap(rendered)
+                            status.text = "${index + 1} / ${pageCount}"
+                            previous.isEnabled = index > 0
+                            next.isEnabled = index + 1 < pageCount
+                        } else {
+                            status.text = tr("Não foi possível abrir PDF.") + ": " + (error ?: "")
+                        }
+                    } else {
+                        rendered?.recycle()
+                    }
+                }
+            }
+        }
+        val builtDialog = AlertDialog.Builder(this)
+            .setTitle(tr("Leitor de PDF") + " — " + file.name)
+            .setView(body)
+            .setPositiveButton(tr("Abrir noutra aplicação")) { _, _ -> openFileExternally(file) }
+            .setNegativeButton(tr("Fechar"), null)
+            .create()
+        dialog = builtDialog
+        previous.setOnClickListener { if (requestedPage > 0) renderPage(requestedPage - 1) }
+        next.setOnClickListener { if (requestedPage + 1 < pageCount) renderPage(requestedPage + 1) }
+        builtDialog.setOnDismissListener { image.setImageDrawable(null) }
+        builtDialog.show()
+        renderPage(0)
+    }
+
+    private fun showImageViewer(file: File) {
+        val image = ImageView(this).apply {
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(pageBackgroundColor())
+        }
+        val status = label("A carregar imagem…", 13, mutedTextColor(), false)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            addView(image, FrameLayout.LayoutParams(-1, -2))
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            addView(status, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(6); leftMargin = dp(4)
+            })
+            addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(file.name)
+            .setView(body)
+            .setPositiveButton(tr("Abrir noutra aplicação")) { _, _ -> openFileExternally(file) }
+            .setNegativeButton(tr("Fechar"), null)
+            .create()
+        var decoded: Bitmap? = null
+        dialog.setOnDismissListener {
+            image.setImageDrawable(null)
+            decoded?.let { if (!it.isRecycled) it.recycle() }
+        }
+        dialog.show()
+        thumbnailWorker.execute {
+            var bitmap: Bitmap? = null
+            var error: String? = null
+            try {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.absolutePath, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException("Ficheiro de imagem inválido.")
+                val maxWidth = (resources.displayMetrics.widthPixels - dp(40)).coerceAtLeast(320)
+                val maxHeight = (resources.displayMetrics.heightPixels - dp(200)).coerceAtLeast(320)
+                var sample = 1
+                while (bounds.outWidth / sample > maxWidth * 2 || bounds.outHeight / sample > maxHeight * 2) sample *= 2
+                bitmap = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
+                    inSampleSize = sample.coerceAtLeast(1)
+                }) ?: throw IOException("Ficheiro de imagem inválido.")
+            } catch (e: Exception) {
+                error = e.message ?: tr("Não foi possível abrir a imagem.")
+            }
+            runOnUiThread {
+                if (dialog.isShowing && bitmap != null) {
+                    decoded = bitmap
+                    image.setImageBitmap(bitmap)
+                    status.text = tr("Pré-visualização da imagem")
+                } else if (dialog.isShowing) {
+                    status.text = tr("Não foi possível abrir a imagem.") + ": " + (error ?: "")
+                } else {
+                    bitmap?.recycle()
+                }
+            }
+        }
+    }
+
+    private fun showAudioPlayer(file: File) {
+        val status = label("A preparar áudio…", 14, mutedTextColor(), false)
+        val play = Button(this).apply { text = tr("Reproduzir"); isAllCaps = false; isEnabled = false }
+        val stop = Button(this).apply { text = tr("Parar"); isAllCaps = false; isEnabled = false }
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(play, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(6) })
+            addView(stop, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(6) })
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(8))
+            addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+            addView(controls, LinearLayout.LayoutParams(-1, -2))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Leitor de áudio") + " — " + file.name)
+            .setView(body)
+            .setPositiveButton(tr("Abrir noutra aplicação")) { _, _ -> openFileExternally(file) }
+            .setNegativeButton(tr("Fechar"), null)
+            .create()
+        val player = MediaPlayer()
+        var prepared = false
+        play.setOnClickListener {
+            if (!prepared) return@setOnClickListener
+            try {
+                if (player.isPlaying) {
+                    player.pause()
+                    play.text = tr("Reproduzir")
+                } else {
+                    player.start()
+                    play.text = tr("Pausar")
+                }
+            } catch (e: Exception) {
+                status.text = tr("Não foi possível reproduzir o áudio.") + ": " + (e.message ?: "")
+            }
+        }
+        stop.setOnClickListener {
+            if (!prepared) return@setOnClickListener
+            runCatching { player.pause(); player.seekTo(0) }
+            play.text = tr("Reproduzir")
+        }
+        player.setOnPreparedListener { preparedPlayer ->
+            prepared = true
+            play.isEnabled = true
+            stop.isEnabled = true
+            val seconds = (preparedPlayer.duration / 1000).coerceAtLeast(0)
+            status.text = tr("Pronto") + " • ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+        }
+        player.setOnCompletionListener {
+            play.text = tr("Reproduzir")
+            status.text = tr("Reprodução concluída.")
+        }
+        player.setOnErrorListener { _, _, _ ->
+            status.text = tr("Não foi possível reproduzir o áudio.")
+            play.isEnabled = false
+            stop.isEnabled = false
+            true
+        }
+        dialog.setOnDismissListener {
+            runCatching { if (player.isPlaying) player.stop() }
+            runCatching { player.release() }
+        }
+        dialog.show()
+        try {
+            player.setDataSource(file.absolutePath)
+            player.prepareAsync()
+        } catch (e: Exception) {
+            status.text = tr("Não foi possível reproduzir o áudio.") + ": " + (e.message ?: "")
+        }
     }
 
     private fun openFileExternally(file: File) {
@@ -1602,15 +1843,17 @@ class MainActivity : Activity() {
         processed: LongArray,
         meter: TaskProgress? = null
     ) {
-        if (depth > 60 || hits.size >= 300) return
-        val children = safeList(directory)
+        if (depth > 50 || hits.size >= 100 || processed[0] >= 10000L) return
+        // Search doesn't need display sorting; avoid extra work during recursive scans.
+        val children = try { directory.listFiles()?.asList() ?: emptyList() }
+            catch (_: SecurityException) { emptyList() }
         for (child in children) {
-            if (hits.size >= 300) return
+            if (hits.size >= 100 || processed[0] >= 10000L) return
             if (!showHidden && child.name.startsWith(".")) continue
             val matchesName = if (matcher != null) matcher.matches(child.name) else child.name.contains(query, ignoreCase = true)
             if (matchesName && matchesSearchType(child, typeFilter)) hits.add(child)
             processed[0]++
-            if (processed[0] % 20L == 0L) {
+            if (processed[0] % 250L == 0L) {
                 meter?.report(0, tr("Analisados") + ": " + processed[0] + " • " + child.name)
             }
             if (recursive && child.isDirectory && isWithinRoot(child) && isWithinScope(child, scope)) {
@@ -1635,7 +1878,7 @@ class MainActivity : Activity() {
             "image" -> ext in setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "heic", "avif")
             "video" -> ext in setOf("mp4", "mkv", "mov", "webm", "avi", "3gp", "m4v")
             "audio" -> ext in setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "opus", "wma")
-            "archive" -> ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "tgz")
+            "archive" -> ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "tgz", "tbz", "tbz2")
             "app" -> ext in setOf("apk", "apks", "xapk", "aab")
             else -> true
         }
@@ -1744,8 +1987,9 @@ class MainActivity : Activity() {
     private fun promptArchive(files: List<File>, initialFormat: String) {
         if (files.isEmpty()) { toast("Seleciona pelo menos um ficheiro ou pasta."); return }
 
-        val formatNames = arrayOf("ZIP", "7Z")
-        val formatPicker = makeSpinner(formatNames, if (initialFormat == "7z") 1 else 0)
+        val formatNames = arrayOf("ZIP", "7Z", "TAR", "TAR.GZ", "TAR.BZ2")
+        val initialIndex = when (initialFormat) { "7z" -> 1; "tar" -> 2; "tgz" -> 3; "tbz2" -> 4; else -> 0 }
+        val formatPicker = makeSpinner(formatNames, initialIndex)
         val levelNames = arrayOf("Sem compressão", "Rápida", "Normal", "Ultra")
         val levelPicker = makeSpinner(levelNames, compressionLevel.coerceIn(0, 3))
         val encryptionNames = arrayOf("Nenhuma", "ZipCrypto", "AES-256")
@@ -1765,11 +2009,11 @@ class MainActivity : Activity() {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSingleLine(true)
         }
-        val suffix = if (initialFormat == "7z") ".7z" else ".zip"
+        val suffix = archiveSuffix(initialFormat)
         val input = EditText(this).apply {
             setSingleLine(true)
             val suggestion = if (files.size == 1) files[0].name else "Arquivo"
-            setText(if (suggestion.lowercase(Locale.ROOT).endsWith(suffix)) suggestion else suggestion + suffix)
+            setText(stripArchiveSuffix(suggestion) + suffix)
         }
         val deleteOriginals = CheckBox(this).apply { text = "Eliminar originais depois de comprimir com sucesso" }
         val separateArchives = CheckBox(this).apply { text = "Criar um arquivo separado por item selecionado" }
@@ -1798,6 +2042,7 @@ class MainActivity : Activity() {
             encryptionPicker.isEnabled = zipSelected
             volumePicker.isEnabled = zipSelected
             passwordInput.isEnabled = zipSelected && encryptionPicker.selectedItemPosition > 0
+            levelPicker.isEnabled = formatPicker.selectedItemPosition <= 1
             if (!zipSelected) {
                 encryptionPicker.setSelection(0)
                 volumePicker.setSelection(0)
@@ -1830,8 +2075,14 @@ class MainActivity : Activity() {
             .create().also { dialog ->
                 dialog.setOnShowListener {
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        val archiveFormat = if (formatPicker.selectedItemPosition == 1) "7z" else "zip"
-                        val chosenSuffix = if (archiveFormat == "7z") ".7z" else ".zip"
+                        val archiveFormat = when (formatPicker.selectedItemPosition) {
+                            1 -> "7z"
+                            2 -> "tar"
+                            3 -> "tgz"
+                            4 -> "tbz2"
+                            else -> "zip"
+                        }
+                        val chosenSuffix = archiveSuffix(archiveFormat)
                         val encryption = encryptionNames[encryptionPicker.selectedItemPosition]
                         val password = passwordInput.text.toString()
                         val splitSize = if (archiveFormat == "zip") volumeBytes[volumePicker.selectedItemPosition] else 0L
@@ -1847,7 +2098,7 @@ class MainActivity : Activity() {
 
                         var name = input.text.toString().trim()
                         if (name.isBlank() || !validName(name)) { toast("Nome inválido."); return@setOnClickListener }
-                        name = name.removeSuffix(".zip").removeSuffix(".7z") + chosenSuffix
+                        name = stripArchiveSuffix(name) + chosenSuffix
                         val sources = files.toList()
                         val removeSources = deleteOriginals.isChecked
                         val separate = separateArchives.isChecked
@@ -1882,17 +2133,15 @@ class MainActivity : Activity() {
                                 if (separate) {
                                     sources.zip(outputFiles).forEach { (source, destination) ->
                                         meter.show(source)
-                                        if (archiveFormat == "7z") createSevenZip(listOf(source), destination, meter)
-                                        else createZip(
-                                            listOf(source), destination, meter,
+                                        createArchive(
+                                            listOf(source), destination, meter, archiveFormat,
                                             password.takeIf { encryption != "Nenhuma" }, encryption, splitSize
                                         )
                                     }
                                 } else {
                                     val destination = outputFiles.single()
-                                    if (archiveFormat == "7z") createSevenZip(sources, destination, meter)
-                                    else createZip(
-                                        sources, destination, meter,
+                                    createArchive(
+                                        sources, destination, meter, archiveFormat,
                                         password.takeIf { encryption != "Nenhuma" }, encryption, splitSize
                                     )
                                 }
@@ -2137,6 +2386,67 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun createArchive(
+        sources: List<File>,
+        destination: File,
+        meter: TaskProgress,
+        format: String,
+        password: String? = null,
+        encryption: String = "Nenhuma",
+        splitBytes: Long = 0L
+    ) {
+        when (format) {
+            "7z" -> createSevenZip(sources, destination, meter)
+            "tar", "tgz", "tbz2" -> createTarArchive(sources, destination, meter, format)
+            else -> createZip(sources, destination, meter, password, encryption, splitBytes)
+        }
+    }
+
+    private fun createTarArchive(sources: List<File>, destination: File, meter: TaskProgress, format: String) {
+        val raw = BufferedOutputStream(FileOutputStream(destination))
+        val wrapped: OutputStream = when (format) {
+            "tgz" -> GzipCompressorOutputStream(raw)
+            "tbz2" -> BZip2CompressorOutputStream(raw)
+            else -> raw
+        }
+        TarArchiveOutputStream(wrapped).use { tar ->
+            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
+            tar.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_POSIX)
+            sources.forEach { source ->
+                if (source.canonicalFile != destination.canonicalFile) {
+                    addToTar(tar, source, source.name, destination, meter)
+                }
+            }
+        }
+    }
+
+    private fun addToTar(tar: TarArchiveOutputStream, source: File, entryName: String, destination: File, meter: TaskProgress) {
+        if (source.canonicalFile == destination.canonicalFile) return
+        meter.show(source)
+        val safeName = entryName.replace('\\', '/').trimStart('/')
+        if (source.isDirectory) {
+            val dirName = safeName.trimEnd('/') + "/"
+            tar.putArchiveEntry(TarArchiveEntry(source, dirName))
+            tar.closeArchiveEntry()
+            meter.itemDone(source)
+            val children = source.listFiles() ?: throw IOException("Não foi possível ler " + source.name)
+            children.forEach { child -> addToTar(tar, child, dirName + child.name, destination, meter) }
+        } else {
+            tar.putArchiveEntry(TarArchiveEntry(source, safeName))
+            BufferedInputStream(FileInputStream(source)).use { input ->
+                val buffer = ByteArray(32 * 1024)
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    tar.write(buffer, 0, n)
+                    meter.bytesRead(n.toLong(), source)
+                }
+            }
+            tar.closeArchiveEntry()
+            meter.itemDone(source)
+        }
+    }
+
     private fun addToSevenZip(seven: SevenZOutputFile, source: File, entryName: String, destination: File, meter: TaskProgress) {
         if (source.canonicalFile == destination.canonicalFile) return
         meter.show(source)
@@ -2346,73 +2656,212 @@ class MainActivity : Activity() {
     private data class ArchiveItem(val index: Int, val name: String, val directory: Boolean, val size: Long)
 
     private fun browseArchive(archive: File) {
-        val ext = extension(archive.name)
+        val kind = archiveKind(archive)
         runTask("A ler arquivo…") {
             val entries = mutableListOf<ArchiveItem>()
-            if (ext == "zip") {
-                ZipFile(archive).use { zip ->
-                    val en = zip.entries()
-                    var index = 0
-                    while (en.hasMoreElements() && entries.size < 300) {
-                        val e = en.nextElement()
-                        entries += ArchiveItem(index++, e.name, e.isDirectory, e.size)
+            var index = 0
+            when (kind) {
+                "zip" -> ZipFile(archive).use { zip ->
+                    val it = zip.entries()
+                    while (it.hasMoreElements() && entries.size < 10000) {
+                        val e = it.nextElement()
+                        val name = e.name.replace('\\', '/').trimStart('/')
+                        entries += ArchiveItem(index++, if (e.isDirectory && !name.endsWith("/")) "$name/" else name, e.isDirectory, e.size)
                     }
                 }
-            } else if (ext == "7z") {
-                SevenZFile(archive).use { seven ->
-                    var index = 0
+                "7z" -> SevenZFile(archive).use { seven ->
                     for (e in seven.entries) {
-                        if (entries.size >= 300) break
-                        entries += ArchiveItem(index++, e.name, e.isDirectory, e.size)
+                        if (entries.size >= 10000) break
+                        val name = e.name.replace('\\', '/').trimStart('/')
+                        entries += ArchiveItem(index++, if (e.isDirectory && !name.endsWith("/")) "$name/" else name, e.isDirectory, e.size)
                     }
                 }
-            } else throw IOException("Formato não suportado.")
-            runOnUiThread { showArchiveItems(archive, entries) }
-            "Conteúdo lido: " + entries.size + " entradas."
+                "tar", "tgz", "tbz2" -> openTarInput(archive).use { tar ->
+                    while (entries.size < 10000) {
+                        val e = tar.nextTarEntry ?: break
+                        val name = e.name.replace('\\', '/').trimStart('/')
+                        entries += ArchiveItem(index++, if (e.isDirectory && !name.endsWith("/")) "$name/" else name, e.isDirectory, e.size)
+                        if (!e.isDirectory) {
+                            val buffer = ByteArray(8192)
+                            while (tar.read(buffer) >= 0) { /* advance to next header */ }
+                        }
+                    }
+                }
+                else -> throw IOException("Formato não suportado.")
+            }
+            runOnUiThread { showArchiveItems(archive, entries, "") }
+            if (entries.isEmpty()) "O arquivo está vazio." else "Conteúdo lido: ${entries.size} entradas."
         }
     }
 
-    private fun showArchiveItems(archive: File, entries: List<ArchiveItem>) {
-        if (entries.isEmpty()) { toast("O arquivo está vazio."); return }
-        val labels = entries.map { (if (it.directory) "📁  " else "📄  ") + it.name + if (!it.directory && it.size >= 0) "  •  " + formatSize(it.size) else "" }.toTypedArray()
-        AlertDialog.Builder(this).setTitle(archive.name + if (entries.size == 300) " (primeiras 300 entradas)" else "")
-            .setItems(labels) { _, which ->
-                val item = entries[which]
-                if (item.directory) {
-                    AlertDialog.Builder(this).setTitle("Pasta do arquivo")
-                        .setMessage("Usa «Extrair aqui» para extrair esta pasta juntamente com o restante conteúdo.")
-                        .setPositiveButton("OK", null).show()
-                } else {
-                    AlertDialog.Builder(this).setTitle("Extrair item")
-                        .setMessage("Extrair " + item.name + " para a pasta atual?")
-                        .setNegativeButton("Cancelar", null)
-                        .setPositiveButton("Extrair") { _, _ -> extractArchiveEntry(archive, item) }.show()
+    private fun showArchiveItems(archive: File, entries: List<ArchiveItem>, prefix: String = "") {
+        val children = linkedMapOf<String, ArchiveItem>()
+        entries.forEach { entry ->
+            val normalized = entry.name.replace('\\', '/').trimStart('/')
+            val fullName = if (entry.directory && !normalized.endsWith("/")) "$normalized/" else normalized
+            if (!fullName.startsWith(prefix)) return@forEach
+            val remaining = fullName.removePrefix(prefix)
+            if (remaining.isBlank()) return@forEach
+            val first = remaining.substringBefore('/')
+            if (first.isBlank()) return@forEach
+            if (remaining.contains('/')) {
+                val virtualPath = prefix + first + "/"
+                if (!children.containsKey(virtualPath)) {
+                    children[virtualPath] = ArchiveItem(-1, virtualPath, true, -1L)
                 }
-            }.setPositiveButton("Fechar", null).show()
+            } else {
+                val childName = prefix + first + if (entry.directory) "/" else ""
+                children[childName] = entry.copy(name = childName)
+            }
+        }
+        val visible = children.values.sortedWith(
+            compareByDescending<ArchiveItem> { it.directory }
+                .thenBy { it.name.substringAfterLast('/').trimEnd('/').lowercase(Locale.ROOT) }
+        )
+        if (visible.isEmpty() && prefix.isBlank()) {
+            toast("O arquivo está vazio.")
+            return
+        }
+        val hasParent = prefix.isNotBlank()
+        val labels = mutableListOf<String>()
+        if (hasParent) labels += "⬆️  .."
+        visible.forEach { item ->
+            labels += (if (item.directory) "📁  " else "📄  ") +
+                item.name.substringAfterLast('/').ifBlank { item.name } +
+                if (!item.directory && item.size >= 0) "  •  " + formatSize(item.size) else ""
+        }
+        val builder = AlertDialog.Builder(this)
+            .setTitle(archive.name + if (prefix.isNotBlank()) "  /  " + prefix.trimEnd('/') else "")
+            .setItems(labels.toTypedArray()) { dialog, which ->
+                dialog.dismiss()
+                page.post {
+                    if (hasParent && which == 0) {
+                        val parent = prefix.trimEnd('/').substringBeforeLast('/', "")
+                        showArchiveItems(archive, entries, if (parent.isBlank()) "" else "$parent/")
+                        return@post
+                    }
+                    val itemIndex = which - if (hasParent) 1 else 0
+                    val item = visible.getOrNull(itemIndex) ?: return@post
+                    if (item.directory) {
+                        showArchiveItems(archive, entries, item.name.trimEnd('/') + "/")
+                    } else {
+                        AlertDialog.Builder(this)
+                            .setTitle(tr("Extrair item"))
+                            .setMessage(tr("Extrair") + " " + item.name + " " + tr("para a pasta atual") + "?")
+                            .setNegativeButton(tr("Cancelar"), null)
+                            .setPositiveButton(tr("Extrair")) { _, _ -> extractArchiveEntry(archive, item) }
+                            .show()
+                    }
+                }
+            }
+            .setPositiveButton(tr("Fechar"), null)
+        if (hasParent) builder.setNeutralButton(tr("Extrair pasta atual")) { _, _ ->
+            extractArchiveEntry(archive, ArchiveItem(-1, prefix, true, -1L))
+        }
+        builder.show()
     }
 
-    private fun extractArchiveEntry(archive: File, item: ArchiveItem) {
+    private fun openTarInput(archive: File): TarArchiveInputStream {
+        val raw = BufferedInputStream(FileInputStream(archive))
+        val input: InputStream = when (archiveKind(archive)) {
+            "tgz" -> GzipCompressorInputStream(raw)
+            "tbz2" -> BZip2CompressorInputStream(raw)
+            else -> raw
+        }
+        return TarArchiveInputStream(input)
+    }
+
+    private fun extractTarArchive(archive: File, destinationDir: File, makeSubfolder: Boolean) {
+        val kind = archiveKind(archive)
+        runTask("A extrair TAR…", 0L, 1L) { meter ->
+            val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, stripArchiveSuffix(archive.name))) else destinationDir
+            if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
+            var count = 0
+            openTarInput(archive).use { tar ->
+                val buffer = ByteArray(32 * 1024)
+                while (true) {
+                    val entry = tar.nextTarEntry ?: break
+                    val output = safeArchiveTarget(destination, entry.name, entry.isDirectory)
+                    meter.show(output)
+                    if (entry.isDirectory) {
+                        if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
+                    } else {
+                        output.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar uma pasta de destino.") }
+                        val target = if (output.exists()) File(output.parentFile, uniqueName(output.parentFile!!, output.name)) else output
+                        BufferedOutputStream(FileOutputStream(target)).use { stream ->
+                            while (true) {
+                                val n = tar.read(buffer)
+                                if (n < 0) break
+                                if (n > 0) {
+                                    stream.write(buffer, 0, n)
+                                    meter.bytesRead(n.toLong(), target)
+                                }
+                            }
+                        }
+                    }
+                    meter.itemDone(output)
+                    count++
+                }
+            }
+            "Extração ${kind.uppercase(Locale.ROOT)} concluída: $count entradas."
+        }
+    }
+
+    private fun testTarArchive(archive: File) {
+        runTask("A testar TAR…", 0L, 1L) { meter ->
+            var count = 0
+            openTarInput(archive).use { tar ->
+                val buffer = ByteArray(32 * 1024)
+                while (true) {
+                    val entry = tar.nextTarEntry ?: break
+                    val current = File(archive.parentFile, entry.name)
+                    meter.show(current)
+                    if (!entry.isDirectory) {
+                        while (true) {
+                            val n = tar.read(buffer)
+                            if (n < 0) break
+                            if (n > 0) meter.bytesRead(n.toLong(), current)
+                        }
+                    }
+                    meter.itemDone(current)
+                    count++
+                }
+            }
+            "Teste TAR concluído: $count entradas."
+        }
+    }
+
+        private fun extractArchiveEntry(archive: File, item: ArchiveItem) {
+        val kind = archiveKind(archive)
         runTrackedTask("A extrair item…", item.size.coerceAtLeast(0L), 1L) { meter ->
-            val destination = safeArchiveTarget(currentDir, item.name, item.directory)
             if (item.directory) {
+                val destination = safeArchiveTarget(currentDir, item.name.trimEnd('/'), true)
+                if (destination.exists() && !destination.isDirectory) throw IOException("Já existe um ficheiro com esse nome.")
                 if (!destination.exists() && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta.")
+                extractArchiveFolderContents(archive, item.name.trimEnd('/') + "/", destination, meter, kind)
+                meter.itemDone(destination)
+                "Pasta extraída: " + item.name.trimEnd('/')
             } else {
-                when (extension(archive.name)) {
+                when (kind) {
                     "zip" -> ZipFile(archive).use { zip ->
                         val entry = zip.getEntry(item.name) ?: throw IOException("A entrada já não existe.")
+                        val destination = safeArchiveTarget(currentDir, item.name, false)
+                        destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
                         val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
-                        target.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
                         BufferedInputStream(zip.getInputStream(entry)).use { input ->
                             BufferedOutputStream(FileOutputStream(target)).use { output ->
                                 val buffer = ByteArray(32 * 1024)
                                 while (true) {
                                     val n = input.read(buffer)
                                     if (n < 0) break
-                                    output.write(buffer, 0, n)
-                                    meter.bytesRead(n.toLong(), target)
+                                    if (n > 0) {
+                                        output.write(buffer, 0, n)
+                                        meter.bytesRead(n.toLong(), target)
+                                    }
                                 }
                             }
                         }
+                        meter.itemDone(target)
                     }
                     "7z" -> {
                         var found = false
@@ -2420,25 +2869,60 @@ class MainActivity : Activity() {
                             var index = 0
                             while (true) {
                                 val entry = seven.nextEntry ?: break
-                                if (index++ != item.index) {
+                                val thisIndex = index++
+                                if (thisIndex != item.index) {
                                     if (!entry.isDirectory) {
-                                        val buffer = ByteArray(32 * 1024)
-                                        while (seven.read(buffer, 0, buffer.size) >= 0) { }
+                                        val skipBuffer = ByteArray(8192)
+                                        while (seven.read(skipBuffer, 0, skipBuffer.size) >= 0) { }
                                     }
                                     continue
                                 }
                                 found = true
+                                val destination = safeArchiveTarget(currentDir, item.name, false)
+                                destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
                                 val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
-                                target.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
-                                BufferedOutputStream(FileOutputStream(target)).use { out ->
+                                BufferedOutputStream(FileOutputStream(target)).use { output ->
                                     val buffer = ByteArray(32 * 1024)
                                     while (true) {
                                         val n = seven.read(buffer, 0, buffer.size)
                                         if (n < 0) break
-                                        out.write(buffer, 0, n)
-                                        meter.bytesRead(n.toLong(), target)
+                                        if (n > 0) {
+                                            output.write(buffer, 0, n)
+                                            meter.bytesRead(n.toLong(), target)
+                                        }
                                     }
                                 }
+                                meter.itemDone(target)
+                                break
+                            }
+                        }
+                        if (!found) throw IOException("A entrada já não existe.")
+                    }
+                    "tar", "tgz", "tbz2" -> {
+                        var found = false
+                        openTarInput(archive).use { tar ->
+                            val buffer = ByteArray(32 * 1024)
+                            while (true) {
+                                val entry = tar.nextTarEntry ?: break
+                                if (entry.name.replace('\\', '/').trimStart('/').trimEnd('/') != item.name.trimEnd('/')) {
+                                    if (!entry.isDirectory) while (tar.read(buffer) >= 0) { }
+                                    continue
+                                }
+                                found = true
+                                val destination = safeArchiveTarget(currentDir, item.name, false)
+                                destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
+                                val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
+                                BufferedOutputStream(FileOutputStream(target)).use { output ->
+                                    while (true) {
+                                        val n = tar.read(buffer)
+                                        if (n < 0) break
+                                        if (n > 0) {
+                                            output.write(buffer, 0, n)
+                                            meter.bytesRead(n.toLong(), target)
+                                        }
+                                    }
+                                }
+                                meter.itemDone(target)
                                 break
                             }
                         }
@@ -2446,13 +2930,92 @@ class MainActivity : Activity() {
                     }
                     else -> throw IOException("Formato não suportado.")
                 }
+                "Item extraído: " + item.name
             }
-            meter.itemDone(destination)
-            "Item extraído: " + item.name
         }
     }
 
-    private fun showInfoPlaceholder() {}
+    private fun extractArchiveFolderContents(
+        archive: File,
+        prefix: String,
+        destination: File,
+        meter: TaskProgress,
+        kind: String
+    ) {
+        val buffer = ByteArray(32 * 1024)
+        fun createTarget(name: String, directory: Boolean): File? {
+            val normalized = name.replace('\\', '/').trimStart('/')
+            if (!normalized.startsWith(prefix) || normalized == prefix) return null
+            val relative = normalized.removePrefix(prefix)
+            if (relative.isBlank()) return null
+            val output = safeArchiveTarget(destination, relative, directory)
+            meter.show(output)
+            if (directory) {
+                if (!output.exists() && !output.mkdirs()) throw IOException("Não foi possível criar " + output.name)
+                meter.itemDone(output)
+                return null
+            }
+            output.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar uma pasta de destino.") }
+            return if (output.exists()) File(output.parentFile, uniqueName(output.parentFile!!, output.name)) else output
+        }
+        fun writeStream(input: InputStream, target: File) {
+            BufferedOutputStream(FileOutputStream(target)).use { out ->
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    if (n > 0) {
+                        out.write(buffer, 0, n)
+                        meter.bytesRead(n.toLong(), target)
+                    }
+                }
+            }
+            meter.itemDone(target)
+        }
+        when (kind) {
+            "zip" -> ZipFile(archive).use { zip ->
+                val it = zip.entries()
+                while (it.hasMoreElements()) {
+                    val entry = it.nextElement()
+                    val target = createTarget(entry.name, entry.isDirectory) ?: continue
+                    zip.getInputStream(entry).use { writeStream(it, target) }
+                }
+            }
+            "7z" -> SevenZFile(archive).use { seven ->
+                while (true) {
+                    val entry = seven.nextEntry ?: break
+                    val target = createTarget(entry.name, entry.isDirectory)
+                    if (!entry.isDirectory) {
+                        if (target != null) {
+                            BufferedOutputStream(FileOutputStream(target)).use { out ->
+                                while (true) {
+                                    val n = seven.read(buffer, 0, buffer.size)
+                                    if (n < 0) break
+                                    if (n > 0) {
+                                        out.write(buffer, 0, n)
+                                        meter.bytesRead(n.toLong(), target)
+                                    }
+                                }
+                            }
+                            meter.itemDone(target)
+                        } else while (seven.read(buffer, 0, buffer.size) >= 0) { }
+                    }
+                }
+            }
+            "tar", "tgz", "tbz2" -> openTarInput(archive).use { tar ->
+                while (true) {
+                    val entry = tar.nextTarEntry ?: break
+                    val target = createTarget(entry.name, entry.isDirectory)
+                    if (!entry.isDirectory) {
+                        if (target != null) writeStream(tar, target)
+                        else while (tar.read(buffer) >= 0) { }
+                    }
+                }
+            }
+            else -> throw IOException("Formato não suportado.")
+        }
+    }
+
+        private fun showInfoPlaceholder() {}
 
     private fun shouldLoadThumbnail(file: File): Boolean {
         if (!showThumbnails) return false
@@ -2843,7 +3406,7 @@ class MainActivity : Activity() {
     private fun toolbarIcon(resource: Int, description: String, click: () -> Unit): ImageButton =
         ImageButton(this).apply {
             setImageResource(resource)
-            contentDescription = description
+            contentDescription = tr(description)
             imageTintList = android.content.res.ColorStateList.valueOf(primaryTextColor())
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(dp(11), dp(11), dp(11), dp(11))
@@ -2872,7 +3435,7 @@ class MainActivity : Activity() {
                 maxLines = 1
             }, LinearLayout.LayoutParams(-1, dp(30)))
             addView(TextView(this@MainActivity).apply {
-                text = title
+                text = tr(title)
                 textSize = 10f
                 gravity = Gravity.CENTER
                 setTextColor(primaryTextColor())
@@ -2925,8 +3488,6 @@ class MainActivity : Activity() {
             "Tema, cor de destaque e aparência" to "Theme, accent color and appearance",
             "Ordenação, ficheiros ocultos e miniaturas" to "Sorting, hidden files and thumbnails",
             "Formato, velocidade e opções de arquivos" to "Formats, speed and archive options",
-            "Não configurado" to "Not configured", "Nenhum" to "None",
-            "O sistema de plugins ainda não está disponível" to "The plugin system is not available yet",
             "Notificações" to "Notifications", "Sobre o Archiver" to "About Archiver",
             "Progresso e conclusão das operações de ficheiros" to "File operation progress and completion",
             "Gestor de ficheiros Android nativo em Kotlin" to "Native Kotlin Android file manager",
@@ -3039,6 +3600,28 @@ class MainActivity : Activity() {
             "Cor dos botões, seleção e indicadores" to "Color for buttons, selection and indicators",
             "Cópia de caminho" to "Copy path",
             "SHA-256" to "SHA-256",
+            "Tamanho total" to "Total size",
+            "Leitor de PDF" to "PDF reader",
+            "Leitor de áudio" to "Audio player",
+            "A abrir PDF…" to "Opening PDF…",
+            "A carregar imagem…" to "Loading image…",
+            "Pré-visualização da imagem" to "Image preview",
+            "Não foi possível abrir PDF." to "Could not open PDF.",
+            "Não foi possível abrir a imagem." to "Could not open image.",
+            "Ficheiro de imagem inválido." to "Invalid image file.",
+            "A preparar áudio…" to "Preparing audio…",
+            "Não foi possível reproduzir o áudio." to "Could not play audio.",
+            "Reprodução concluída." to "Playback complete.",
+            "Reproduzir" to "Play",
+            "Pausar" to "Pause",
+            "Parar" to "Stop",
+            "Pronto" to "Ready",
+            "Anterior" to "Previous",
+            "Seguinte" to "Next",
+            "Extrair pasta atual" to "Extract current folder",
+            "Extrair item" to "Extract item",
+            "para a pasta atual" to "to the current folder",
+            "Extrair" to "Extract",
             "Tamanho total" to "Total size",
             "Itens" to "Items",
             "itens" to "items",
@@ -3805,6 +4388,21 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun languageDisplayName(code: String): String = when (code) {
+        "en" -> "English"
+        "es" -> "Español"
+        "fr" -> "Français"
+        "de" -> "Deutsch"
+        "zh" -> "中文（简体）"
+        "hi" -> "हिन्दी"
+        "ar" -> "العربية"
+        "ja" -> "日本語"
+        "ru" -> "Русский"
+        "bn" -> "বাংলা"
+        "id" -> "Bahasa Indonesia"
+        else -> "Português"
+    }
+
     private fun showLanguageMenu() {
         val codes = arrayOf("pt", "en", "es", "fr", "de", "zh", "hi", "ar", "ja", "ru", "bn", "id")
         val options = arrayOf(
@@ -3818,8 +4416,9 @@ class MainActivity : Activity() {
                 savePreferences()
                 if (Build.VERSION.SDK_INT >= 33) {
                     runCatching {
+                        val localeTag = if (codes[which] == "zh") "zh-Hans" else codes[which]
                         getSystemService(android.app.LocaleManager::class.java).applicationLocales =
-                            android.os.LocaleList.forLanguageTags(codes[which])
+                            android.os.LocaleList.forLanguageTags(localeTag)
                     }
                 }
                 dialog.dismiss()
@@ -3967,6 +4566,33 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
     private fun extension(name: String): String = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+
+    private fun archiveKind(file: File): String {
+        val name = file.name.lowercase(Locale.ROOT)
+        return when {
+            name.endsWith(".tar.gz") || name.endsWith(".tgz") -> "tgz"
+            name.endsWith(".tar.bz2") || name.endsWith(".tbz2") || name.endsWith(".tbz") -> "tbz2"
+            name.endsWith(".tar") -> "tar"
+            name.endsWith(".zip") -> "zip"
+            name.endsWith(".7z") -> "7z"
+            else -> ""
+        }
+    }
+
+    private fun archiveSuffix(kind: String): String = when (kind) {
+        "7z" -> ".7z"
+        "tar" -> ".tar"
+        "tgz" -> ".tar.gz"
+        "tbz2" -> ".tar.bz2"
+        else -> ".zip"
+    }
+
+    private fun stripArchiveSuffix(name: String): String {
+        val lower = name.lowercase(Locale.ROOT)
+        val suffix = listOf(".tar.bz2", ".tar.gz", ".tbz2", ".tgz", ".tar", ".zip", ".7z")
+            .firstOrNull { lower.endsWith(it) }
+        return if (suffix != null) name.dropLast(suffix.length) else name.substringBeforeLast('.', name)
+    }
 
     private fun formatSize(bytes: Long): String = when {
         bytes < 1024 -> bytes.toString() + " B"
