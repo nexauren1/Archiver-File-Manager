@@ -1211,10 +1211,6 @@ class MainActivity : Activity() {
     }
 
     private fun isDescendant(child: File, parent: File): Boolean {
-
-    private fun isDescendant(child: File, parent: File): Boolean {
-
-    private fun isDescendant(child: File, parent: File): Boolean {
         val p = pathKey(parent)
         val c = pathKey(child)
         return c.startsWith(p + File.separator)
@@ -1359,10 +1355,6 @@ class MainActivity : Activity() {
                 }
             }.show()
     }
-
-    private fun compressionName(): String = when
-
-    private fun compressionName(): String = when
 
     private fun compressionName(): String = when (compressionLevel) {
         0 -> "sem compressão"
@@ -1591,10 +1583,6 @@ class MainActivity : Activity() {
             "Teste 7Z concluído: " + count + " entradas."
         }
     }
-
-    private data class ArchiveItem
-
-    private data class ArchiveItem
 
     private data class ArchiveItem(val index: Int, val name: String, val directory: Boolean, val size: Long)
 
