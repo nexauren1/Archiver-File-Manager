@@ -962,8 +962,9 @@ class MainActivity : Activity() {
             .setMessage("Eliminar " + files.size + if (files.size == 1) " item? Esta ação não pode ser anulada." else " itens? Esta ação não pode ser anulada.")
             .setNegativeButton("Cancelar", null).setPositiveButton("Eliminar") { _, _ ->
                 selected.clear()
-                val totals = measureFiles(files)
-                runTask("A eliminar ficheiros…", 0L, totals.entries) { meter ->
+                runTask("A eliminar ficheiros…", 0L, 1L) { meter ->
+                    val totals = measureFiles(files) { meter.show(it) }
+                    meter.setTotals(0L, totals.entries)
                     files.forEach { file ->
                         meter.show(file)
                         if (!deleteRecursively(file) { deleted -> meter.itemDone(deleted) }) {
@@ -1028,9 +1029,9 @@ class MainActivity : Activity() {
         }
         val effectiveSources = sources.filterNot { cut && it.parentFile?.canonicalFile == target.canonicalFile }
         if (effectiveSources.isEmpty()) { toast("Os itens já estão nesta pasta."); return }
-        val totals = measureFiles(effectiveSources)
-        val totalItems = totals.entries * if (cut) 2L else 1L
-        runTask(if (cut) "A mover…" else "A copiar…", totals.bytes, totalItems) { meter ->
+        runTask(if (cut) "A mover…" else "A copiar…", 0L, 1L) { meter ->
+            val totals = measureFiles(effectiveSources) { meter.show(it) }
+            meter.setTotals(totals.bytes, totals.entries * if (cut) 2L else 1L)
             var count = 0
             for (source in effectiveSources) {
                 val destination = File(target, uniqueName(target, source.name))
@@ -1047,6 +1048,8 @@ class MainActivity : Activity() {
             (if (cut) "Movidos " else "Copiados ") + count + " item(ns)."
         }
     }
+
+    private fun isDescendant(child: File, parent: File): Boolean {
 
     private fun isDescendant(child: File, parent: File): Boolean {
 
@@ -1102,8 +1105,9 @@ class MainActivity : Activity() {
                 val query = input.text.toString().trim().lowercase(Locale.ROOT)
                 if (query.isBlank()) { toast("Escreve um nome para pesquisar."); return@setPositiveButton }
                 val start = currentDir
-                val entries = countFilesForSearch(start).coerceAtLeast(1L)
-                runTask("A pesquisar…", 0L, entries) { meter ->
+                runTask("A pesquisar…", 0L, 1L) { meter ->
+                    val entries = countFilesForSearch(start) { meter.show(it) }
+                    meter.setTotals(0L, entries)
                     val hits = mutableListOf<File>()
                     searchTree(start, query, hits, 0, meter)
                     runOnUiThread { showSearchResults(hits) }
@@ -1174,25 +1178,28 @@ class MainActivity : Activity() {
                 val destination = File(currentDir, name)
                 val removeSources = deleteOriginals.isChecked
                 val sources = files.toList()
-                val totals = measureFiles(sources)
-                runTask("A criar " + suffix + "…", totals.bytes, totals.entries * if (removeSources) 2L else 1L) { meter ->
+                runTask("A criar " + suffix + "…", 0L, 1L) { meter ->
+                    val totals = measureFiles(sources) { meter.show(it) }
+                    meter.setTotals(totals.bytes, totals.entries * if (removeSources) 2L else 1L)
                     try {
                         if (format == "7z") createSevenZip(sources, destination, meter) else createZip(sources, destination, meter)
-                        if (removeSources) sources.forEach { source ->
-                            meter.show(source)
-                            if (!deleteRecursively(source) { deleted -> meter.itemDone(deleted) }) {
-                                throw IOException("Arquivo criado, mas não foi possível eliminar " + source.name)
-                            }
-                        }
                     } catch (e: Exception) {
                         destination.delete()
                         throw e
+                    }
+                    if (removeSources) sources.forEach { source ->
+                        meter.show(source)
+                        if (!deleteRecursively(source) { deleted -> meter.itemDone(deleted) }) {
+                            throw IOException("Arquivo criado, mas não foi possível eliminar " + source.name)
+                        }
                     }
                     selected.clear()
                     if (removeSources) "Arquivo criado; originais eliminados." else "Arquivo criado: " + destination.name
                 }
             }.show()
     }
+
+    private fun compressionName(): String = when
 
     private fun compressionName(): String = when
 
@@ -1291,11 +1298,9 @@ class MainActivity : Activity() {
     }
 
     private fun extractZip(archive: File, destinationDir: File, makeSubfolder: Boolean) {
-        runTrackedTask("A extrair ZIP…", {
-            try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
-        }().bytes, {
-            try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
-        }().entries) { meter ->
+        runTask("A extrair ZIP…", 0L, 1L) { meter ->
+            val totals = try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+            meter.setTotals(totals.bytes, totals.entries)
             val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension)) else destinationDir
             if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
             var count = 0
@@ -1329,8 +1334,9 @@ class MainActivity : Activity() {
     }
 
     private fun extractSevenZip(archive: File, destinationDir: File, makeSubfolder: Boolean) {
-        val totals = try { measureSevenZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
-        runTrackedTask("A extrair 7Z…", totals.bytes, totals.entries) { meter ->
+        runTask("A extrair 7Z…", 0L, 1L) { meter ->
+            val totals = try { measureSevenZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+            meter.setTotals(totals.bytes, totals.entries)
             val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension)) else destinationDir
             if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
             var count = 0
@@ -1377,8 +1383,9 @@ class MainActivity : Activity() {
     }
 
     private fun testZip(archive: File) {
-        val totals = try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
-        runTrackedTask("A testar ZIP…", totals.bytes, totals.entries) { meter ->
+        runTask("A testar ZIP…", 0L, 1L) { meter ->
+            val totals = try { measureZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+            meter.setTotals(totals.bytes, totals.entries)
             var count = 0
             ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
                 val buffer = ByteArray(32 * 1024)
@@ -1401,8 +1408,9 @@ class MainActivity : Activity() {
     }
 
     private fun testSevenZip(archive: File) {
-        val totals = try { measureSevenZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
-        runTrackedTask("A testar 7Z…", totals.bytes, totals.entries) { meter ->
+        runTask("A testar 7Z…", 0L, 1L) { meter ->
+            val totals = try { measureSevenZipArchive(archive) } catch (_: Exception) { TaskTotals(0L, 1L) }
+            meter.setTotals(totals.bytes, totals.entries)
             var count = 0
             SevenZFile(archive).use { seven ->
                 val buffer = ByteArray(32 * 1024)
@@ -1422,6 +1430,8 @@ class MainActivity : Activity() {
             "Teste 7Z concluído: " + count + " entradas."
         }
     }
+
+    private data class ArchiveItem
 
     private data class ArchiveItem
 
@@ -1647,13 +1657,25 @@ class MainActivity : Activity() {
     private data class TaskTotals(val bytes: Long, val entries: Long)
 
     private inner class TaskProgress(
-        private val totalBytes: Long,
-        private val totalEntries: Long,
+        totalBytes: Long,
+        totalEntries: Long,
         private val publish: (Int, String) -> Unit
     ) {
+        private var totalBytes: Long = totalBytes.coerceAtLeast(0L)
+        private var totalEntries: Long = totalEntries.coerceAtLeast(1L)
         private var completedBytes = 0L
         private var completedEntries = 0L
-        private val totalUnits = (totalBytes.coerceAtLeast(0L) + totalEntries.coerceAtLeast(1L)).coerceAtLeast(1L)
+        private var totalUnits = (this.totalBytes + this.totalEntries).coerceAtLeast(1L)
+
+        @Synchronized
+        fun setTotals(bytes: Long, entries: Long) {
+            totalBytes = bytes.coerceAtLeast(0L)
+            totalEntries = entries.coerceAtLeast(1L)
+            completedBytes = 0L
+            completedEntries = 0L
+            totalUnits = (totalBytes + totalEntries).coerceAtLeast(1L)
+            publish(0, "A preparar operação…")
+        }
 
         @Synchronized
         fun show(file: File) = publish(progressPercent(), file.absolutePath)
@@ -1678,7 +1700,7 @@ class MainActivity : Activity() {
         fun finish(detail: String) = publish(100, detail)
     }
 
-    private fun measureFiles(files: List<File>): TaskTotals {
+    private fun measureFiles(files: List<File>, onVisit: ((File) -> Unit)? = null): TaskTotals {
         var bytes = 0L
         var entries = 0L
         val visited = HashSet<String>()
@@ -1686,6 +1708,7 @@ class MainActivity : Activity() {
             if (depth > 80 || entries >= 200000L) return
             val key = pathKey(file)
             if (!visited.add(key)) return
+            onVisit?.invoke(file)
             entries++
             if (file.isFile) {
                 bytes += file.length().coerceAtLeast(0L)
@@ -1697,7 +1720,7 @@ class MainActivity : Activity() {
         return TaskTotals(bytes, entries.coerceAtLeast(1L))
     }
 
-    private fun countFilesForSearch(directory: File): Long = measureFiles(listOf(directory)).entries
+    private fun countFilesForSearch(directory: File, onVisit: ((File) -> Unit)? = null): Long = measureFiles(listOf(directory), onVisit).entries
 
     private fun measureZipArchive(archive: File): TaskTotals {
         var bytes = 0L
