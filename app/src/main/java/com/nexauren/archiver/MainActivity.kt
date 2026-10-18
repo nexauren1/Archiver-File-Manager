@@ -456,14 +456,15 @@ class MainActivity : Activity() {
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
         page.addView(View(this).apply { setBackgroundColor(accentColor()) },
             LinearLayout.LayoutParams(-1, dp(2)))
-        storageView = label("", 12, mutedTextColor(), false).apply {
+        val storageSummary = label("", 12, mutedTextColor(), false).apply {
             setPadding(dp(14), dp(4), dp(14), dp(4))
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setBackgroundColor(panelBackgroundColor())
         }
-        page.addView(storageView, LinearLayout.LayoutParams(-1, dp(30)))
+        storageView = storageSummary
+        page.addView(storageSummary, LinearLayout.LayoutParams(-1, dp(30)))
 
         val breadcrumbScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
