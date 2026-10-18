@@ -1448,6 +1448,7 @@ class MainActivity : Activity() {
         backgroundPlay.setOnClickListener {
             if (!prepared) return@setOnClickListener
             try {
+                val resumePosition = runCatching { player.currentPosition }.getOrDefault(0)
                 runCatching { if (player.isPlaying) player.stop() }
                 runCatching { player.release() }
                 prepared = false
@@ -1455,6 +1456,7 @@ class MainActivity : Activity() {
                 val intent = Intent(this, AudioPlaybackService::class.java)
                     .setAction(AudioPlaybackService.ACTION_PLAY)
                     .putExtra(AudioPlaybackService.EXTRA_PATH, file.absolutePath)
+                    .putExtra(AudioPlaybackService.EXTRA_POSITION, resumePosition)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
                 dialog.dismiss()
                 toast("O áudio continua a tocar em segundo plano. Usa a notificação para parar.")
