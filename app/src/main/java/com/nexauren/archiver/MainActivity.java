@@ -2,6 +2,7 @@ package com.nexauren.archiver;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -57,12 +58,14 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_TREE = 101;
     private static final String PREFS = "archiver_preferences";
     private static final String KEY_TREE = "tree_uri";
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean workActive = new AtomicBoolean(false);
     private final List<DocumentFile> stack = new ArrayList<>();
     private final Set<String> selected = new HashSet<>();
     private final Set<String> favorites = new HashSet<>();
@@ -1601,7 +1604,29 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void runWork(Runnable action) { toast("A processar…"); worker.execute(action); }
+    private void runWork(Runnable action) {
+        if (!workActive.compareAndSet(false, true)) {
+            toast("Já existe uma operação em curso. Aguarde que termine.");
+            return;
+        }
+        ProgressDialog progress = new ProgressDialog(this);
+        progress.setMessage("A processar…");
+        progress.setIndeterminate(true);
+        progress.setCancelable(false);
+        progress.show();
+        worker.execute(() -> {
+            try {
+                action.run();
+            } catch (Exception e) {
+                postResult("Erro inesperado: " + safeMessage(e), false);
+            } finally {
+                workActive.set(false);
+                runOnUiThread(() -> {
+                    if (!isFinishing() && progress.isShowing()) progress.dismiss();
+                });
+            }
+        });
+    }
     private void postResult(String message, boolean success) {
         runOnUiThread(() -> { toast(message); refresh(); });
     }
