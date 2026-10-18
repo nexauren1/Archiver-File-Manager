@@ -714,59 +714,130 @@ public class MainActivity extends Activity {
         List<DocumentFile> sources = new ArrayList<>(clipboard);
         DocumentFile target = current();
         boolean cut = clipboardIsCut;
+        for (DocumentFile src : sources) {
+            DocumentFile parent = src.getParentFile();
+            if (parent != null && parent.getUri().equals(target.getUri())) {
+                toast("O item selecionado já está nesta pasta.");
+                return;
+            }
+            if (src.isDirectory()) {
+                for (DocumentFile ancestor : stack) {
+                    if (ancestor.getUri().equals(src.getUri())) {
+                        toast("Não é possível copiar ou mover uma pasta para dentro de si mesma ou de uma subpasta.");
+                        return;
+                    }
+                }
+            }
+        }
         runWork(() -> {
             int done = 0;
             for (DocumentFile src : sources) {
                 try {
-                    if (!cut) copyRecursively(src, target, src.getName());
-                    else {
-                        if (src.getUri().equals(target.getUri())) continue;
+                    if (!cut) {
+                        copyRecursively(src, target, src.getName() == null ? "item" : src.getName());
+                    } else {
                         if (src.isDirectory()) {
-                            DocumentFile moved = target.createDirectory(src.getName());
-                            if (moved == null) throw new IOException("Já existe uma pasta com esse nome.");
-                            copyFolderChildren(src, moved);
+                            String name = uniqueName(target, src.getName() == null ? "Pasta" : src.getName());
+                            DocumentFile moved = target.createDirectory(name);
+                            if (moved == null) throw new IOException("Não foi possível criar a pasta de destino.");
+                            try {
+                                copyFolderChildren(src, moved);
+                            } catch (IOException e) {
+                                deleteRecursively(moved);
+                                throw e;
+                            }
                             if (!deleteRecursively(src)) throw new IOException("A pasta foi copiada, mas a origem não foi eliminada.");
                         } else {
+                            String name = uniqueName(target, src.getName() == null ? "ficheiro" : src.getName());
                             String mime = getContentResolver().getType(src.getUri());
-                            DocumentFile moved = target.createFile(mime == null ? "application/octet-stream" : mime, src.getName());
-                            copyBytes(src, moved);
+                            DocumentFile moved = target.createFile(mime == null ? "application/octet-stream" : mime, name);
+                            try {
+                                copyBytes(src, moved);
+                            } catch (IOException e) {
+                                if (moved != null) deleteRecursively(moved);
+                                throw e;
+                            }
                             if (!src.delete()) throw new IOException("Ficheiro copiado, mas a origem não foi eliminada.");
                         }
                     }
                     done++;
-                } catch (Exception e) { postResult("Erro ao copiar/mover " + src.getName() + ": " + safeMessage(e), false); return; }
+                } catch (Exception e) {
+                    postResult("Erro ao copiar/mover " + src.getName() + ": " + safeMessage(e), false);
+                    return;
+                }
             }
-            clipboard.clear(); clipboardIsCut = false;
+            clipboard.clear();
+            clipboardIsCut = false;
             postResult((cut ? "Movidos " : "Copiados ") + done + " item(ns).", true);
         });
     }
+
+    private String uniqueName(DocumentFile destination, String originalName) throws IOException {
+        DocumentFile[] children = destination.listFiles();
+        if (children == null) throw new IOException("Não foi possível listar a pasta de destino.");
+        for (DocumentFile child : children) if (originalName.equals(child.getName())) {
+            int dot = originalName.lastIndexOf('.');
+            String stem = dot > 0 ? originalName.substring(0, dot) : originalName;
+            String ext = dot > 0 ? originalName.substring(dot) : "";
+            for (int suffix = 2; suffix < 100000; suffix++) {
+                String candidate = stem + " (" + suffix + ")" + ext;
+                boolean used = false;
+                for (DocumentFile existing : children) {
+                    if (candidate.equals(existing.getName())) { used = true; break; }
+                }
+                if (!used) return candidate;
+            }
+            throw new IOException("Não foi possível gerar um nome único.");
+        }
+        return originalName;
+    }
+
     private void copyRecursively(DocumentFile source, DocumentFile destination, String name) throws IOException {
+        String safeName = uniqueName(destination, name);
         if (source.isDirectory()) {
-            DocumentFile dir = destination.createDirectory(name);
-            if (dir == null) throw new IOException("Já existe uma pasta com o nome " + name);
-            copyFolderChildren(source, dir);
+            DocumentFile dir = destination.createDirectory(safeName);
+            if (dir == null) throw new IOException("Não foi possível criar a pasta " + safeName);
+            try {
+                copyFolderChildren(source, dir);
+            } catch (IOException e) {
+                deleteRecursively(dir);
+                throw e;
+            }
         } else {
             String mime = getContentResolver().getType(source.getUri());
-            DocumentFile out = destination.createFile(mime == null ? "application/octet-stream" : mime, name);
-            if (out == null) throw new IOException("Já existe um item com o nome " + name);
-            copyBytes(source, out);
+            DocumentFile out = destination.createFile(mime == null ? "application/octet-stream" : mime, safeName);
+            if (out == null) throw new IOException("Não foi possível criar o ficheiro " + safeName);
+            try {
+                copyBytes(source, out);
+            } catch (IOException e) {
+                deleteRecursively(out);
+                throw e;
+            }
         }
     }
+
     private void copyFolderChildren(DocumentFile source, DocumentFile out) throws IOException {
         DocumentFile[] children = source.listFiles();
         if (children != null) for (DocumentFile child : children)
             copyRecursively(child, out, child.getName() == null ? "item" : child.getName());
     }
+
     private void copyBytes(DocumentFile source, DocumentFile target) throws IOException {
         if (target == null) throw new IOException("Não foi possível criar o destino.");
         InputStream raw = getContentResolver().openInputStream(source.getUri());
+        if (raw == null) throw new IOException("Não foi possível ler o ficheiro de origem.");
         OutputStream outRaw = getContentResolver().openOutputStream(target.getUri());
-        if (raw == null || outRaw == null) throw new IOException("Não foi possível abrir o ficheiro.");
+        if (outRaw == null) {
+            raw.close();
+            throw new IOException("Não foi possível abrir o ficheiro de destino.");
+        }
         try (InputStream in = new BufferedInputStream(raw); OutputStream out = new BufferedOutputStream(outRaw)) {
-            byte[] buffer = new byte[32768]; int n;
+            byte[] buffer = new byte[32768];
+            int n;
             while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
         }
     }
+
     private void runWork(Runnable action) { toast("A processar…"); worker.execute(action); }
     private void postResult(String message, boolean success) {
         runOnUiThread(() -> { toast(message); refresh(); });
