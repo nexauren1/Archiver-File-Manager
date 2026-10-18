@@ -9,6 +9,19 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.ImageView;
+import android.widget.GridLayout;
+import android.util.LruCache;
+import android.os.ParcelFileDescriptor;
+import android.os.Build;
+import android.media.MediaMetadataRetriever;
+import android.graphics.drawable.Drawable;
+import android.graphics.pdf.PdfRenderer;
+import android.graphics.Canvas;
+import android.graphics.BitmapFactory;
+import android.graphics.Bitmap;
+import android.content.pm.PackageInfo;
+import android.content.pm.ApplicationInfo;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -22,6 +35,7 @@ import java.io.BufferedOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.IOException;
+import java.io.File;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,12 +60,20 @@ public class MainActivity extends Activity {
     private final Set<String> selected = new HashSet<>();
     private final List<DocumentFile> clipboard = new ArrayList<>();
     private boolean clipboardIsCut = false;
-    private boolean showHidden = false, showSize = true, showDate = true, descending = false;
-    private String sortBy = "Nome";
+    private boolean showHidden = false, showSize = true, showDate = true, showTime = false, descending = false;
+    private boolean showThumbnails = true, showPdfThumbnails = false, showVideoThumbnails = false;
+    private boolean showAlbumCovers = true, showApkIcons = true, squareThumbnails = false;
+    private String sortBy = "Nome", viewMode = "Detalhado";
     private int compressionLevel = 2;
     private LinearLayout page, rows;
+    private GridLayout gridRows;
     private TextView pathView, selectionView;
     private SharedPreferences prefs;
+    private final LruCache<String, Bitmap> thumbnailCache = new LruCache<String, Bitmap>(1024) {
+        @Override protected int sizeOf(String key, Bitmap value) {
+            return Math.max(1, value.getByteCount() / 1024);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -59,6 +81,14 @@ public class MainActivity extends Activity {
         showHidden = prefs.getBoolean("hidden", false);
         showSize = prefs.getBoolean("size", true);
         showDate = prefs.getBoolean("date", true);
+        showTime = prefs.getBoolean("time", false);
+        showThumbnails = prefs.getBoolean("thumbnails", true);
+        showPdfThumbnails = prefs.getBoolean("thumbnails_pdf", false);
+        showVideoThumbnails = prefs.getBoolean("thumbnails_video", false);
+        showAlbumCovers = prefs.getBoolean("album_covers", true);
+        showApkIcons = prefs.getBoolean("apk_icons", true);
+        squareThumbnails = prefs.getBoolean("square_thumbnails", false);
+        viewMode = prefs.getString("view_mode", "Detalhado");
         sortBy = prefs.getString("sort", "Nome");
         descending = prefs.getBoolean("descending", false);
         compressionLevel = prefs.getInt("compression", 2);
@@ -155,6 +185,12 @@ public class MainActivity extends Activity {
             return;
         }
         pathView.setText(dir.getName() == null ? "Ficheiros" : dir.getName());
+        gridRows = null;
+        if ("Grelha".equals(viewMode)) {
+            gridRows = new GridLayout(this);
+            gridRows.setColumnCount(3);
+            rows.addView(gridRows, new LinearLayout.LayoutParams(-1, -2));
+        }
         List<DocumentFile> files = new ArrayList<>();
         DocumentFile[] children = dir.listFiles();
         if (children != null) for (DocumentFile f : children) {
@@ -178,36 +214,248 @@ public class MainActivity extends Activity {
 
     private void addRow(DocumentFile file) {
         String name = file.getName() == null ? "(sem nome)" : file.getName();
-        TextView row = new TextView(this);
-        StringBuilder label = new StringBuilder(file.isDirectory() ? "📁  " : iconFor(name) + "  ").append(name);
-        if (showSize) label.append("\n").append(file.isDirectory() ? "Pasta" : formatSize(file.length()));
-        if (showDate && file.lastModified() > 0)
-            label.append(showSize ? "   •   " : "\n").append(DateFormat.getDateInstance(DateFormat.SHORT).format(new Date(file.lastModified())));
-        boolean isSelected = selected.contains(file.getUri().toString());
+        String uriKey = file.getUri().toString();
+        boolean isSelected = selected.contains(uriKey);
+        boolean grid = gridRows != null;
+        LinearLayout item = new LinearLayout(this);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setOrientation(grid ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        item.setPadding(dp(grid ? 6 : 8), dp(grid ? 8 : ("Compacto".equals(viewMode) ? 5 : 10)),
+                dp(grid ? 6 : 8), dp(grid ? 8 : ("Compacto".equals(viewMode) ? 5 : 10)));
+        if (isSelected) item.setBackgroundColor(0xFF323044);
+
+        if (grid) {
+            ImageView icon = new ImageView(this);
+            icon.setImageResource(file.isDirectory() ? android.R.drawable.ic_menu_agenda : android.R.drawable.ic_menu_report_image);
+            icon.setScaleType(squareThumbnails ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
+            int imageSize = dp(72);
+            item.addView(icon, new LinearLayout.LayoutParams(imageSize, imageSize));
+            if (shouldLoadThumbnail(file)) loadThumbnailAsync(file, icon);
+        } else if (shouldLoadThumbnail(file)) {
+            ImageView icon = new ImageView(this);
+            icon.setImageResource(android.R.drawable.ic_menu_report_image);
+            icon.setScaleType(squareThumbnails ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
+            LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+            imageParams.rightMargin = dp(10);
+            item.addView(icon, imageParams);
+            loadThumbnailAsync(file, icon);
+        }
+
+        StringBuilder label = new StringBuilder(grid ? name : (file.isDirectory() ? "📁  " : iconFor(name) + "  ") + name);
+        if (!grid && "Detalhado".equals(viewMode) && showSize)
+            label.append("\n").append(file.isDirectory() ? "Pasta" : formatSize(file.length()));
+        else if ("Compacto".equals(viewMode) && showSize && !file.isDirectory())
+            label.append("  •  ").append(formatSize(file.length()));
+        if (!grid && showDate && file.lastModified() > 0 && "Detalhado".equals(viewMode)) {
+            Date modified = new Date(file.lastModified());
+            label.append(showSize ? "   •   " : "\n");
+            label.append(DateFormat.getDateInstance(DateFormat.SHORT).format(modified));
+            if (showTime) label.append(" ").append(DateFormat.getTimeInstance(DateFormat.SHORT).format(modified));
+        }
         if (isSelected) label.insert(0, "✓  ");
-        row.setText(label.toString());
-        row.setTextSize(16);
-        row.setTextColor(isSelected ? 0xFFBDB8FF : 0xFFF2F2F2);
-        row.setPadding(dp(8), dp(12), dp(8), dp(12));
-        row.setMinHeight(dp(58));
-        row.setOnClickListener(v -> {
-            String id = file.getUri().toString();
+        TextView text = new TextView(this);
+        text.setText(label.toString());
+        text.setTextSize(grid ? 13 : ("Compacto".equals(viewMode) ? 14 : 16));
+        text.setTextColor(isSelected ? 0xFFBDB8FF : 0xFFF2F2F2);
+        text.setGravity(grid ? Gravity.CENTER : Gravity.CENTER_VERTICAL);
+        text.setMaxLines(grid ? 2 : ("Detalhado".equals(viewMode) ? 3 : 1));
+        if (grid) {
+            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(-1, -2);
+            textParams.topMargin = dp(5);
+            item.addView(text, textParams);
+        } else {
+            item.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        View.OnClickListener click = v -> {
             if (!selected.isEmpty()) {
-                if (!selected.add(id)) selected.remove(id);
+                if (!selected.add(uriKey)) selected.remove(uriKey);
                 refresh();
-            } else if (file.isDirectory()) { stack.add(file); refresh(); }
-            else showFileActions(file);
-        });
-        row.setOnLongClickListener(v -> {
-            selected.add(file.getUri().toString());
+            } else if (file.isDirectory()) {
+                stack.add(file);
+                refresh();
+            } else showFileActions(file);
+        };
+        item.setOnClickListener(click);
+        item.setOnLongClickListener(v -> {
+            selected.add(uriKey);
             refresh();
             showFileActions(file);
             return true;
         });
-        rows.addView(row);
-        View divider = new View(this);
-        divider.setBackgroundColor(0xFF333333);
-        rows.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
+        if (grid) {
+            GridLayout.LayoutParams params = new GridLayout.LayoutParams(
+                    GridLayout.spec(GridLayout.UNDEFINED, 1f),
+                    GridLayout.spec(GridLayout.UNDEFINED, 1f));
+            params.width = 0;
+            params.height = -2;
+            params.setMargins(dp(3), dp(3), dp(3), dp(3));
+            gridRows.addView(item, params);
+        } else {
+            rows.addView(item, new LinearLayout.LayoutParams(-1, -2));
+            if (!"Compacto".equals(viewMode)) {
+                View divider = new View(this);
+                divider.setBackgroundColor(0xFF333333);
+                rows.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
+            }
+        }
+    }
+
+    private boolean shouldLoadThumbnail(DocumentFile file) {
+        if (!showThumbnails || file.isDirectory()) return false;
+        String ext = extension(file.getName());
+        String mime = getContentResolver().getType(file.getUri());
+        if (isImageExtension(ext)) return true;
+        if ("pdf".equals(ext)) return showPdfThumbnails;
+        if (isVideoExtension(ext) || (mime != null && mime.startsWith("video/"))) return showVideoThumbnails;
+        if (isAudioExtension(ext) || (mime != null && mime.startsWith("audio/"))) return showAlbumCovers;
+        if ("apk".equals(ext)) return showApkIcons;
+        return false;
+    }
+
+    private boolean isImageExtension(String ext) {
+        return "jpg".equals(ext) || "jpeg".equals(ext) || "png".equals(ext) ||
+                "webp".equals(ext) || "gif".equals(ext) || "bmp".equals(ext) || "heic".equals(ext);
+    }
+    private boolean isVideoExtension(String ext) {
+        return "mp4".equals(ext) || "mkv".equals(ext) || "webm".equals(ext) ||
+                "3gp".equals(ext) || "avi".equals(ext) || "mov".equals(ext) || "m4v".equals(ext);
+    }
+    private boolean isAudioExtension(String ext) {
+        return "mp3".equals(ext) || "wav".equals(ext) || "ogg".equals(ext) ||
+                "m4a".equals(ext) || "flac".equals(ext) || "aac".equals(ext) || "opus".equals(ext);
+    }
+
+    private String thumbnailKey(DocumentFile file) {
+        return file.getUri().toString() + ":" + file.lastModified() + ":" + file.length();
+    }
+
+    private void loadThumbnailAsync(DocumentFile file, ImageView view) {
+        String key = thumbnailKey(file);
+        view.setTag(key);
+        Bitmap cached = thumbnailCache.get(key);
+        if (cached != null) { view.setImageBitmap(cached); return; }
+        worker.execute(() -> {
+            Bitmap bitmap = loadThumbnail(file);
+            if (bitmap != null) thumbnailCache.put(key, bitmap);
+            runOnUiThread(() -> {
+                if (!isFinishing() && key.equals(view.getTag()) && bitmap != null) view.setImageBitmap(bitmap);
+            });
+        });
+    }
+
+    private Bitmap loadThumbnail(DocumentFile file) {
+        String ext = extension(file.getName());
+        try {
+            if (isImageExtension(ext)) return decodeScaledImage(file);
+            if ("pdf".equals(ext) && showPdfThumbnails) return pdfThumbnail(file);
+            if ((isVideoExtension(ext) || isMime(file, "video/")) && showVideoThumbnails) return videoThumbnail(file);
+            if ((isAudioExtension(ext) || isMime(file, "audio/")) && showAlbumCovers) return albumThumbnail(file);
+            if ("apk".equals(ext) && showApkIcons) return apkThumbnail(file);
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    private boolean isMime(DocumentFile file, String prefix) {
+        String mime = getContentResolver().getType(file.getUri());
+        return mime != null && mime.startsWith(prefix);
+    }
+
+    private Bitmap decodeScaledImage(DocumentFile file) throws IOException {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        InputStream first = getContentResolver().openInputStream(file.getUri());
+        if (first == null) return null;
+        try { BitmapFactory.decodeStream(first, null, bounds); } finally { first.close(); }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inSampleSize = 1;
+        while (bounds.outWidth / opts.inSampleSize > 256 || bounds.outHeight / opts.inSampleSize > 256)
+            opts.inSampleSize *= 2;
+        InputStream second = getContentResolver().openInputStream(file.getUri());
+        if (second == null) return null;
+        Bitmap decoded;
+        try { decoded = BitmapFactory.decodeStream(second, null, opts); } finally { second.close(); }
+        return scaleThumbnail(decoded);
+    }
+
+    private Bitmap scaleThumbnail(Bitmap source) {
+        if (source == null) return null;
+        int max = dp(96);
+        float ratio = Math.min(1f, Math.min(max / (float) source.getWidth(), max / (float) source.getHeight()));
+        if (ratio >= 1f) return source;
+        int w = Math.max(1, Math.round(source.getWidth() * ratio));
+        int h = Math.max(1, Math.round(source.getHeight() * ratio));
+        Bitmap scaled = Bitmap.createScaledBitmap(source, w, h, true);
+        if (scaled != source) source.recycle();
+        return scaled;
+    }
+
+    private Bitmap videoThumbnail(DocumentFile file) throws Exception {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(this, file.getUri());
+            if (Build.VERSION.SDK_INT >= 27)
+                return scaleThumbnail(retriever.getScaledFrameAtTime(-1, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 128, 128));
+            return scaleThumbnail(retriever.getFrameAtTime(-1));
+        } finally { retriever.release(); }
+    }
+
+    private Bitmap albumThumbnail(DocumentFile file) throws Exception {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(this, file.getUri());
+            byte[] bytes = retriever.getEmbeddedPicture();
+            if (bytes == null || bytes.length == 0) return null;
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = 1;
+            while (bounds.outWidth / opts.inSampleSize > 256 || bounds.outHeight / opts.inSampleSize > 256)
+                opts.inSampleSize *= 2;
+            return scaleThumbnail(BitmapFactory.decodeByteArray(bytes, 0, bytes.length, opts));
+        } finally { retriever.release(); }
+    }
+
+    private Bitmap pdfThumbnail(DocumentFile file) throws Exception {
+        ParcelFileDescriptor descriptor = getContentResolver().openFileDescriptor(file.getUri(), "r");
+        if (descriptor == null) return null;
+        try (ParcelFileDescriptor pfd = descriptor; PdfRenderer renderer = new PdfRenderer(pfd)) {
+            if (renderer.getPageCount() < 1) return null;
+            try (PdfRenderer.Page page = renderer.openPage(0)) {
+                float ratio = Math.min(1f, 128f / Math.max(page.getWidth(), page.getHeight()));
+                int width = Math.max(1, (int)(page.getWidth() * ratio));
+                int height = Math.max(1, (int)(page.getHeight() * ratio));
+                Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                return bitmap;
+            }
+        }
+    }
+
+    private Bitmap apkThumbnail(DocumentFile file) throws Exception {
+        File temporary = File.createTempFile("archiver-app-icon-", ".apk", getCacheDir());
+        try {
+            InputStream raw = getContentResolver().openInputStream(file.getUri());
+            if (raw == null) return null;
+            try (InputStream in = new BufferedInputStream(raw);
+                 OutputStream out = new BufferedOutputStream(new java.io.FileOutputStream(temporary))) {
+                byte[] buffer = new byte[32768];
+                int n;
+                while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+            }
+            PackageInfo info = getPackageManager().getPackageArchiveInfo(temporary.getAbsolutePath(), 0);
+            if (info == null || info.applicationInfo == null) return null;
+            ApplicationInfo appInfo = info.applicationInfo;
+            appInfo.sourceDir = temporary.getAbsolutePath();
+            appInfo.publicSourceDir = temporary.getAbsolutePath();
+            Drawable icon = getPackageManager().getApplicationIcon(appInfo);
+            Bitmap bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            icon.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+            icon.draw(canvas);
+            return bitmap;
+        } finally { temporary.delete(); }
     }
 
     private String iconFor(String name) {
@@ -250,7 +498,7 @@ public class MainActivity extends Activity {
     }
 
     private void showMainMenu() {
-        String[] options = {"Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Excluir seleção", "Ordenar", "Mostrar/ocultar ficheiros ocultos", "Mostrar/ocultar tamanho", "Mostrar/ocultar data", "Compressão ZIP", "Atualizar", "Pesquisar em subpastas"};
+        String[] options = {"Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Excluir seleção", "Ordenar", "Mostrar/ocultar ficheiros ocultos", "Mostrar/ocultar tamanho", "Mostrar/ocultar data", "Compressão ZIP", "Atualizar", "Pesquisar em subpastas", "Definições do explorador"};
         new AlertDialog.Builder(this).setTitle("Opções").setItems(options, (d, which) -> {
             switch (which) {
                 case 0:
@@ -268,6 +516,7 @@ public class MainActivity extends Activity {
                 case 9: showCompressionMenu(); break;
                 case 10: refresh(); break;
                 case 11: promptSearch(); break;
+                case 12: showExplorerSettings(); break;
             }
         }).show();
     }
@@ -385,6 +634,52 @@ public class MainActivity extends Activity {
         }
         regex.append("$");
         return Pattern.matches(regex.toString(), name);
+    }
+
+    private void showExplorerSettings() {
+        String[] options = {
+            "Modo de exibição: " + viewMode,
+            "Miniaturas: " + onOff(showThumbnails),
+            "Miniaturas de PDF: " + onOff(showPdfThumbnails),
+            "Miniaturas de vídeo: " + onOff(showVideoThumbnails),
+            "Capa do álbum: " + onOff(showAlbumCovers),
+            "Ícones do APK: " + onOff(showApkIcons),
+            "Miniaturas quadradas: " + onOff(squareThumbnails),
+            "Mostrar hora: " + onOff(showTime) + (showDate ? "" : " (ative Mostrar data primeiro)")
+        };
+        new AlertDialog.Builder(this).setTitle("Definições do explorador")
+            .setItems(options, (dialog, which) -> {
+                switch (which) {
+                    case 0: showViewModeMenu(); return;
+                    case 1: showThumbnails = !showThumbnails; prefs.edit().putBoolean("thumbnails", showThumbnails).apply(); break;
+                    case 2: showPdfThumbnails = !showPdfThumbnails; prefs.edit().putBoolean("thumbnails_pdf", showPdfThumbnails).apply(); break;
+                    case 3: showVideoThumbnails = !showVideoThumbnails; prefs.edit().putBoolean("thumbnails_video", showVideoThumbnails).apply(); break;
+                    case 4: showAlbumCovers = !showAlbumCovers; prefs.edit().putBoolean("album_covers", showAlbumCovers).apply(); break;
+                    case 5: showApkIcons = !showApkIcons; prefs.edit().putBoolean("apk_icons", showApkIcons).apply(); break;
+                    case 6: squareThumbnails = !squareThumbnails; prefs.edit().putBoolean("square_thumbnails", squareThumbnails).apply(); break;
+                    case 7:
+                        if (!showDate) { toast("Ative primeiro a opção Mostrar data no menu principal."); return; }
+                        showTime = !showTime; prefs.edit().putBoolean("time", showTime).apply(); break;
+                }
+                refresh();
+                showExplorerSettings();
+            }).setNegativeButton("Fechar", null).show();
+    }
+
+    private String onOff(boolean value) { return value ? "Ligado" : "Desligado"; }
+
+    private void showViewModeMenu() {
+        String[] modes = {"Detalhado", "Compacto", "Grelha"};
+        int checked = 0;
+        for (int i = 0; i < modes.length; i++) if (modes[i].equals(viewMode)) checked = i;
+        new AlertDialog.Builder(this).setTitle("Modo de exibição")
+            .setSingleChoiceItems(modes, checked, (dialog, which) -> {
+                viewMode = modes[which];
+                prefs.edit().putString("view_mode", viewMode).apply();
+                dialog.dismiss();
+                refresh();
+                showExplorerSettings();
+            }).setNegativeButton("Cancelar", null).show();
     }
 
     private void showSortMenu() {
