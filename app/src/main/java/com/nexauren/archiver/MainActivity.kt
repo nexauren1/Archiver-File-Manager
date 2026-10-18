@@ -132,6 +132,7 @@ class MainActivity : Activity() {
         override fun sizeOf(key: String, value: Bitmap): Int = maxOf(1, value.byteCount / 1024)
     }
 
+    private var showAnimations = true
     private var showHidden = false
     private var showSize = true
     private var showDate = true
@@ -172,6 +173,7 @@ class MainActivity : Activity() {
     }
 
     private fun loadPreferences() {
+        showAnimations = prefs.getBoolean("animations", true)
         showHidden = prefs.getBoolean("hidden", false)
         showSize = prefs.getBoolean("size", true)
         showDate = prefs.getBoolean("date", true)
@@ -202,6 +204,7 @@ class MainActivity : Activity() {
 
     private fun savePreferences() {
         prefs.edit()
+            .putBoolean("animations", showAnimations)
             .putBoolean("hidden", showHidden)
             .putBoolean("size", showSize)
             .putBoolean("date", showDate)
@@ -557,7 +560,7 @@ class MainActivity : Activity() {
             gravity = if (inGrid) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
             setPadding(dp(if (inGrid) 8 else 4), dp(if (inGrid) 12 else 6),
                 dp(if (inGrid) 8 else 6), dp(if (inGrid) 12 else 6))
-            background = roundedBackground(
+            background = interactiveBackground(
                 if (isSelected) selectedRowColor() else if (inGrid) rowSurfaceColor() else pageBackgroundColor(),
                 if (inGrid) 10 else 4
             )
@@ -636,6 +639,7 @@ class MainActivity : Activity() {
             rows.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(2) })
             if (viewMode != "Compacto") addDivider()
         }
+        animateRowEntrance(item)
         item.setOnClickListener {
             if (selected.isNotEmpty()) toggleSelection(file)
             else if (file.isDirectory) {
@@ -702,7 +706,7 @@ class MainActivity : Activity() {
     private fun toggleSelection(file: File) {
         val key = pathKey(file)
         if (!selected.add(key)) selected.remove(key)
-        rowViews[key]?.background = roundedBackground(
+        rowViews[key]?.background = interactiveBackground(
             if (selected.contains(key)) selectedRowColor() else if (gridRows != null) rowSurfaceColor() else pageBackgroundColor(),
             if (gridRows != null) 10 else 4
         )
@@ -884,6 +888,7 @@ class MainActivity : Activity() {
             "Interface" -> {
                 addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escolhe entre escuro, preto OLED e claro") { showThemeMenu() }
                 addSettingChoice(content, "Cor de destaque", tr(accentName), "Cor dos botões, seleção e indicadores") { showAccentMenu() }
+                addSettingSwitch(content, "Animações suaves", "Efeitos leves ao apresentar ficheiros", showAnimations) { showAnimations = it }
                 addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor no menu de cada pasta") {
                     toast("Abre o menu de uma pasta e escolhe Cor da pasta.")
                 }
@@ -3451,6 +3456,25 @@ class MainActivity : Activity() {
             cornerRadius = dp(radiusDp).toFloat()
         }
 
+    private fun interactiveBackground(color: Int, radiusDp: Int): Drawable =
+        android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf((accentColor() and 0x00FFFFFF) or 0x33000000),
+            roundedBackground(color, radiusDp),
+            null
+        )
+
+    private fun animateRowEntrance(view: View) {
+        // Avoid per-row animation on very large lists so the feature remains light on older phones.
+        if (!showAnimations || visibleFileCount > 60) return
+        view.alpha = 0f
+        view.translationY = dp(4).toFloat()
+        view.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(130L)
+            .start()
+    }
+
     private fun label(text: String, size: Int, color: Int, bold: Boolean): TextView = TextView(this).apply {
         this.text = tr(text)
         textSize = size.toFloat()
@@ -3603,6 +3627,8 @@ class MainActivity : Activity() {
             "Tamanho total" to "Total size",
             "Leitor de PDF" to "PDF reader",
             "Leitor de áudio" to "Audio player",
+            "Animações suaves" to "Smooth animations",
+            "Efeitos leves ao apresentar ficheiros" to "Lightweight file-entry effects",
             "A abrir PDF…" to "Opening PDF…",
             "A carregar imagem…" to "Loading image…",
             "Pré-visualização da imagem" to "Image preview",
@@ -4246,16 +4272,16 @@ class MainActivity : Activity() {
             else -> emptyMap()
         }
         val readerTranslations = when (appLanguage) {
-            "es" -> mapOf("Leitor de PDF" to "Lector de PDF", "Leitor de áudio" to "Reproductor de audio", "A abrir PDF…" to "Abriendo PDF…", "A carregar imagem…" to "Cargando imagen…", "Pré-visualização da imagem" to "Vista previa de imagen", "Não foi possível abrir PDF." to "No se pudo abrir el PDF.", "Não foi possível abrir a imagem." to "No se pudo abrir la imagen.", "Ficheiro de imagem inválido." to "Archivo de imagen no válido.", "A preparar áudio…" to "Preparando audio…", "Não foi possível reproduzir o áudio." to "No se pudo reproducir el audio.", "Reprodução concluída." to "Reproducción finalizada.", "Reproduzir" to "Reproducir", "Pausar" to "Pausar", "Parar" to "Detener", "Pronto" to "Listo", "Anterior" to "Anterior", "Seguinte" to "Siguiente", "Extrair pasta atual" to "Extraer carpeta actual", "Extrair item" to "Extraer elemento", "para a pasta atual" to "a la carpeta actual", "Extrair" to "Extraer")
-            "fr" -> mapOf("Leitor de PDF" to "Lecteur PDF", "Leitor de áudio" to "Lecteur audio", "A abrir PDF…" to "Ouverture du PDF…", "A carregar imagem…" to "Chargement de l’image…", "Pré-visualização da imagem" to "Aperçu de l’image", "Não foi possível abrir PDF." to "Impossible d’ouvrir le PDF.", "Não foi possível abrir a imagem." to "Impossible d’ouvrir l’image.", "Ficheiro de imagem inválido." to "Fichier image invalide.", "A preparar áudio…" to "Préparation de l’audio…", "Não foi possível reproduzir o áudio." to "Impossible de lire l’audio.", "Reprodução concluída." to "Lecture terminée.", "Reproduzir" to "Lire", "Pausar" to "Pause", "Parar" to "Arrêter", "Pronto" to "Prêt", "Anterior" to "Précédent", "Seguinte" to "Suivant", "Extrair pasta atual" to "Extraire le dossier actuel", "Extrair item" to "Extraire l’élément", "para a pasta atual" to "dans le dossier actuel", "Extrair" to "Extraire")
-            "de" -> mapOf("Leitor de PDF" to "PDF-Reader", "Leitor de áudio" to "Audioplayer", "A abrir PDF…" to "PDF wird geöffnet…", "A carregar imagem…" to "Bild wird geladen…", "Pré-visualização da imagem" to "Bildvorschau", "Não foi possível abrir PDF." to "PDF konnte nicht geöffnet werden.", "Não foi possível abrir a imagem." to "Bild konnte nicht geöffnet werden.", "Ficheiro de imagem inválido." to "Ungültige Bilddatei.", "A preparar áudio…" to "Audio wird vorbereitet…", "Não foi possível reproduzir o áudio." to "Audio kann nicht abgespielt werden.", "Reprodução concluída." to "Wiedergabe abgeschlossen.", "Reproduzir" to "Wiedergabe", "Pausar" to "Pause", "Parar" to "Stopp", "Pronto" to "Bereit", "Anterior" to "Zurück", "Seguinte" to "Weiter", "Extrair pasta atual" to "Aktuellen Ordner entpacken", "Extrair item" to "Element entpacken", "para a pasta atual" to "in den aktuellen Ordner", "Extrair" to "Entpacken")
-            "zh" -> mapOf("Leitor de PDF" to "PDF 阅读器", "Leitor de áudio" to "音频播放器", "A abrir PDF…" to "正在打开 PDF…", "A carregar imagem…" to "正在加载图片…", "Pré-visualização da imagem" to "图片预览", "Não foi possível abrir PDF." to "无法打开 PDF。", "Não foi possível abrir a imagem." to "无法打开图片。", "Ficheiro de imagem inválido." to "无效的图片文件。", "A preparar áudio…" to "正在准备音频…", "Não foi possível reproduzir o áudio." to "无法播放音频。", "Reprodução concluída." to "播放完毕。", "Reproduzir" to "播放", "Pausar" to "暂停", "Parar" to "停止", "Pronto" to "就绪", "Anterior" to "上一页", "Seguinte" to "下一页", "Extrair pasta atual" to "解压当前文件夹", "Extrair item" to "解压项目", "para a pasta atual" to "到当前文件夹", "Extrair" to "解压")
-            "hi" -> mapOf("Leitor de PDF" to "PDF रीडर", "Leitor de áudio" to "ऑडियो प्लेयर", "A abrir PDF…" to "PDF खोला जा रहा है…", "A carregar imagem…" to "चित्र लोड हो रहा है…", "Pré-visualização da imagem" to "चित्र पूर्वावलोकन", "Não foi possível abrir PDF." to "PDF नहीं खुल सका।", "Não foi possível abrir a imagem." to "चित्र नहीं खुल सका।", "Ficheiro de imagem inválido." to "अमान्य चित्र फ़ाइल।", "A preparar áudio…" to "ऑडियो तैयार हो रहा है…", "Não foi possível reproduzir o áudio." to "ऑडियो नहीं चल सका।", "Reprodução concluída." to "प्लेबैक पूरा हुआ।", "Reproduzir" to "चलाएँ", "Pausar" to "रोकें", "Parar" to "बंद करें", "Pronto" to "तैयार", "Anterior" to "पिछला", "Seguinte" to "अगला", "Extrair pasta atual" to "वर्तमान फ़ोल्डर निकालें", "Extrair item" to "आइटम निकालें", "para a pasta atual" to "वर्तमान फ़ोल्डर में", "Extrair" to "निकालें")
-            "ar" -> mapOf("Leitor de PDF" to "قارئ PDF", "Leitor de áudio" to "مشغل الصوت", "A abrir PDF…" to "جارٍ فتح PDF…", "A carregar imagem…" to "جارٍ تحميل الصورة…", "Pré-visualização da imagem" to "معاينة الصورة", "Não foi possível abrir PDF." to "تعذّر فتح PDF.", "Não foi possível abrir a imagem." to "تعذّر فتح الصورة.", "Ficheiro de imagem inválido." to "ملف صورة غير صالح.", "A preparar áudio…" to "جارٍ تجهيز الصوت…", "Não foi possível reproduzir o áudio." to "تعذّر تشغيل الصوت.", "Reprodução concluída." to "اكتمل التشغيل.", "Reproduzir" to "تشغيل", "Pausar" to "إيقاف مؤقت", "Parar" to "إيقاف", "Pronto" to "جاهز", "Anterior" to "السابق", "Seguinte" to "التالي", "Extrair pasta atual" to "استخراج المجلد الحالي", "Extrair item" to "استخراج العنصر", "para a pasta atual" to "إلى المجلد الحالي", "Extrair" to "استخراج")
-            "ja" -> mapOf("Leitor de PDF" to "PDF リーダー", "Leitor de áudio" to "音声プレーヤー", "A abrir PDF…" to "PDF を開いています…", "A carregar imagem…" to "画像を読み込み中…", "Pré-visualização da imagem" to "画像プレビュー", "Não foi possível abrir PDF." to "PDF を開けませんでした。", "Não foi possível abrir a imagem." to "画像を開けませんでした。", "Ficheiro de imagem inválido." to "無効な画像ファイルです。", "A preparar áudio…" to "音声を準備中…", "Não foi possível reproduzir o áudio." to "音声を再生できません。", "Reprodução concluída." to "再生が完了しました。", "Reproduzir" to "再生", "Pausar" to "一時停止", "Parar" to "停止", "Pronto" to "準備完了", "Anterior" to "前へ", "Seguinte" to "次へ", "Extrair pasta atual" to "現在のフォルダーを展開", "Extrair item" to "項目を展開", "para a pasta atual" to "現在のフォルダーへ", "Extrair" to "展開")
-            "ru" -> mapOf("Leitor de PDF" to "Чтение PDF", "Leitor de áudio" to "Аудиоплеер", "A abrir PDF…" to "Открытие PDF…", "A carregar imagem…" to "Загрузка изображения…", "Pré-visualização da imagem" to "Предпросмотр изображения", "Não foi possível abrir PDF." to "Не удалось открыть PDF.", "Não foi possível abrir a imagem." to "Не удалось открыть изображение.", "Ficheiro de imagem inválido." to "Недопустимый файл изображения.", "A preparar áudio…" to "Подготовка аудио…", "Não foi possível reproduzir o áudio." to "Не удалось воспроизвести аудио.", "Reprodução concluída." to "Воспроизведение завершено.", "Reproduzir" to "Воспроизвести", "Pausar" to "Пауза", "Parar" to "Стоп", "Pronto" to "Готово", "Anterior" to "Назад", "Seguinte" to "Далее", "Extrair pasta atual" to "Извлечь текущую папку", "Extrair item" to "Извлечь элемент", "para a pasta atual" to "в текущую папку", "Extrair" to "Извлечь")
-            "bn" -> mapOf("Leitor de PDF" to "PDF রিডার", "Leitor de áudio" to "অডিও প্লেয়ার", "A abrir PDF…" to "PDF খোলা হচ্ছে…", "A carregar imagem…" to "ছবি লোড হচ্ছে…", "Pré-visualização da imagem" to "ছবির পূর্বরূপ", "Não foi possível abrir PDF." to "PDF খোলা যায়নি।", "Não foi possível abrir a imagem." to "ছবি খোলা যায়নি।", "Ficheiro de imagem inválido." to "অবৈধ ছবির ফাইল।", "A preparar áudio…" to "অডিও প্রস্তুত হচ্ছে…", "Não foi possível reproduzir o áudio." to "অডিও চালানো যায়নি।", "Reprodução concluída." to "প্লেব্যাক শেষ।", "Reproduzir" to "চালান", "Pausar" to "বিরতি", "Parar" to "থামান", "Pronto" to "প্রস্তুত", "Anterior" to "আগের", "Seguinte" to "পরের", "Extrair pasta atual" to "বর্তমান ফোল্ডার এক্সট্র্যাক্ট করুন", "Extrair item" to "আইটেম এক্সট্র্যাক্ট করুন", "para a pasta atual" to "বর্তমান ফোল্ডারে", "Extrair" to "এক্সট্র্যাক্ট করুন")
-            "id" -> mapOf("Leitor de PDF" to "Pembaca PDF", "Leitor de áudio" to "Pemutar audio", "A abrir PDF…" to "Membuka PDF…", "A carregar imagem…" to "Memuat gambar…", "Pré-visualização da imagem" to "Pratinjau gambar", "Não foi possível abrir PDF." to "PDF tidak dapat dibuka.", "Não foi possível abrir a imagem." to "Gambar tidak dapat dibuka.", "Ficheiro de imagem inválido." to "Berkas gambar tidak valid.", "A preparar áudio…" to "Menyiapkan audio…", "Não foi possível reproduzir o áudio." to "Audio tidak dapat diputar.", "Reprodução concluída." to "Pemutaran selesai.", "Reproduzir" to "Putar", "Pausar" to "Jeda", "Parar" to "Berhenti", "Pronto" to "Siap", "Anterior" to "Sebelumnya", "Seguinte" to "Berikutnya", "Extrair pasta atual" to "Ekstrak folder saat ini", "Extrair item" to "Ekstrak item", "para a pasta atual" to "ke folder saat ini", "Extrair" to "Ekstrak")
+            "es" -> mapOf("Animações suaves" to "Animaciones suaves", "Efeitos leves ao apresentar ficheiros" to "Efectos ligeros al mostrar archivos", "Leitor de PDF" to "Lector de PDF", "Leitor de áudio" to "Reproductor de audio", "A abrir PDF…" to "Abriendo PDF…", "A carregar imagem…" to "Cargando imagen…", "Pré-visualização da imagem" to "Vista previa de imagen", "Não foi possível abrir PDF." to "No se pudo abrir el PDF.", "Não foi possível abrir a imagem." to "No se pudo abrir la imagen.", "Ficheiro de imagem inválido." to "Archivo de imagen no válido.", "A preparar áudio…" to "Preparando audio…", "Não foi possível reproduzir o áudio." to "No se pudo reproducir el audio.", "Reprodução concluída." to "Reproducción finalizada.", "Reproduzir" to "Reproducir", "Pausar" to "Pausar", "Parar" to "Detener", "Pronto" to "Listo", "Anterior" to "Anterior", "Seguinte" to "Siguiente", "Extrair pasta atual" to "Extraer carpeta actual", "Extrair item" to "Extraer elemento", "para a pasta atual" to "a la carpeta actual", "Extrair" to "Extraer")
+            "fr" -> mapOf("Animações suaves" to "Animations douces", "Efeitos leves ao apresentar ficheiros" to "Effets légers à l’affichage des fichiers", "Leitor de PDF" to "Lecteur PDF", "Leitor de áudio" to "Lecteur audio", "A abrir PDF…" to "Ouverture du PDF…", "A carregar imagem…" to "Chargement de l’image…", "Pré-visualização da imagem" to "Aperçu de l’image", "Não foi possível abrir PDF." to "Impossible d’ouvrir le PDF.", "Não foi possível abrir a imagem." to "Impossible d’ouvrir l’image.", "Ficheiro de imagem inválido." to "Fichier image invalide.", "A preparar áudio…" to "Préparation de l’audio…", "Não foi possível reproduzir o áudio." to "Impossible de lire l’audio.", "Reprodução concluída." to "Lecture terminée.", "Reproduzir" to "Lire", "Pausar" to "Pause", "Parar" to "Arrêter", "Pronto" to "Prêt", "Anterior" to "Précédent", "Seguinte" to "Suivant", "Extrair pasta atual" to "Extraire le dossier actuel", "Extrair item" to "Extraire l’élément", "para a pasta atual" to "dans le dossier actuel", "Extrair" to "Extraire")
+            "de" -> mapOf("Animações suaves" to "Sanfte Animationen", "Efeitos leves ao apresentar ficheiros" to "Leichte Effekte beim Anzeigen von Dateien", "Leitor de PDF" to "PDF-Reader", "Leitor de áudio" to "Audioplayer", "A abrir PDF…" to "PDF wird geöffnet…", "A carregar imagem…" to "Bild wird geladen…", "Pré-visualização da imagem" to "Bildvorschau", "Não foi possível abrir PDF." to "PDF konnte nicht geöffnet werden.", "Não foi possível abrir a imagem." to "Bild konnte nicht geöffnet werden.", "Ficheiro de imagem inválido." to "Ungültige Bilddatei.", "A preparar áudio…" to "Audio wird vorbereitet…", "Não foi possível reproduzir o áudio." to "Audio kann nicht abgespielt werden.", "Reprodução concluída." to "Wiedergabe abgeschlossen.", "Reproduzir" to "Wiedergabe", "Pausar" to "Pause", "Parar" to "Stopp", "Pronto" to "Bereit", "Anterior" to "Zurück", "Seguinte" to "Weiter", "Extrair pasta atual" to "Aktuellen Ordner entpacken", "Extrair item" to "Element entpacken", "para a pasta atual" to "in den aktuellen Ordner", "Extrair" to "Entpacken")
+            "zh" -> mapOf("Animações suaves" to "柔和动画", "Efeitos leves ao apresentar ficheiros" to "文件显示轻量效果", "Leitor de PDF" to "PDF 阅读器", "Leitor de áudio" to "音频播放器", "A abrir PDF…" to "正在打开 PDF…", "A carregar imagem…" to "正在加载图片…", "Pré-visualização da imagem" to "图片预览", "Não foi possível abrir PDF." to "无法打开 PDF。", "Não foi possível abrir a imagem." to "无法打开图片。", "Ficheiro de imagem inválido." to "无效的图片文件。", "A preparar áudio…" to "正在准备音频…", "Não foi possível reproduzir o áudio." to "无法播放音频。", "Reprodução concluída." to "播放完毕。", "Reproduzir" to "播放", "Pausar" to "暂停", "Parar" to "停止", "Pronto" to "就绪", "Anterior" to "上一页", "Seguinte" to "下一页", "Extrair pasta atual" to "解压当前文件夹", "Extrair item" to "解压项目", "para a pasta atual" to "到当前文件夹", "Extrair" to "解压")
+            "hi" -> mapOf("Animações suaves" to "सहज एनिमेशन", "Efeitos leves ao apresentar ficheiros" to "फ़ाइलें दिखाने के हल्के प्रभाव", "Leitor de PDF" to "PDF रीडर", "Leitor de áudio" to "ऑडियो प्लेयर", "A abrir PDF…" to "PDF खोला जा रहा है…", "A carregar imagem…" to "चित्र लोड हो रहा है…", "Pré-visualização da imagem" to "चित्र पूर्वावलोकन", "Não foi possível abrir PDF." to "PDF नहीं खुल सका।", "Não foi possível abrir a imagem." to "चित्र नहीं खुल सका।", "Ficheiro de imagem inválido." to "अमान्य चित्र फ़ाइल।", "A preparar áudio…" to "ऑडियो तैयार हो रहा है…", "Não foi possível reproduzir o áudio." to "ऑडियो नहीं चल सका।", "Reprodução concluída." to "प्लेबैक पूरा हुआ।", "Reproduzir" to "चलाएँ", "Pausar" to "रोकें", "Parar" to "बंद करें", "Pronto" to "तैयार", "Anterior" to "पिछला", "Seguinte" to "अगला", "Extrair pasta atual" to "वर्तमान फ़ोल्डर निकालें", "Extrair item" to "आइटम निकालें", "para a pasta atual" to "वर्तमान फ़ोल्डर में", "Extrair" to "निकालें")
+            "ar" -> mapOf("Animações suaves" to "حركات سلسة", "Efeitos leves ao apresentar ficheiros" to "تأثيرات خفيفة عند عرض الملفات", "Leitor de PDF" to "قارئ PDF", "Leitor de áudio" to "مشغل الصوت", "A abrir PDF…" to "جارٍ فتح PDF…", "A carregar imagem…" to "جارٍ تحميل الصورة…", "Pré-visualização da imagem" to "معاينة الصورة", "Não foi possível abrir PDF." to "تعذّر فتح PDF.", "Não foi possível abrir a imagem." to "تعذّر فتح الصورة.", "Ficheiro de imagem inválido." to "ملف صورة غير صالح.", "A preparar áudio…" to "جارٍ تجهيز الصوت…", "Não foi possível reproduzir o áudio." to "تعذّر تشغيل الصوت.", "Reprodução concluída." to "اكتمل التشغيل.", "Reproduzir" to "تشغيل", "Pausar" to "إيقاف مؤقت", "Parar" to "إيقاف", "Pronto" to "جاهز", "Anterior" to "السابق", "Seguinte" to "التالي", "Extrair pasta atual" to "استخراج المجلد الحالي", "Extrair item" to "استخراج العنصر", "para a pasta atual" to "إلى المجلد الحالي", "Extrair" to "استخراج")
+            "ja" -> mapOf("Animações suaves" to "滑らかなアニメーション", "Efeitos leves ao apresentar ficheiros" to "ファイル表示時の軽いエフェクト", "Leitor de PDF" to "PDF リーダー", "Leitor de áudio" to "音声プレーヤー", "A abrir PDF…" to "PDF を開いています…", "A carregar imagem…" to "画像を読み込み中…", "Pré-visualização da imagem" to "画像プレビュー", "Não foi possível abrir PDF." to "PDF を開けませんでした。", "Não foi possível abrir a imagem." to "画像を開けませんでした。", "Ficheiro de imagem inválido." to "無効な画像ファイルです。", "A preparar áudio…" to "音声を準備中…", "Não foi possível reproduzir o áudio." to "音声を再生できません。", "Reprodução concluída." to "再生が完了しました。", "Reproduzir" to "再生", "Pausar" to "一時停止", "Parar" to "停止", "Pronto" to "準備完了", "Anterior" to "前へ", "Seguinte" to "次へ", "Extrair pasta atual" to "現在のフォルダーを展開", "Extrair item" to "項目を展開", "para a pasta atual" to "現在のフォルダーへ", "Extrair" to "展開")
+            "ru" -> mapOf("Animações suaves" to "Плавная анимация", "Efeitos leves ao apresentar ficheiros" to "Лёгкие эффекты при показе файлов", "Leitor de PDF" to "Чтение PDF", "Leitor de áudio" to "Аудиоплеер", "A abrir PDF…" to "Открытие PDF…", "A carregar imagem…" to "Загрузка изображения…", "Pré-visualização da imagem" to "Предпросмотр изображения", "Não foi possível abrir PDF." to "Не удалось открыть PDF.", "Não foi possível abrir a imagem." to "Не удалось открыть изображение.", "Ficheiro de imagem inválido." to "Недопустимый файл изображения.", "A preparar áudio…" to "Подготовка аудио…", "Não foi possível reproduzir o áudio." to "Не удалось воспроизвести аудио.", "Reprodução concluída." to "Воспроизведение завершено.", "Reproduzir" to "Воспроизвести", "Pausar" to "Пауза", "Parar" to "Стоп", "Pronto" to "Готово", "Anterior" to "Назад", "Seguinte" to "Далее", "Extrair pasta atual" to "Извлечь текущую папку", "Extrair item" to "Извлечь элемент", "para a pasta atual" to "в текущую папку", "Extrair" to "Извлечь")
+            "bn" -> mapOf("Animações suaves" to "মসৃণ অ্যানিমেশন", "Efeitos leves ao apresentar ficheiros" to "ফাইল দেখানোর হালকা প্রভাব", "Leitor de PDF" to "PDF রিডার", "Leitor de áudio" to "অডিও প্লেয়ার", "A abrir PDF…" to "PDF খোলা হচ্ছে…", "A carregar imagem…" to "ছবি লোড হচ্ছে…", "Pré-visualização da imagem" to "ছবির পূর্বরূপ", "Não foi possível abrir PDF." to "PDF খোলা যায়নি।", "Não foi possível abrir a imagem." to "ছবি খোলা যায়নি।", "Ficheiro de imagem inválido." to "অবৈধ ছবির ফাইল।", "A preparar áudio…" to "অডিও প্রস্তুত হচ্ছে…", "Não foi possível reproduzir o áudio." to "অডিও চালানো যায়নি।", "Reprodução concluída." to "প্লেব্যাক শেষ।", "Reproduzir" to "চালান", "Pausar" to "বিরতি", "Parar" to "থামান", "Pronto" to "প্রস্তুত", "Anterior" to "আগের", "Seguinte" to "পরের", "Extrair pasta atual" to "বর্তমান ফোল্ডার এক্সট্র্যাক্ট করুন", "Extrair item" to "আইটেম এক্সট্র্যাক্ট করুন", "para a pasta atual" to "বর্তমান ফোল্ডারে", "Extrair" to "এক্সট্র্যাক্ট করুন")
+            "id" -> mapOf("Animações suaves" to "Animasi halus", "Efeitos leves ao apresentar ficheiros" to "Efek ringan saat menampilkan berkas", "Leitor de PDF" to "Pembaca PDF", "Leitor de áudio" to "Pemutar audio", "A abrir PDF…" to "Membuka PDF…", "A carregar imagem…" to "Memuat gambar…", "Pré-visualização da imagem" to "Pratinjau gambar", "Não foi possível abrir PDF." to "PDF tidak dapat dibuka.", "Não foi possível abrir a imagem." to "Gambar tidak dapat dibuka.", "Ficheiro de imagem inválido." to "Berkas gambar tidak valid.", "A preparar áudio…" to "Menyiapkan audio…", "Não foi possível reproduzir o áudio." to "Audio tidak dapat diputar.", "Reprodução concluída." to "Pemutaran selesai.", "Reproduzir" to "Putar", "Pausar" to "Jeda", "Parar" to "Berhenti", "Pronto" to "Siap", "Anterior" to "Sebelumnya", "Seguinte" to "Berikutnya", "Extrair pasta atual" to "Ekstrak folder saat ini", "Extrair item" to "Ekstrak item", "para a pasta atual" to "ke folder saat ini", "Extrair" to "Ekstrak")
             else -> emptyMap()
         }
         // Long-tail labels use English until their dedicated translation is added.
