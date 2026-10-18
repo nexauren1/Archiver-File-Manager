@@ -30,6 +30,10 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.GridLayout
+import android.widget.Switch
+import android.widget.ImageButton
+import android.widget.FrameLayout
+import android.graphics.drawable.GradientDrawable
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -69,8 +73,10 @@ class MainActivity : Activity() {
     private lateinit var rows: LinearLayout
     private lateinit var pathView: TextView
     private lateinit var selectionView: TextView
+    private lateinit var countView: TextView
     private var gridRows: GridLayout? = null
     private var browserRendered = false
+    private var settingsOpen = false
 
     private val selected = linkedSetOf<String>()
     private val favorites = linkedSetOf<String>()
@@ -230,6 +236,7 @@ class MainActivity : Activity() {
             showPermissionScreen()
             return
         }
+        settingsOpen = false
         browserRendered = true
         if (!::rootDir.isInitialized) rootDir = Environment.getExternalStorageDirectory().canonicalFile
         if (!::currentDir.isInitialized) currentDir = rootDir
@@ -245,56 +252,80 @@ class MainActivity : Activity() {
             setPadding(dp(4), 0, dp(4), 0)
             setBackgroundColor(0xFF292D40.toInt())
         }
-        toolbar.addView(iconButton("‹", "Voltar") { goUp() }, LinearLayout.LayoutParams(dp(48), dp(54)))
+        toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Pasta anterior") { goUp() },
+            LinearLayout.LayoutParams(dp(48), dp(58)))
         val titleColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        pathView = label(displayPath(), 17, 0xFFFFFFFF.toInt(), true)
-        pathView.maxLines = 1
-        pathView.ellipsize = android.text.TextUtils.TruncateAt.START
+        pathView = label(currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno",
+            19, 0xFFFFFFFF.toInt(), true).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.START
+        }
+        selectionView = label(currentDir.absolutePath, 12, 0xFFD0D0DF.toInt(), false).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.START
+        }
         titleColumn.addView(pathView, LinearLayout.LayoutParams(-1, -2))
-        selectionView = label(if (selected.isEmpty()) "Armazenamento interno" else selected.size.toString() + " selecionado(s)", 12, 0xFFD0D0DF.toInt(), false)
         titleColumn.addView(selectionView, LinearLayout.LayoutParams(-1, -2))
-        toolbar.addView(titleColumn, LinearLayout.LayoutParams(0, dp(54), 1f))
-        toolbar.addView(iconButton("⌕", "Pesquisar") { promptSearch() }, LinearLayout.LayoutParams(dp(44), dp(54)))
-        toolbar.addView(iconButton(if (viewMode == "Grelha") "☰" else "▦", "Alterar modo de visualização") { cycleViewMode() },
-            LinearLayout.LayoutParams(dp(44), dp(54)))
-        toolbar.addView(iconButton("⋮", "Mais opções") { showMainMenu() }, LinearLayout.LayoutParams(dp(44), dp(54)))
-        page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(54)))
+        toolbar.addView(titleColumn, LinearLayout.LayoutParams(0, dp(58), 1f))
+        toolbar.addView(toolbarIcon(R.drawable.ic_search, "Pesquisar") { promptSearch() },
+            LinearLayout.LayoutParams(dp(44), dp(58)))
+        toolbar.addView(toolbarIcon(if (viewMode == "Grelha") R.drawable.ic_list else R.drawable.ic_grid,
+            "Alterar modo de visualização") { cycleViewMode() }, LinearLayout.LayoutParams(dp(44), dp(58)))
+        toolbar.addView(toolbarIcon(R.drawable.ic_more_vertical, "Mais opções") { showMainMenu() },
+            LinearLayout.LayoutParams(dp(44), dp(58)))
+        page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
+        page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) },
+            LinearLayout.LayoutParams(-1, dp(2)))
 
-        val strip = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        countView = label("", 13, 0xFFB9B9C3.toInt(), false).apply {
+            setPadding(dp(16), dp(7), dp(16), dp(7))
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(4), dp(8), dp(4))
             setBackgroundColor(0xFF202025.toInt())
         }
-        strip.addView(actionButton("+ Criar") { showCreateMenu() }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        strip.addView(actionButton("Colar") { paste() }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        strip.addView(actionButton("Compactar") { promptArchive(chosen(), "zip") }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        page.addView(strip, LinearLayout.LayoutParams(-1, dp(50)))
+        page.addView(countView, LinearLayout.LayoutParams(-1, dp(34)))
 
-        val scroll = ScrollView(this)
-        rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(rows)
-        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val body = FrameLayout(this)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+        }
+        rows = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(4), dp(8), dp(88))
+        }
+        scroll.addView(rows, ScrollView.LayoutParams(-1, -2))
+        body.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+
+        val fab = ImageButton(this).apply {
+            setImageResource(R.drawable.ic_add)
+            contentDescription = "Criar ficheiro ou arquivo"
+            background = roundedBackground(0xFFB8B5FF.toInt(), 28)
+            scaleType = ImageView.ScaleType.CENTER
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            elevation = dp(8).toFloat()
+            setOnClickListener { showCreateMenu() }
+        }
+        val fabParams = FrameLayout.LayoutParams(dp(58), dp(58), Gravity.END or Gravity.BOTTOM)
+        fabParams.setMargins(0, 0, dp(20), dp(20))
+        body.addView(fab, fabParams)
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
         refreshFiles()
     }
 
     private fun refreshFiles() {
-        if (!browserRendered || !hasStorageAccess()) return
+        if (!browserRendered || settingsOpen || !hasStorageAccess()) return
         rows.removeAllViews()
         gridRows = null
-        pathView.text = displayPath()
-        selectionView.text = if (selected.isEmpty()) {
-            val count = safeList(currentDir).size
-            count.toString() + if (count == 1) " item" else " itens"
-        } else selected.size.toString() + " selecionado(s)"
+        pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
+        selectionView.text = currentDir.absolutePath
         if (useParentEntry && currentDir.canonicalFile != rootDir.canonicalFile) addParentRow()
 
         if (viewMode == "Grelha") {
-            gridRows = GridLayout(this).apply { columnCount = 3 }
+            gridRows = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
             rows.addView(gridRows, LinearLayout.LayoutParams(-1, -2))
         }
         val files = safeList(currentDir).filter { showHidden || !it.name.startsWith(".") }.toMutableList()
@@ -315,6 +346,11 @@ class MainActivity : Activity() {
                 if (descending) -order else order
             }
         }
+        countView.text = when {
+            selected.isNotEmpty() -> selected.size.toString() + " selecionado(s) • " + files.size + " itens"
+            files.isEmpty() -> "Pasta vazia"
+            else -> files.size.toString() + if (files.size == 1) " item" else " itens"
+        }
         files.forEach { addFileRow(it) }
     }
 
@@ -323,15 +359,31 @@ class MainActivity : Activity() {
     }
 
     private fun addParentRow() {
-        val row = TextView(this).apply {
-            text = "📁   ..\nSubir um diretório"
-            textSize = 15f
-            setTextColor(0xFFF2F2F2.toInt())
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+        val item = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(8), dp(12), dp(8))
+            minimumHeight = dp(76)
+            background = roundedBackground(0xFF24242A.toInt(), 12)
             setOnClickListener { goUp() }
         }
-        rows.addView(row, LinearLayout.LayoutParams(-1, -2))
-        addDivider()
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_folder_up)
+            contentDescription = "Subir um diretório"
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        item.addView(icon, LinearLayout.LayoutParams(dp(64), dp(54)))
+        val textColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, 0, 0)
+        }
+        textColumn.addView(label("..", 17, 0xFFF4F4F6.toInt(), true))
+        textColumn.addView(label("Subir um diretório", 12, 0xFFACACB6.toInt(), false).apply {
+            setPadding(0, dp(3), 0, 0)
+        })
+        item.addView(textColumn, LinearLayout.LayoutParams(0, -2, 1f))
+        rows.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(2) })
     }
 
     private fun addFileRow(file: File) {
@@ -340,86 +392,81 @@ class MainActivity : Activity() {
         val inGrid = gridRows != null
         val item = LinearLayout(this).apply {
             orientation = if (inGrid) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(if (inGrid) 6 else 10), dp(if (inGrid) 8 else if (viewMode == "Compacto") 4 else 9),
-                dp(if (inGrid) 6 else 10), dp(if (inGrid) 8 else if (viewMode == "Compacto") 4 else 9))
-            if (isSelected) setBackgroundColor(0xFF353348.toInt())
+            gravity = if (inGrid) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
+            setPadding(dp(if (inGrid) 8 else 6), dp(if (inGrid) 12 else 8),
+                dp(if (inGrid) 8 else 10), dp(if (inGrid) 12 else 8))
+            background = roundedBackground(if (isSelected) 0xFF353348.toInt() else if (inGrid) 0xFF24242A.toInt() else 0xFF19191D.toInt(), 10)
+            isClickable = true
+            isFocusable = true
         }
-        if (file.isDirectory) {
-            val folderIcon = ImageView(this).apply {
-                setImageResource(R.drawable.ic_folder)
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                contentDescription = "Pasta"
-            }
-            val size = dp(if (inGrid) 72 else 52)
-            if (inGrid) item.addView(folderIcon, LinearLayout.LayoutParams(size, size))
-            else item.addView(folderIcon, LinearLayout.LayoutParams(size, size).apply { rightMargin = dp(10) })
-        } else if (shouldLoadThumbnail(file)) {
-            val preview = ImageView(this).apply {
-                setImageResource(android.R.drawable.ic_menu_report_image)
-                scaleType = if (squareThumbnails) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
-            }
-            val size = dp(if (inGrid) 72 else 48)
-            if (inGrid) item.addView(preview, LinearLayout.LayoutParams(size, size))
-            else item.addView(preview, LinearLayout.LayoutParams(size, size).apply { rightMargin = dp(10) })
-            loadThumbnailAsync(file, preview)
-        } else if (inGrid) {
-            val glyph = TextView(this).apply {
-                text = fileGlyph(file)
-                textSize = 36f
-                gravity = Gravity.CENTER
-                setTextColor(if (file.isDirectory) 0xFFFFA726.toInt() else 0xFFE4E4EA.toInt())
-            }
-            item.addView(glyph, LinearLayout.LayoutParams(dp(72), dp(72)))
-        } else {
-            val glyph = TextView(this).apply {
-                text = fileGlyph(file)
-                textSize = 31f
-                gravity = Gravity.CENTER
-                setTextColor(if (file.isDirectory) 0xFFFFA726.toInt() else 0xFFE4E4EA.toInt())
-            }
-            item.addView(glyph, LinearLayout.LayoutParams(dp(52), dp(54)))
+        val icon = ImageView(this).apply {
+            setImageResource(iconForFile(file))
+            contentDescription = if (file.isDirectory) "Pasta " + file.name else file.name
+            scaleType = if (squareThumbnails) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
         }
+        val iconWidth = dp(if (inGrid) 72 else 64)
+        val iconHeight = dp(if (inGrid) 66 else 58)
+        if (inGrid) item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        else item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { rightMargin = dp(8) })
+        if (shouldLoadThumbnail(file)) loadThumbnailAsync(file, icon)
 
-        val title = if (inGrid) file.name else (if (file.isDirectory) "" else "") + file.name
         val details = if (file.isDirectory) {
             val count = safeList(file).size
             count.toString() + if (count == 1) " item" else " itens"
         } else formatSize(file.length())
-        val labelText = TextView(this).apply {
-            text = when {
-                inGrid -> title
-                viewMode == "Compacto" -> title + if (showSize && !file.isDirectory) "  •  " + details else ""
-                else -> buildString {
-                    append(title)
-                    if (showSize) append("\n").append(details)
-                    if (showDate && file.lastModified() > 0L) {
-                        if (showSize) append("   •   ") else append("\n")
-                        append(DateFormat.getDateInstance(DateFormat.SHORT).format(Date(file.lastModified())))
-                        if (showTime) append(" ").append(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(file.lastModified())))
-                    }
-                }
-            }
-            textSize = if (inGrid) 13f else if (viewMode == "Compacto") 14f else 16f
-            setTextColor(if (isSelected) 0xFFD0CBFF.toInt() else 0xFFF3F3F5.toInt())
-            maxLines = if (inGrid) 2 else if (viewMode == "Detalhado") 3 else 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            gravity = if (inGrid) Gravity.CENTER else Gravity.CENTER_VERTICAL
+        val modified = if (file.lastModified() > 0L) DateFormat.getDateInstance(DateFormat.SHORT).format(Date(file.lastModified())) else ""
+        val middle = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = if (inGrid) Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
+            setPadding(if (inGrid) 0 else dp(4), 0, if (inGrid) 0 else dp(4), 0)
         }
+        val name = TextView(this).apply {
+            text = file.name.ifBlank { "(sem nome)" }
+            textSize = if (inGrid) 13f else if (viewMode == "Compacto") 14f else 16f
+            setTextColor(if (isSelected) 0xFFD8D3FF.toInt() else 0xFFF3F3F5.toInt())
+            typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+            maxLines = if (inGrid) 2 else if (viewMode == "Detalhado") 2 else 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity = if (inGrid) Gravity.CENTER else Gravity.START
+        }
+        val metaText = buildString {
+            if (showSize) append(details)
+            if (showDate && modified.isNotEmpty() && !inGrid) {
+                if (isNotEmpty()) append("   •   ")
+                append(modified)
+                if (showTime) append(" ").append(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(file.lastModified())))
+            }
+        }
+        middle.addView(name, LinearLayout.LayoutParams(-1, -2))
+        if (metaText.isNotEmpty()) middle.addView(TextView(this).apply {
+            text = metaText
+            textSize = 12f
+            setTextColor(0xFFAAAAB4.toInt())
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity = if (inGrid) Gravity.CENTER else Gravity.START
+            setPadding(0, dp(4), 0, 0)
+        }, LinearLayout.LayoutParams(-1, -2))
         if (inGrid) {
-            item.addView(labelText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
+            item.addView(middle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
             val params = GridLayout.LayoutParams(
                 GridLayout.spec(GridLayout.UNDEFINED, 1f),
                 GridLayout.spec(GridLayout.UNDEFINED, 1f)
             ).apply {
-                width = 0
-                height = -2
+                width = 0; height = -2
                 setMargins(dp(3), dp(3), dp(3), dp(3))
             }
             gridRows?.addView(item, params)
         } else {
-            item.addView(labelText, LinearLayout.LayoutParams(0, -2, 1f))
-            rows.addView(item, LinearLayout.LayoutParams(-1, -2))
+            item.addView(middle, LinearLayout.LayoutParams(0, -2, 1f))
+            if (showDate && modified.isNotEmpty()) item.addView(TextView(this).apply {
+                text = modified
+                textSize = 11f
+                gravity = Gravity.END or Gravity.BOTTOM
+                setTextColor(0xFF9999A3.toInt())
+                maxLines = 1
+            }, LinearLayout.LayoutParams(dp(72), -2).apply { leftMargin = dp(4) })
+            rows.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(2) })
             if (viewMode != "Compacto") addDivider()
         }
         item.setOnClickListener {
@@ -430,9 +477,19 @@ class MainActivity : Activity() {
                 refreshFiles()
             } else showFileActions(file)
         }
-        item.setOnLongClickListener {
-            toggleSelection(file)
-            true
+        item.setOnLongClickListener { toggleSelection(file); true }
+    }
+
+    private fun iconForFile(file: File): Int {
+        if (file.isDirectory) return R.drawable.ic_folder
+        return when (extension(file.name)) {
+            "zip", "7z", "rar", "tar", "gz", "bz2" -> R.drawable.ic_archive
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> R.drawable.ic_image
+            "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus" -> R.drawable.ic_audio
+            "mp4", "mkv", "webm", "avi", "mov", "3gp" -> R.drawable.ic_video
+            "apk" -> R.drawable.ic_android_file
+            "pdf" -> R.drawable.ic_pdf
+            else -> R.drawable.ic_file
         }
     }
 
