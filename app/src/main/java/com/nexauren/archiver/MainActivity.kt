@@ -294,7 +294,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        breadcrumbScroll.addView(breadcrumbRow, HorizontalScrollView.LayoutParams(-2, -1))
+        breadcrumbScroll.addView(breadcrumbRow, FrameLayout.LayoutParams(-2, -1))
         page.addView(breadcrumbScroll, LinearLayout.LayoutParams(-1, dp(38)))
 
         countView = label("", 13, 0xFFB9B9C3.toInt(), false).apply {
