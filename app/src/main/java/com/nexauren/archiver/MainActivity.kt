@@ -838,7 +838,7 @@ class MainActivity : Activity() {
 
         when (category) {
             null -> {
-                addSettingChoice(content, "Geral", "9 idiomas", "Idioma, notificações e informações") {
+                addSettingChoice(content, "Geral", "12 idiomas", "Idioma, notificações e informações") {
                     settingsCategory = "Geral"; renderSettingsScreen()
                 }
                 addSettingChoice(content, "Interface", uiTheme, "Tema, cor de destaque e aparência") {
@@ -3002,7 +3002,7 @@ class MainActivity : Activity() {
             "Já existe uma operação em curso. Aguarda que termine." to "Another operation is running. Please wait.",
             "A operação está em curso. Acompanha o progresso na janela ou na notificação." to "An operation is running. Follow progress in the dialog or notification."
         ) + mapOf(
-            "9 idiomas" to "9 languages",
+            "12 idiomas" to "12 languages",
             "Pesquisa avançada" to "Advanced search",
             "Incluir subpastas" to "Include subfolders",
             "Todos os tipos" to "All types",
@@ -3121,7 +3121,7 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "Oscuro (recomendado)",
             "Preto OLED (ecrãs OLED)" to "Negro OLED (pantallas OLED)",
             "Claro (boa visibilidade à luz do dia)" to "Claro (mejor con mucha luz)",
-            "9 idiomas" to "9 idiomas"
+            "12 idiomas" to "12 idiomas"
             )
             "fr" -> mapOf(
             "Explorador" to "Explorateur",
@@ -3193,7 +3193,7 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "Sombre (recommandé)",
             "Preto OLED (ecrãs OLED)" to "Noir OLED (écrans OLED)",
             "Claro (boa visibilidade à luz do dia)" to "Clair (lisible en plein jour)",
-            "9 idiomas" to "9 langues"
+            "12 idiomas" to "12 langues"
             )
             "de" -> mapOf(
             "Explorador" to "Dateimanager",
@@ -3265,7 +3265,7 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "Dunkel (empfohlen)",
             "Preto OLED (ecrãs OLED)" to "OLED-Schwarz (OLED-Displays)",
             "Claro (boa visibilidade à luz do dia)" to "Hell (gut bei Tageslicht)",
-            "9 idiomas" to "9 Sprachen"
+            "12 idiomas" to "12 Sprachen"
             )
             "zh" -> mapOf(
             "Explorador" to "文件管理器",
@@ -3337,7 +3337,7 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "深色（推荐）",
             "Preto OLED (ecrãs OLED)" to "OLED 纯黑（OLED 屏幕）",
             "Claro (boa visibilidade à luz do dia)" to "浅色（适合明亮环境）",
-            "9 idiomas" to "9 种语言"
+            "12 idiomas" to "12 种语言"
             )
             "hi" -> mapOf(
             "Explorador" to "फ़ाइल प्रबंधक",
@@ -3409,7 +3409,7 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "डार्क (अनुशंसित)",
             "Preto OLED (ecrãs OLED)" to "OLED ब्लैक (OLED डिस्प्ले)",
             "Claro (boa visibilidade à luz do dia)" to "लाइट (दिन के उजाले में बेहतर)",
-            "9 idiomas" to "9 भाषाएँ"
+            "12 idiomas" to "12 भाषाएँ"
             )
             "ar" -> mapOf(
             "Explorador" to "مدير الملفات",
@@ -3481,7 +3481,7 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "داكن (موصى به)",
             "Preto OLED (ecrãs OLED)" to "أسود OLED (شاشات OLED)",
             "Claro (boa visibilidade à luz do dia)" to "فاتح (أفضل في ضوء النهار)",
-            "9 idiomas" to "9 لغات"
+            "12 idiomas" to "12 لغات"
             )
             "ja" -> mapOf(
             "Explorador" to "ファイル管理",
@@ -3553,7 +3553,107 @@ class MainActivity : Activity() {
             "Escuro (recomendado)" to "ダーク（おすすめ）",
             "Preto OLED (ecrãs OLED)" to "OLEDブラック（OLED画面）",
             "Claro (boa visibilidade à luz do dia)" to "ライト（明るい場所向け）",
-            "9 idiomas" to "9言語"
+            "12 idiomas" to "12言語"
+            )
+            "ru" -> mapOf(
+                "Explorador" to "Файловый менеджер",
+                "Gestor de ficheiros para Android" to "Файловый менеджер Android",
+                "Configurações" to "Настройки", "Geral" to "Общие", "Interface" to "Интерфейс",
+                "Compressão" to "Сжатие", "Idioma" to "Язык", "Tema da interface" to "Тема интерфейса",
+                "Cor de destaque" to "Акцентный цвет", "Cores das pastas" to "Цвета папок",
+                "Ordenar ficheiros" to "Сортировка файлов", "Nome" to "Имя", "Tamanho" to "Размер",
+                "Data" to "Дата", "Tipo" to "Тип", "Detalhado" to "Подробный", "Compacto" to "Компактный",
+                "Grelha" to "Сетка", "Copiar" to "Копировать", "Mover" to "Переместить",
+                "Eliminar" to "Удалить", "Renomear" to "Переименовать", "Informações" to "Сведения",
+                "Abrir" to "Открыть", "Abrir pasta" to "Открыть папку", "Partilhar" to "Поделиться",
+                "Extrair aqui" to "Извлечь сюда", "Extrair para nova pasta" to "Извлечь в новую папку",
+                "Ver conteúdo" to "Просмотр архива", "Testar arquivo" to "Проверить архив",
+                "Adicionar aos Favoritos" to "Добавить в избранное", "Remover dos Favoritos" to "Удалить из избранного",
+                "Cancelar" to "Отмена", "Guardar" to "Сохранить", "Fechar" to "Закрыть",
+                "Pasta vazia" to "Папка пуста", "Armazenamento interno" to "Внутренняя память",
+                "Selecionar tudo" to "Выбрать всё", "Limpar seleção" to "Снять выделение",
+                "Colar" to "Вставить", "Favoritos" to "Избранное", "Ordenar" to "Сортировать",
+                "Atualizar" to "Обновить", "Pasta de início" to "Домашняя папка",
+                "Pesquisa avançada" to "Расширенный поиск", "Incluir subpastas" to "Включать подпапки",
+                "Todos os tipos" to "Все типы", "Pastas" to "Папки", "Documentos" to "Документы",
+                "Imagens" to "Изображения", "Vídeo" to "Видео", "Áudio" to "Аудио",
+                "Arquivos" to "Архивы", "Aplicações" to "Приложения",
+                "Pasta pesquisada" to "Папка поиска", "resultados" to "результатов",
+                "Nenhum resultado encontrado." to "Ничего не найдено.", "Mais ações" to "Другие действия",
+                "Copiar caminho" to "Копировать путь", "Calcular SHA-256" to "Вычислить SHA-256",
+                "Caminho copiado." to "Путь скопирован.", "Partilhar o Archiver" to "Поделиться Archiver",
+                "Ajudar o projeto" to "Поддержать проект", "Convida alguém a experimentar o Archiver" to "Предложите друзьям попробовать Archiver",
+                "Gostas do Archiver?" to "Нравится Archiver?", "Agora não" to "Не сейчас",
+                "Escuro (recomendado)" to "Тёмная тема (рекомендуется)",
+                "Preto OLED (ecrãs OLED)" to "Чёрная OLED-тема (OLED-дисплеи)",
+                "Claro (boa visibilidade à luz do dia)" to "Светлая тема (для дневного света)",
+                "12 idiomas" to "12 языков"
+            )
+            "bn" -> mapOf(
+                "Explorador" to "ফাইল ম্যানেজার",
+                "Gestor de ficheiros para Android" to "অ্যান্ড্রয়েড ফাইল ম্যানেজার",
+                "Configurações" to "সেটিংস", "Geral" to "সাধারণ", "Interface" to "ইন্টারফেস",
+                "Compressão" to "কমপ্রেশন", "Idioma" to "ভাষা", "Tema da interface" to "ইন্টারফেস থিম",
+                "Cor de destaque" to "অ্যাকসেন্ট রং", "Cores das pastas" to "ফোল্ডারের রং",
+                "Ordenar ficheiros" to "ফাইল সাজান", "Nome" to "নাম", "Tamanho" to "আকার",
+                "Data" to "তারিখ", "Tipo" to "ধরন", "Detalhado" to "বিস্তারিত", "Compacto" to "কমপ্যাক্ট",
+                "Grelha" to "গ্রিড", "Copiar" to "কপি", "Mover" to "সরান",
+                "Eliminar" to "মুছুন", "Renomear" to "নাম পরিবর্তন", "Informações" to "তথ্য",
+                "Abrir" to "খুলুন", "Abrir pasta" to "ফোল্ডার খুলুন", "Partilhar" to "শেয়ার",
+                "Extrair aqui" to "এখানে আনজিপ করুন", "Extrair para nova pasta" to "নতুন ফোল্ডারে আনজিপ করুন",
+                "Ver conteúdo" to "আর্কাইভ দেখুন", "Testar arquivo" to "আর্কাইভ পরীক্ষা করুন",
+                "Adicionar aos Favoritos" to "পছন্দে যোগ করুন", "Remover dos Favoritos" to "পছন্দ থেকে সরান",
+                "Cancelar" to "বাতিল", "Guardar" to "সংরক্ষণ", "Fechar" to "বন্ধ",
+                "Pasta vazia" to "ফোল্ডার খালি", "Armazenamento interno" to "অভ্যন্তরীণ স্টোরেজ",
+                "Selecionar tudo" to "সব নির্বাচন", "Limpar seleção" to "নির্বাচন বাতিল",
+                "Colar" to "পেস্ট", "Favoritos" to "পছন্দ", "Ordenar" to "সাজান",
+                "Atualizar" to "রিফ্রেশ", "Pasta de início" to "হোম ফোল্ডার",
+                "Pesquisa avançada" to "উন্নত অনুসন্ধান", "Incluir subpastas" to "সাবফোল্ডার অন্তর্ভুক্ত করুন",
+                "Todos os tipos" to "সব ধরন", "Pastas" to "ফোল্ডার", "Documentos" to "ডকুমেন্ট",
+                "Imagens" to "ছবি", "Vídeo" to "ভিডিও", "Áudio" to "অডিও",
+                "Arquivos" to "আর্কাইভ", "Aplicações" to "অ্যাপ",
+                "Pasta pesquisada" to "অনুসন্ধানের ফোল্ডার", "resultados" to "টি ফলাফল",
+                "Nenhum resultado encontrado." to "কোনো ফলাফল পাওয়া যায়নি।", "Mais ações" to "আরও কাজ",
+                "Copiar caminho" to "পাথ কপি করুন", "Calcular SHA-256" to "SHA-256 গণনা করুন",
+                "Caminho copiado." to "পাথ কপি হয়েছে।", "Partilhar o Archiver" to "Archiver শেয়ার করুন",
+                "Ajudar o projeto" to "প্রকল্পকে সহায়তা করুন", "Convida alguém a experimentar o Archiver" to "বন্ধুকে Archiver ব্যবহার করতে বলুন",
+                "Gostas do Archiver?" to "Archiver কি ভালো লেগেছে?", "Agora não" to "এখন নয়",
+                "Escuro (recomendado)" to "গাঢ় থিম (প্রস্তাবিত)",
+                "Preto OLED (ecrãs OLED)" to "OLED কালো থিম", "Claro (boa visibilidade à luz do dia)" to "হালকা থিম",
+                "12 idiomas" to "12টি ভাষা"
+            )
+            "id" -> mapOf(
+                "Explorador" to "Pengelola berkas",
+                "Gestor de ficheiros para Android" to "Pengelola berkas Android",
+                "Configurações" to "Pengaturan", "Geral" to "Umum", "Interface" to "Antarmuka",
+                "Compressão" to "Kompresi", "Idioma" to "Bahasa", "Tema da interface" to "Tema antarmuka",
+                "Cor de destaque" to "Warna aksen", "Cores das pastas" to "Warna folder",
+                "Ordenar ficheiros" to "Urutkan berkas", "Nome" to "Nama", "Tamanho" to "Ukuran",
+                "Data" to "Tanggal", "Tipo" to "Jenis", "Detalhado" to "Terperinci", "Compacto" to "Ringkas",
+                "Grelha" to "Kisi", "Copiar" to "Salin", "Mover" to "Pindahkan",
+                "Eliminar" to "Hapus", "Renomear" to "Ganti nama", "Informações" to "Informasi",
+                "Abrir" to "Buka", "Abrir pasta" to "Buka folder", "Partilhar" to "Bagikan",
+                "Extrair aqui" to "Ekstrak di sini", "Extrair para nova pasta" to "Ekstrak ke folder baru",
+                "Ver conteúdo" to "Lihat isi arsip", "Testar arquivo" to "Uji arsip",
+                "Adicionar aos Favoritos" to "Tambahkan ke Favorit", "Remover dos Favoritos" to "Hapus dari Favorit",
+                "Cancelar" to "Batal", "Guardar" to "Simpan", "Fechar" to "Tutup",
+                "Pasta vazia" to "Folder kosong", "Armazenamento interno" to "Penyimpanan internal",
+                "Selecionar tudo" to "Pilih semua", "Limpar seleção" to "Hapus pilihan",
+                "Colar" to "Tempel", "Favoritos" to "Favorit", "Ordenar" to "Urutkan",
+                "Atualizar" to "Segarkan", "Pasta de início" to "Folder awal",
+                "Pesquisa avançada" to "Pencarian lanjutan", "Incluir subpastas" to "Sertakan subfolder",
+                "Todos os tipos" to "Semua jenis", "Pastas" to "Folder", "Documentos" to "Dokumen",
+                "Imagens" to "Gambar", "Vídeo" to "Video", "Áudio" to "Audio",
+                "Arquivos" to "Arsip", "Aplicações" to "Aplikasi",
+                "Pasta pesquisada" to "Folder yang dicari", "resultados" to "hasil",
+                "Nenhum resultado encontrado." to "Tidak ada hasil ditemukan.", "Mais ações" to "Tindakan lainnya",
+                "Copiar caminho" to "Salin jalur", "Calcular SHA-256" to "Hitung SHA-256",
+                "Caminho copiado." to "Jalur disalin.", "Partilhar o Archiver" to "Bagikan Archiver",
+                "Ajudar o projeto" to "Dukung proyek", "Convida alguém a experimentar o Archiver" to "Ajak teman mencoba Archiver",
+                "Gostas do Archiver?" to "Suka Archiver?", "Agora não" to "Nanti saja",
+                "Escuro (recomendado)" to "Gelap (disarankan)",
+                "Preto OLED (ecrãs OLED)" to "Hitam OLED", "Claro (boa visibilidade à luz do dia)" to "Terang (untuk siang hari)",
+                "12 idiomas" to "12 bahasa"
             )
             else -> emptyMap()
         }
@@ -3711,8 +3811,11 @@ class MainActivity : Activity() {
     }
 
     private fun showLanguageMenu() {
-        val codes = arrayOf("pt", "en", "es", "fr", "de", "zh", "hi", "ar", "ja")
-        val options = arrayOf("Português", "English", "Español", "Français", "Deutsch", "中文（简体）", "हिन्दी", "العربية", "日本語")
+        val codes = arrayOf("pt", "en", "es", "fr", "de", "zh", "hi", "ar", "ja", "ru", "bn", "id")
+        val options = arrayOf(
+            "Português", "English", "Español", "Français", "Deutsch", "中文（简体）",
+            "हिन्दी", "العربية", "日本語", "Русский", "বাংলা", "Bahasa Indonesia"
+        )
         AlertDialog.Builder(this).setTitle(tr("Idioma"))
             .setMessage(tr("Escolhe um idioma. Os nomes são apresentados na própria língua."))
             .setSingleChoiceItems(options, codes.indexOf(appLanguage).coerceAtLeast(0)) { dialog, which ->
