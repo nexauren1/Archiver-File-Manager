@@ -379,13 +379,15 @@ class MainActivity : Activity() {
         body.addView(scroll, FrameLayout.LayoutParams(-1, -1))
 
         val fab = ImageButton(this).apply {
-            setImageResource(R.drawable.ic_add)
-            contentDescription = "Criar ficheiro ou arquivo"
-            background = roundedBackground(0xFFB8B5FF.toInt(), 28)
+            setImageResource(if (clipboard.isNotEmpty()) R.drawable.ic_paste else R.drawable.ic_add)
+            contentDescription = if (clipboard.isNotEmpty()) tr("Colar aqui") else tr("Criar pasta ou ficheiro")
+            background = roundedBackground(accentColor(), 28)
             scaleType = ImageView.ScaleType.CENTER
             setPadding(dp(16), dp(16), dp(16), dp(16))
             elevation = dp(8).toFloat()
-            setOnClickListener { showCreateMenu() }
+            setOnClickListener {
+                if (clipboard.isNotEmpty()) paste() else showCreateMenu()
+            }
         }
         val fabParams = FrameLayout.LayoutParams(dp(58), dp(58), Gravity.END or Gravity.BOTTOM)
         fabParams.setMargins(0, 0, dp(20), dp(20))
@@ -516,7 +518,15 @@ class MainActivity : Activity() {
         val bar = selectionBar ?: return
         val hasSelection = selected.isNotEmpty()
         bar.visibility = if (hasSelection) View.VISIBLE else View.GONE
-        addFab?.visibility = if (hasSelection) View.GONE else View.VISIBLE
+        addFab?.let { fab ->
+            fab.visibility = if (hasSelection) View.GONE else View.VISIBLE
+            val canPaste = clipboard.isNotEmpty()
+            fab.setImageResource(if (canPaste) R.drawable.ic_paste else R.drawable.ic_add)
+            fab.contentDescription = if (canPaste) {
+                tr(if (clipboardIsCut) "Mover para esta pasta — Colar" else "Copiar para esta pasta — Colar")
+            } else tr("Criar pasta ou ficheiro")
+            fab.background = roundedBackground(if (canPaste) 0xFF66BB6A.toInt() else accentColor(), 28)
+        }
     }
 
     private fun safeList(dir: File): List<File> {
@@ -889,8 +899,8 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escolhe entre escuro, preto OLED e claro") { showThemeMenu() }
                 addSettingChoice(content, "Cor de destaque", tr(accentName), "Cor dos botões, seleção e indicadores") { showAccentMenu() }
                 addSettingSwitch(content, "Animações suaves", "Efeitos leves ao apresentar ficheiros", showAnimations) { showAnimations = it }
-                addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor no menu de cada pasta") {
-                    toast("Abre o menu de uma pasta e escolhe Cor da pasta.")
+                addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor para uma pasta") {
+                    showFolderColorFolderPicker()
                 }
             }
             "Explorador" -> {
@@ -4448,21 +4458,48 @@ class MainActivity : Activity() {
             "Português", "English", "Español", "Français", "Deutsch", "中文（简体）",
             "हिन्दी", "العربية", "日本語", "Русский", "বাংলা", "Bahasa Indonesia"
         )
-        AlertDialog.Builder(this).setTitle(tr("Idioma"))
-            .setMessage(tr("Escolhe um idioma. Os nomes são apresentados na própria língua."))
-            .setSingleChoiceItems(options, codes.indexOf(appLanguage).coerceAtLeast(0)) { dialog, which ->
-                appLanguage = codes[which]
-                savePreferences()
-                if (Build.VERSION.SDK_INT >= 33) {
-                    runCatching {
-                        val localeTag = if (codes[which] == "zh") "zh-Hans" else codes[which]
-                        getSystemService(android.app.LocaleManager::class.java).applicationLocales =
-                            android.os.LocaleList.forLanguageTags(localeTag)
+        val selectedIndex = codes.indexOf(appLanguage).coerceAtLeast(0)
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Selecionar idioma"))
+            .setMessage(tr("Toca diretamente no idioma que queres usar."))
+            .setView(ScrollView(this).apply { addView(list) })
+            .setNegativeButton(tr("Cancelar"), null)
+            .create()
+        options.forEachIndexed { index, option ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = roundedBackground(
+                    if (index == selectedIndex) selectedRowColor() else rowSurfaceColor(), 10
+                )
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    appLanguage = codes[index]
+                    savePreferences()
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        runCatching {
+                            val localeTag = if (codes[index] == "zh") "zh-Hans" else codes[index]
+                            getSystemService(android.app.LocaleManager::class.java).applicationLocales =
+                                android.os.LocaleList.forLanguageTags(localeTag)
+                        }
                     }
+                    dialog.dismiss()
+                    if (settingsOpen) renderSettingsScreen() else renderBrowser()
                 }
-                dialog.dismiss()
-                if (settingsOpen) renderSettingsScreen() else renderBrowser()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+            }
+            row.addView(label(if (index == selectedIndex) "✓" else "○", 18, accentColor(), true),
+                LinearLayout.LayoutParams(dp(32), -2))
+            row.addView(label(option, 16, primaryTextColor(), index == selectedIndex),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        }
+        dialog.show()
     }
 
     private fun showThemeMenu() {
@@ -4578,14 +4615,35 @@ class MainActivity : Activity() {
         accentDialog?.show()
     }
 
+    private fun showFolderColorFolderPicker() {
+        val folders = safeList(currentDir).filter { it.isDirectory }.sortedBy { it.name.lowercase(Locale.ROOT) }
+        if (folders.isEmpty()) {
+            AlertDialog.Builder(this).setTitle(tr("Cores das pastas"))
+                .setMessage(tr("Esta pasta não contém subpastas. Abre a pasta desejada e usa o menu da pasta para escolher uma cor."))
+                .setPositiveButton(tr("OK"), null).show()
+            return
+        }
+        val names = folders.map { (if (folderColors.containsKey(pathKey(it))) "● " else "📁 ") + it.name }.toTypedArray()
+        AlertDialog.Builder(this).setTitle(tr("Escolher pasta"))
+            .setItems(names) { _, which -> showFolderColorMenu(folders[which]) }
+            .setNegativeButton(tr("Cancelar"), null).show()
+    }
+
     private fun showFolderColorMenu(file: File) {
         val options = arrayOf("Predefinida", "Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
-        AlertDialog.Builder(this).setTitle(tr("Cor da pasta"))
-            .setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
+        val descriptions = options.map { option ->
+            when (option) {
+                "Predefinida" -> tr("Usar a cor normal")
+                else -> tr("Aplicar a cor ") + tr(option)
+            }
+        }.toTypedArray()
+        AlertDialog.Builder(this).setTitle(tr("Cor da pasta") + " — " + file.name)
+            .setItems(options.map { tr(it) + if (it == "Predefinida") "" else "  ●" }.toTypedArray()) { _, which ->
                 val key = pathKey(file)
                 if (which == 0) folderColors.remove(key) else folderColors[key] = options[which]
                 savePreferences()
                 refreshFiles()
+                toast(if (which == 0) "Cor da pasta reposta." else "Cor da pasta alterada.")
             }.setNegativeButton(tr("Cancelar"), null).show()
     }
 
