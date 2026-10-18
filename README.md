@@ -1,33 +1,48 @@
-# Archiver 0.4.0 — Android File Manager
+# Archiver 0.5.0 — Android File Manager
 
-**Archiver** is a native Android file manager written in Kotlin, inspired by classic archive managers such as ZArchiver. It is not a website wrapped in an app. Website and app are separate: the Android app runs on-device, while the website is published from `docs/`.
+**Archiver** is a native Android file manager written in Kotlin, inspired by classic archive managers such as ZArchiver. The Android app runs locally; the website under `docs/` is a separate project site.
 
-## Features
+## What's new in 0.5.0
 
-- Shared-storage explorer with Android's special **Allow access to manage all files** permission, breadcrumb navigation, parent-folder entry, search, favorites, sorting, hidden-file toggle, multi-selection, and detailed/compact/grid views.
-- File actions: open/share, create, rename, copy, move, paste, delete, information, and per-folder color choices.
-- Type-aware icons for folders, text/code, documents, spreadsheets, archives, images, audio, video, APKs, PDFs and 3D-model files.
-- Image thumbnails, optional PDF/video/music/APK previews, and folder thumbnails when a folder contains an image.
+- Faster selection: selection changes the selected row in place instead of rebuilding the entire file list.
+- Faster browser rendering: child counts for folders are fetched asynchronously and cached.
+- Search is scoped to the current folder by default. Optional subfolder search, wildcard matching with `*` and `?`, file-type filters, cancelable scanning, progress status, and actionable results show each item's full parent path, metadata, and context actions.
+- Completed file operations automatically dismiss the progress panel and clear the ongoing/completed operation notification after a brief result message.
+- Eight UI languages: Portuguese, English, Spanish, French, Simplified Chinese, Hindi, Arabic, and Russian. The most common navigation, search, settings, and file-operation labels are translated; translations continue to be refined.
+- Theme selector with visual previews for Dark, OLED black, and Light; accent colors display swatches and descriptions instead of unexplained names.
+- Redesigned Archiver app icon.
+- SHA-256 checksum for files, with selectable/copyable result.
+- Folder storage analysis: recursive size/count summary and largest files, with cancellation and a shareable report.
+- Optional, one-time request to share Archiver after successful use. Sharing is never forced.
+
+## Core features
+
+- Shared-storage explorer with Android's special **Allow access to manage all files** permission, clickable breadcrumbs, parent-folder navigation, favorites, sorting, hidden-file toggle, multi-selection, and detailed/compact/grid views.
+- File actions: open/share, create, rename, copy, move, paste, delete, file information, and per-folder color choices.
+- Type-aware icons for folders, text/code, documents, spreadsheets, archives (ZIP, 7Z, RAR, TAR), images, audio, video, APKs, PDFs and 3D-model files.
+- Image thumbnails, optional PDF/video/music/APK previews, and folder thumbnails when a folder contains an image. Folder item counts load in the background.
 - ZIP and 7Z create, browse, test and extract; ZIP supports ZipCrypto/AES-256 passwords and split volumes. Compression levels are configurable.
-- Operation feedback: percentage, horizontal progress bar, current path/item, counts where available, in-app completion/error state and an ongoing/final notification when Android notification permission is allowed.
+- Operation feedback includes a progress bar, percentage, current path/item, counts where available, and a final success/error state. Ongoing/final notifications are used when Android notification permission is allowed.
 - Built-in UTF-8 text editor for common text/code files up to 4 MiB, with save confirmation for unsaved changes.
 - GLB/GLTF metadata inspector for scene/node/mesh/material/texture/animation counts; interactive 3D rendering is delegated to a compatible external viewer.
-- UI preferences: Portuguese/English, dark/OLED-black/light themes, seven accent colors, custom folder colors, thumbnails and sorting preferences.
-- Two-language public project site under `docs/`, with a privacy page.
+- UI preferences: eight languages, dark/OLED-black/light themes, seven accent colors, custom folder colors, thumbnails and sorting preferences.
+- Bilingual project website and privacy page under `docs/`.
 
-## Supported archive formats and limits
+## Supported formats and limits
 
-The current archive engine focuses on ZIP and 7Z. ZIP creation supports encryption and split volumes; these options are not implemented for 7Z. RAR, TAR-family formats, root/Shizuku access, a plugin system, and embedded interactive 3D rendering are not implemented in this release. Android can still restrict private app directories such as `Android/data`, even when all-files access is granted.
+The current archive engine focuses on ZIP and 7Z. ZIP creation supports encryption and split volumes; these features are not implemented for 7Z. The app can display icons for RAR/TAR and other formats, but that does **not** mean every such archive can be opened or extracted in this version. Root/Shizuku access, NAS/FTP/SFTP/SMB/WebDAV connections, a plugin system, and embedded interactive 3D rendering are not implemented in this release.
+
+Android's all-files permission does not bypass operating-system restrictions on other apps' private storage. The user must explicitly grant access in Android settings.
 
 ## Website
 
-The GitHub Pages deployment workflow publishes `docs/` from `main`. If Pages is enabled for this repository, the site is available at:
+GitHub Pages is configured to publish `docs/` from `main`. When Pages is enabled for the repository, the expected URL is:
 
 https://nexauren1.github.io/Archiver-File-Manager/
 
-The site is independent from the APK; it is not used as the app UI.
+The website is separate from the Android app; the native app does not use the website as its user interface.
 
-## Build
+## Build and validation
 
 - JDK 17
 - Gradle 8.13
@@ -35,14 +50,14 @@ The site is independent from the APK; it is not used as the app UI.
 - Kotlin
 - `gradle --no-daemon assembleDebug`
 
-GitHub Actions builds a debug APK and uploads it as the `Archiver-debug-APK` workflow artifact. A successful build validates compilation only; it does not replace physical-device testing.
+GitHub Actions builds a debug APK and uploads it as the `Archiver-debug-APK` workflow artifact. A successful build verifies compilation and packaging, but it does not replace on-device testing of file permissions, compression, notifications, search, and theme contrast.
 
-## Storage permission and privacy
+## Privacy and signing
 
-Android 11+ opens Android's special all-files-access settings page. The user must grant it explicitly. The permission does **not** grant root and does not bypass operating-system restrictions on other apps' private storage. Google Play also reviews broad storage access and requires an appropriate policy justification for distribution.
+File operations are performed locally by the app. Folder analysis and checksums read files only when the user invokes those features. The app does not need network access for ordinary local file management.
 
-Files are processed locally by the app. Before destructive actions or encryption/extraction, test with disposable sample files and verify that the selected paths and password are correct.
+A release keystore must be generated and backed up securely by the project owner. Do not commit keystore files, passwords, key aliases, or private signing material to this repository. CI signing values should be stored as GitHub Actions secrets, and the keystore backup should be kept offline.
 
-## License and project status
+## Project status
 
-Archiver is an independent project and is not affiliated with ZArchiver. This is an early preview release; feature coverage and device behavior should be tested before important data is used.
+Archiver is an independent project and is not affiliated with ZArchiver. Version 0.5.0 is a preview release; please test with disposable sample files before using destructive actions on important data.
