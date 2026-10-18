@@ -843,7 +843,12 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Sobre o Archiver", "0.4.0", "Gestor de ficheiros Android nativo em Kotlin") {
                     AlertDialog.Builder(this).setTitle("Archiver 0.4.0")
                         .setMessage("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso.")
-                        .setPositiveButton(tr("Fechar"), null).show()
+                        .setPositiveButton(tr("Fechar"), null)
+                        .setNeutralButton(tr("Partilhar aplicação")) { _, _ -> shareApp() }
+                        .show()
+                }
+                addSettingChoice(content, "Partilhar aplicação", "Archiver", "Recomenda a aplicação a amigos") {
+                    shareApp()
                 }
             }
             "Interface" -> {
@@ -1309,6 +1314,20 @@ class MainActivity : Activity() {
         renderBrowser()
     }
 
+    private fun shareApp() {
+        val shareText = tr("Experimenta o Archiver, um gestor de ficheiros Android:") +
+            "\nhttps://github.com/nexauren1/Archiver-File-Manager"
+        try {
+            val intent = Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_SUBJECT, "Archiver — gestor de ficheiros Android")
+                .putExtra(Intent.EXTRA_TEXT, shareText)
+            startActivity(Intent.createChooser(intent, tr("Partilhar aplicação")))
+        } catch (e: Exception) {
+            toast("Não foi possível abrir a partilha: " + (e.message ?: "erro"))
+        }
+    }
+
     private fun shareFile(file: File) {
         try {
             val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
@@ -1489,50 +1508,133 @@ class MainActivity : Activity() {
     }
 
     private fun promptSearch() {
-        val input = EditText(this).apply { hint = "Nome ou padrão, por exemplo *.zip"; setSingleLine(true) }
-        AlertDialog.Builder(this).setTitle("Pesquisar ficheiros").setView(input)
-            .setNegativeButton("Cancelar", null).setPositiveButton("Pesquisar") { _, _ ->
+        val input = EditText(this).apply {
+            hint = tr("Nome, parte do nome ou *.zip")
+            setSingleLine(true)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        val includeSubfolders = CheckBox(this).apply {
+            text = tr("Incluir subpastas")
+            isChecked = prefs.getBoolean("search_subfolders", false)
+            setTextColor(primaryTextColor())
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(4))
+            addView(input, LinearLayout.LayoutParams(-1, -2))
+            addView(includeSubfolders, LinearLayout.LayoutParams(-1, -2))
+        }
+        AlertDialog.Builder(this).setTitle(tr("Pesquisar nesta pasta")).setView(content)
+            .setNegativeButton(tr("Cancelar"), null).setPositiveButton(tr("Pesquisar")) { _, _ ->
                 val query = input.text.toString().trim().lowercase(Locale.ROOT)
                 if (query.isBlank()) { toast("Escreve um nome para pesquisar."); return@setPositiveButton }
-                val start = currentDir
-                runTask("A pesquisar…", 0L, 1L) { meter ->
-                    val entries = countFilesForSearch(start) { meter.show(it) }
-                    meter.setTotals(0L, entries)
+                val start = currentDir.canonicalFile
+                val recursive = includeSubfolders.isChecked
+                prefs.edit().putBoolean("search_subfolders", recursive).apply()
+                runTask("A pesquisar…", 0L, 0L) { meter ->
                     val hits = mutableListOf<File>()
-                    searchTree(start, query, hits, 0, meter)
-                    runOnUiThread { showSearchResults(hits) }
-                    "Pesquisa concluída: " + hits.size + " resultado(s)."
+                    val scanned = longArrayOf(0L)
+                    searchTree(start, query, hits, 0, meter, recursive, scanned)
+                    runOnUiThread { showSearchResults(hits, start, scanned[0]) }
+                    "Pesquisa concluída: " + hits.size + " resultado(s) em " + scanned[0] + " item(ns)."
                 }
             }.show()
     }
 
-    private fun searchTree(directory: File, query: String, hits: MutableList<File>, depth: Int, meter: TaskProgress? = null) {
-        if (depth > 60 || hits.size >= 300) return
-        val children = try { directory.listFiles() } catch (_: Exception) { null } ?: return
-        for (child in children) {
-            if (hits.size >= 300) return
+    private fun searchTree(
+        directory: File,
+        query: String,
+        hits: MutableList<File>,
+        depth: Int,
+        meter: TaskProgress? = null,
+        includeSubfolders: Boolean = false,
+        scanned: LongArray = longArrayOf(0L)
+    ) {
+        if (depth > 60 || hits.size >= 1000) return
+        for (child in safeList(directory)) {
+            if (hits.size >= 1000) return
             if (!showHidden && child.name.startsWith(".")) continue
+            scanned[0]++
             val name = child.name.lowercase(Locale.ROOT)
             val matches = if (query.contains('*') || query.contains('?')) {
                 val regex = query.replace(".", "\\.").replace("*", ".*").replace("?", ".")
-                name.matches(Regex("^" + regex + "$"))
+                runCatching { name.matches(Regex("^" + regex + "$")) }.getOrDefault(false)
             } else name.contains(query)
             if (matches) hits.add(child)
-            if (child.isDirectory) searchTree(child, query, hits, depth + 1, meter)
-            meter?.itemDone(child)
+            if (includeSubfolders && child.isDirectory) {
+                searchTree(child, query, hits, depth + 1, meter, true, scanned)
+            }
+            if (scanned[0] % 12L == 0L) {
+                meter?.report(0, "${scanned[0]} • ${hits.size} ${tr("resultados")} • ${child.name}")
+            }
         }
     }
 
-    private fun showSearchResults(hits: List<File>) {
+    private fun showSearchResults(hits: List<File>, searchedRoot: File, scannedCount: Long) {
         if (isFinishing) return
-        if (hits.isEmpty()) { toast("Nenhum resultado encontrado."); return }
-        val labels = hits.map { it.absolutePath.removePrefix(rootDir.absolutePath).trimStart(File.separatorChar) }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Resultados (" + hits.size + ")").setItems(labels) { _, which ->
-            val found = hits[which]
-            currentDir = if (found.isDirectory) found else found.parentFile ?: rootDir
-            refreshFiles()
-            if (!found.isDirectory) showFileActions(found)
-        }.setPositiveButton("Fechar", null).show()
+        if (hits.isEmpty()) {
+            toast("Nenhum resultado encontrado em " + searchedRoot.name)
+            return
+        }
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        hits.forEach { found ->
+            val path = found.parentFile?.absolutePath ?: found.absolutePath
+            val subtitle = if (found.isDirectory) {
+                tr("Pasta") + " • " + path
+            } else {
+                formatSize(found.length()) + " • " +
+                    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(found.lastModified())) +
+                    "\n" + path
+            }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(8))
+                background = roundedBackground(rowSurfaceColor(), 12)
+            }
+            row.addView(label(found.name, 15, primaryTextColor(), true), LinearLayout.LayoutParams(-1, -2))
+            row.addView(label(subtitle, 11, mutedTextColor(), false).apply {
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                setPadding(0, dp(3), 0, dp(6))
+            }, LinearLayout.LayoutParams(-1, -2))
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            }
+            actions.addView(Button(this).apply {
+                text = tr(if (found.isDirectory) "Abrir pasta" else "Ações")
+                setOnClickListener {
+                    (list.tag as? AlertDialog)?.dismiss()
+                    if (found.isDirectory) { currentDir = found; refreshFiles() }
+                    else showFileActions(found)
+                }
+            }, LinearLayout.LayoutParams(0, dp(42), 1f))
+            if (found.isFile) actions.addView(Button(this).apply {
+                text = tr("Partilhar")
+                setOnClickListener { (list.tag as? AlertDialog)?.dismiss(); shareFile(found) }
+            }, LinearLayout.LayoutParams(0, dp(42), 1f))
+            row.addView(actions, LinearLayout.LayoutParams(-1, -2))
+            row.setOnClickListener {
+                (list.tag as? AlertDialog)?.dismiss()
+                if (found.isDirectory) { currentDir = found; refreshFiles() }
+                else showFileActions(found)
+            }
+            val rowParams = LinearLayout.LayoutParams(-1, -2)
+            rowParams.bottomMargin = dp(8)
+            list.addView(row, rowParams)
+        }
+        val scroller = ScrollView(this).apply { isFillViewport = false; addView(list) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Resultados da pesquisa") + " (" + hits.size + ")")
+            .setView(scroller)
+            .setPositiveButton(tr("Fechar"), null)
+            .create()
+        list.tag = dialog
+        dialog.show()
     }
 
     private fun showFavorites() {
@@ -2568,11 +2670,16 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 742)
         }
 
+        val unknownTotal = totalEntries <= 0L
         val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
+            isIndeterminate = unknownTotal
         }
-        val percentView = label("0%", 14, 0xFFD8D3FF.toInt(), true).apply { gravity = Gravity.END }
+        val percentView = label(if (unknownTotal) "…" else "0%", 14, 0xFFD8D3FF.toInt(), true).apply {
+            gravity = Gravity.END
+            visibility = if (unknownTotal) View.GONE else View.VISIBLE
+        }
         val detailView = label(message, 12, 0xFFB9B9C3.toInt(), false).apply {
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
@@ -2640,24 +2747,31 @@ class MainActivity : Activity() {
                 }
                 if (!isFinishing) {
                     if (failed) {
+                        progressBar.isIndeterminate = false
                         progressBar.progress = latestPercent
+                        percentView.visibility = View.VISIBLE
                         percentView.text = "$latestPercent%"
                     } else {
+                        progressBar.isIndeterminate = false
                         progressBar.progress = 100
+                        percentView.visibility = View.VISIBLE
                         percentView.text = "100%"
                     }
-                    detailView.text = finalResult
+                    detailView.text = tr(finalResult)
                     dialog.setTitle(if (failed) tr("Falha na operação") else tr("Operação concluída"))
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
                         text = tr("Fechar")
                         isEnabled = true
                     }
-                    Toast.makeText(this, tr(finalResult), Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, tr(finalResult), if (failed) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
                     if (hasStorageAccess() && browserRendered && !settingsOpen && !editorOpen) refreshFiles()
+                    // Success should leave no completed-progress dialog hanging over the file list.
+                    if (!failed) dialog.dismiss()
                 } else {
                     dialog.dismiss()
                 }
-                showOperationNotification(message, tr(finalResult), null, finished = true, failed = failed)
+                // Clear the stale notification when any operation has ended; errors remain visible in the dialog.
+                try { getSystemService(NotificationManager::class.java).cancel(operationNotificationId) } catch (_: Exception) { }
             }
         }
     }
