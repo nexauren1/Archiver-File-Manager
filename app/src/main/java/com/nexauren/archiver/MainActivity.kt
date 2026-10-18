@@ -447,18 +447,20 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(4), dp(16), dp(4))
             setBackgroundColor(panelBackgroundColor())
         }
-        storageView = label("", 11, mutedTextColor(), false).apply {
+        val storageLabel = label("", 11, mutedTextColor(), false).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        storageProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+        storageView = storageLabel
+        val storageMeter = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
             progressTintList = android.content.res.ColorStateList.valueOf(accentColor())
             progressBackgroundTintList = android.content.res.ColorStateList.valueOf(rowSurfaceColor())
         }
-        storageStatus.addView(storageView, LinearLayout.LayoutParams(-1, -2))
-        storageStatus.addView(storageProgress, LinearLayout.LayoutParams(-1, dp(3)).apply {
+        storageProgress = storageMeter
+        storageStatus.addView(storageLabel, LinearLayout.LayoutParams(-1, -2))
+        storageStatus.addView(storageMeter, LinearLayout.LayoutParams(-1, dp(3)).apply {
             topMargin = dp(3)
         })
         page.addView(storageStatus, LinearLayout.LayoutParams(-1, dp(34)))
