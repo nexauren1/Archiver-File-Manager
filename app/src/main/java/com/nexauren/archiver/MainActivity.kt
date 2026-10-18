@@ -1513,50 +1513,202 @@ class MainActivity : Activity() {
     }
 
     private fun promptSearch() {
-        val input = EditText(this).apply { hint = "Nome ou padrão, por exemplo *.zip"; setSingleLine(true) }
-        AlertDialog.Builder(this).setTitle("Pesquisar ficheiros").setView(input)
-            .setNegativeButton("Cancelar", null).setPositiveButton("Pesquisar") { _, _ ->
-                val query = input.text.toString().trim().lowercase(Locale.ROOT)
-                if (query.isBlank()) { toast("Escreve um nome para pesquisar."); return@setPositiveButton }
-                val start = currentDir
-                runTask("A pesquisar…", 0L, 1L) { meter ->
-                    val entries = countFilesForSearch(start) { meter.show(it) }
-                    meter.setTotals(0L, entries)
+        val input = EditText(this).apply {
+            hint = tr("Nome ou padrão, por exemplo *.zip")
+            setSingleLine(true)
+            textSize = 16f
+        }
+        val recurse = CheckBox(this).apply {
+            text = tr("Incluir subpastas")
+            isChecked = false
+        }
+        val typeLabels = arrayOf(
+            tr("Todos os tipos"), tr("Pastas"), tr("Documentos"), tr("Imagens"),
+            tr("Vídeo"), tr("Áudio"), tr("Arquivos"), tr("Aplicações")
+        )
+        val typeSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, typeLabels)
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(4))
+            addView(input, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(typeSpinner, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(recurse, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(label(tr("A pesquisa começa na pasta atual e não procura fora dela."), 12, mutedTextColor(), false)
+                .apply { setPadding(0, dp(5), 0, dp(8)) }, LinearLayout.LayoutParams(-1, -2))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(tr("Pesquisa avançada"))
+            .setView(body)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(tr("Pesquisar")) { _, _ ->
+                val query = input.text.toString().trim()
+                if (query.isBlank()) {
+                    toast("Escreve um nome para pesquisar.")
+                    return@setPositiveButton
+                }
+                val start = try { currentDir.canonicalFile } catch (_: Exception) { currentDir }
+                val includeSubfolders = recurse.isChecked
+                val typeFilter = arrayOf("all", "folder", "document", "image", "video", "audio", "archive", "app")
+                    .getOrElse(typeSpinner.selectedItemPosition) { "all" }
+                runTask("A pesquisar…", 0L, 100L) { meter ->
                     val hits = mutableListOf<File>()
-                    searchTree(start, query, hits, 0, meter)
-                    runOnUiThread { showSearchResults(hits) }
+                    val processed = longArrayOf(0L)
+                    val matcher = if (query.contains('*') || query.contains('?')) {
+                        val pattern = buildString {
+                            query.forEach { ch ->
+                                when (ch) {
+                                    '*' -> append(".*")
+                                    '?' -> append('.')
+                                    else -> append(Regex.escape(ch.toString()))
+                                }
+                            }
+                        }
+                        runCatching { Regex("^$pattern$", RegexOption.IGNORE_CASE) }.getOrNull()
+                    } else null
+                    searchTree(start, start, query, matcher, typeFilter, includeSubfolders, hits, 0, processed, meter)
+                    runOnUiThread { showSearchResults(hits, start) }
                     "Pesquisa concluída: " + hits.size + " resultado(s)."
                 }
-            }.show()
+            }
+            .show()
     }
 
-    private fun searchTree(directory: File, query: String, hits: MutableList<File>, depth: Int, meter: TaskProgress? = null) {
+    private fun searchTree(
+        directory: File,
+        scope: File,
+        query: String,
+        matcher: Regex?,
+        typeFilter: String,
+        recursive: Boolean,
+        hits: MutableList<File>,
+        depth: Int,
+        processed: LongArray,
+        meter: TaskProgress? = null
+    ) {
         if (depth > 60 || hits.size >= 300) return
-        val children = try { directory.listFiles() } catch (_: Exception) { null } ?: return
+        val children = safeList(directory)
         for (child in children) {
             if (hits.size >= 300) return
+            if (!isWithinRoot(child) || !isWithinScope(child, scope)) continue
             if (!showHidden && child.name.startsWith(".")) continue
-            val name = child.name.lowercase(Locale.ROOT)
-            val matches = if (query.contains('*') || query.contains('?')) {
-                val regex = query.replace(".", "\\.").replace("*", ".*").replace("?", ".")
-                name.matches(Regex("^" + regex + "$"))
-            } else name.contains(query)
-            if (matches) hits.add(child)
-            if (child.isDirectory) searchTree(child, query, hits, depth + 1, meter)
-            meter?.itemDone(child)
+            val matchesName = if (matcher != null) matcher.matches(child.name) else child.name.contains(query, ignoreCase = true)
+            if (matchesName && matchesSearchType(child, typeFilter)) hits.add(child)
+            processed[0]++
+            if (processed[0] % 20L == 0L) {
+                meter?.report(0, tr("Analisados") + ": " + processed[0] + " • " + child.name)
+            }
+            if (recursive && child.isDirectory) {
+                searchTree(child, scope, query, matcher, typeFilter, true, hits, depth + 1, processed, meter)
+            }
         }
     }
 
-    private fun showSearchResults(hits: List<File>) {
+    private fun isWithinScope(file: File, scope: File): Boolean {
+        val base = pathKey(scope).trimEnd(File.separatorChar)
+        val path = pathKey(file)
+        return path == base || path.startsWith(base + File.separator)
+    }
+
+    private fun matchesSearchType(file: File, filter: String): Boolean {
+        if (filter == "all") return true
+        if (filter == "folder") return file.isDirectory
+        if (file.isDirectory) return false
+        val ext = extension(file.name)
+        return when (filter) {
+            "document" -> ext in setOf("pdf", "txt", "md", "rtf", "doc", "docx", "odt", "xls", "xlsx", "ppt", "pptx", "csv")
+            "image" -> ext in setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "heic", "avif")
+            "video" -> ext in setOf("mp4", "mkv", "mov", "webm", "avi", "3gp", "m4v")
+            "audio" -> ext in setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "opus", "wma")
+            "archive" -> ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "tgz")
+            "app" -> ext in setOf("apk", "apks", "xapk", "aab")
+            else -> true
+        }
+    }
+
+    private fun showSearchResults(hits: List<File>, searchedFolder: File) {
         if (isFinishing) return
-        if (hits.isEmpty()) { toast("Nenhum resultado encontrado."); return }
-        val labels = hits.map { it.absolutePath.removePrefix(rootDir.absolutePath).trimStart(File.separatorChar) }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("Resultados (" + hits.size + ")").setItems(labels) { _, which ->
-            val found = hits[which]
-            currentDir = if (found.isDirectory) found else found.parentFile ?: rootDir
-            refreshFiles()
-            if (!found.isDirectory) showFileActions(found)
-        }.setPositiveButton("Fechar", null).show()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+        }
+        val summary = if (hits.isEmpty()) {
+            tr("Nenhum resultado encontrado.")
+        } else {
+            tr("Pasta pesquisada") + ": " + searchedFolder.name + " • " + hits.size + " " + tr("resultados")
+        }
+        content.addView(label(summary, 13, mutedTextColor(), false)
+            .apply { setPadding(dp(5), dp(5), dp(5), dp(10)) }, LinearLayout.LayoutParams(-1, -2))
+        val scroll = ScrollView(this).apply { isFillViewport = false }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val visibleHits = hits.take(100)
+        visibleHits.forEach { found ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(6), dp(7), dp(4), dp(7))
+                background = roundedBackground(rowSurfaceColor(), 8)
+                isClickable = true
+                isFocusable = true
+            }
+            val icon = ImageView(this).apply {
+                setImageResource(iconForFile(found))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = if (found.isDirectory) tr("Pasta") else tr("Ficheiro")
+            }
+            row.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(8) })
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            details.addView(label(found.name, 14, primaryTextColor(), true).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            })
+            details.addView(label(found.parentFile?.absolutePath ?: found.absolutePath, 11, mutedTextColor(), false).apply {
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                setPadding(0, dp(3), 0, 0)
+            })
+            val meta = if (found.isFile) formatSize(found.length()) else tr("Pasta")
+            details.addView(label(meta, 11, accentColor(), false).apply { setPadding(0, dp(3), 0, 0) })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            val more = TextView(this).apply {
+                text = "⋮"
+                textSize = 26f
+                gravity = Gravity.CENTER
+                setTextColor(accentColor())
+                contentDescription = tr("Mais ações")
+                setPadding(dp(8), 0, dp(8), 0)
+                setOnClickListener { showFileActions(found) }
+            }
+            row.addView(more, LinearLayout.LayoutParams(dp(42), dp(52)))
+            row.setOnClickListener {
+                if (found.isDirectory) {
+                    currentDir = found
+                    selected.clear()
+                    refreshFiles()
+                } else {
+                    currentDir = found.parentFile ?: rootDir
+                    selected.clear()
+                    refreshFiles()
+                    showFileActions(found)
+                }
+            }
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+        }
+        if (hits.size > visibleHits.size) {
+            list.addView(label(tr("Mostrando os primeiros 100 resultados."), 12, mutedTextColor(), false)
+                .apply { setPadding(dp(8), dp(8), dp(8), dp(8)) }, LinearLayout.LayoutParams(-1, -2))
+        }
+        scroll.addView(list)
+        content.addView(scroll, LinearLayout.LayoutParams(-1, dp(420)))
+        AlertDialog.Builder(this)
+            .setTitle(tr("Resultados da pesquisa") + " (" + hits.size + ")")
+            .setView(content)
+            .setPositiveButton(tr("Fechar"), null)
+            .show()
     }
 
     private fun showFavorites() {
@@ -2592,11 +2744,13 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 742)
         }
 
+        val searching = message.contains("pesquis", ignoreCase = true)
         val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
+            isIndeterminate = searching
         }
-        val percentView = label("0%", 14, 0xFFD8D3FF.toInt(), true).apply { gravity = Gravity.END }
+        val percentView = label(if (searching) "…" else "0%", 14, 0xFFD8D3FF.toInt(), true).apply { gravity = Gravity.END }
         val detailView = label(message, 12, 0xFFB9B9C3.toInt(), false).apply {
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
@@ -2626,8 +2780,8 @@ class MainActivity : Activity() {
             latestPercent = percent.coerceIn(0, 99)
             runOnUiThread {
                 if (!isFinishing && dialog.isShowing) {
-                    progressBar.progress = percent
-                    percentView.text = "$percent%"
+                    if (!searching) progressBar.progress = percent
+                    percentView.text = if (searching) "…" else "$percent%"
                     detailView.text = detail
                 }
             }
