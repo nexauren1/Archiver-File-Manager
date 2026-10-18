@@ -1331,7 +1331,7 @@ class MainActivity : Activity() {
         var handedOffToService = false
         val progressUpdate = object : Runnable {
             override fun run() {
-                if (prepared && !dragging) {
+                if (prepared && player.isPlaying && !dragging) {
                     val duration = player.duration.coerceAtLeast(1)
                     seek.max = duration
                     seek.progress = player.currentPosition.coerceIn(0, duration)
