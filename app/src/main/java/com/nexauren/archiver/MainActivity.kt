@@ -3657,6 +3657,9 @@ class MainActivity : Activity() {
             "hi" -> mapOf("Tamanho total" to "कुल आकार", "Itens" to "आइटम", "itens" to "आइटम", "Tamanho calculado" to "गणना किया गया आकार", "Seleciona uma pasta." to "एक फ़ोल्डर चुनें।", "A calcular tamanho da pasta…" to "फ़ोल्डर का आकार गणना हो रहा है…")
             "ar" -> mapOf("Tamanho total" to "الحجم الإجمالي", "Itens" to "العناصر", "itens" to "عناصر", "Tamanho calculado" to "الحجم المحسوب", "Seleciona uma pasta." to "اختر مجلدًا.", "A calcular tamanho da pasta…" to "جارٍ حساب حجم المجلد…")
             "ja" -> mapOf("Tamanho total" to "合計サイズ", "Itens" to "項目", "itens" to "項目", "Tamanho calculado" to "計算済みサイズ", "Seleciona uma pasta." to "フォルダーを選択してください。", "A calcular tamanho da pasta…" to "フォルダーサイズを計算中…")
+            "ru" -> mapOf("Tamanho total" to "Общий размер", "Itens" to "Элементы", "itens" to "элементов", "Tamanho calculado" to "Размер рассчитан", "Seleciona uma pasta." to "Выберите папку.", "A calcular tamanho da pasta…" to "Вычисление размера папки…")
+            "bn" -> mapOf("Tamanho total" to "মোট আকার", "Itens" to "আইটেম", "itens" to "টি আইটেম", "Tamanho calculado" to "গণনা করা আকার", "Seleciona uma pasta." to "একটি ফোল্ডার নির্বাচন করুন।", "A calcular tamanho da pasta…" to "ফোল্ডারের আকার গণনা হচ্ছে…")
+            "id" -> mapOf("Tamanho total" to "Ukuran total", "Itens" to "Item", "itens" to "item", "Tamanho calculado" to "Ukuran dihitung", "Seleciona uma pasta." to "Pilih folder.", "A calcular tamanho da pasta…" to "Menghitung ukuran folder…")
             else -> emptyMap()
         }
         // Long-tail labels use English until their dedicated translation is added.
