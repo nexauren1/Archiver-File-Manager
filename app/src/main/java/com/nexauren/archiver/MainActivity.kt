@@ -1024,7 +1024,7 @@ class MainActivity : Activity() {
         })
         val scroll = ScrollView(this).apply {
             isFillViewport = true
-            addView(input, ScrollView.LayoutParams(-1, -1))
+            addView(input, FrameLayout.LayoutParams(-1, -1))
         }
         page.addView(status, LinearLayout.LayoutParams(-1, -2))
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -1711,8 +1711,6 @@ class MainActivity : Activity() {
             else -> false
         }
     }
-
-    private fun thumbnailKey(file: File): String
 
     private fun thumbnailKey(file: File): String = file.absolutePath + ":" + file.lastModified() + ":" + file.length()
 
