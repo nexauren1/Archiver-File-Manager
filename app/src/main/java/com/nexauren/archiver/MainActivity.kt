@@ -3041,7 +3041,13 @@ class MainActivity : Activity() {
             "Escolhe entre escuro, preto OLED e claro" to "Choose dark, OLED black or light",
             "Cor dos botões, seleção e indicadores" to "Color for buttons, selection and indicators",
             "Cópia de caminho" to "Copy path",
-            "SHA-256" to "SHA-256"
+            "SHA-256" to "SHA-256",
+            "Tamanho total" to "Total size",
+            "Itens" to "Items",
+            "itens" to "items",
+            "Tamanho calculado" to "Calculated size",
+            "Seleciona uma pasta." to "Choose a folder.",
+            "A calcular tamanho da pasta…" to "Calculating folder size…"
         )
         if (appLanguage == "en") return english[text] ?: text
         val localized = when (appLanguage) {
@@ -3551,8 +3557,18 @@ class MainActivity : Activity() {
             )
             else -> emptyMap()
         }
+        val localizedExtras = when (appLanguage) {
+            "es" -> mapOf("Tamanho total" to "Tamaño total", "Itens" to "Elementos", "itens" to "elementos", "Tamanho calculado" to "Tamaño calculado", "Seleciona uma pasta." to "Selecciona una carpeta.", "A calcular tamanho da pasta…" to "Calculando el tamaño de la carpeta…")
+            "fr" -> mapOf("Tamanho total" to "Taille totale", "Itens" to "Éléments", "itens" to "éléments", "Tamanho calculado" to "Taille calculée", "Seleciona uma pasta." to "Choisissez un dossier.", "A calcular tamanho da pasta…" to "Calcul de la taille du dossier…")
+            "de" -> mapOf("Tamanho total" to "Gesamtgröße", "Itens" to "Elemente", "itens" to "Elemente", "Tamanho calculado" to "Berechnete Größe", "Seleciona uma pasta." to "Wähle einen Ordner.", "A calcular tamanho da pasta…" to "Ordnergröße wird berechnet…")
+            "zh" -> mapOf("Tamanho total" to "总大小", "Itens" to "项目", "itens" to "个项目", "Tamanho calculado" to "已计算大小", "Seleciona uma pasta." to "请选择文件夹。", "A calcular tamanho da pasta…" to "正在计算文件夹大小…")
+            "hi" -> mapOf("Tamanho total" to "कुल आकार", "Itens" to "आइटम", "itens" to "आइटम", "Tamanho calculado" to "गणना किया गया आकार", "Seleciona uma pasta." to "एक फ़ोल्डर चुनें।", "A calcular tamanho da pasta…" to "फ़ोल्डर का आकार गणना हो रहा है…")
+            "ar" -> mapOf("Tamanho total" to "الحجم الإجمالي", "Itens" to "العناصر", "itens" to "عناصر", "Tamanho calculado" to "الحجم المحسوب", "Seleciona uma pasta." to "اختر مجلدًا.", "A calcular tamanho da pasta…" to "جارٍ حساب حجم المجلد…")
+            "ja" -> mapOf("Tamanho total" to "合計サイズ", "Itens" to "項目", "itens" to "項目", "Tamanho calculado" to "計算済みサイズ", "Seleciona uma pasta." to "フォルダーを選択してください。", "A calcular tamanho da pasta…" to "フォルダーサイズを計算中…")
+            else -> emptyMap()
+        }
         // Long-tail labels use English until their dedicated translation is added.
-        return localized[text] ?: english[text] ?: text
+        return localized[text] ?: localizedExtras[text] ?: english[text] ?: text
     }
 
     private fun accentColor(): Int = when (accentName) {
