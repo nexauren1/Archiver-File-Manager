@@ -1,4 +1,4 @@
-# Archiver 0.7.0 — Android File Manager
+# Archiver 0.7.1 — Android File Manager
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
 
