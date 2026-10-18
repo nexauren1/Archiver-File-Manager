@@ -1024,7 +1024,7 @@ class MainActivity : Activity() {
     private fun showViewModeMenu() {
         val modes = arrayOf("Detalhado", "Compacto", "Grelha")
         val checked = modes.indexOf(viewMode).coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle("Modo de exibição").setSingleChoiceItems(modes, checked) { dialog, which ->
+        AlertDialog.Builder(this).setTitle(tr("Modo de exibição")).setSingleChoiceItems(modes.map { tr(it) }.toTypedArray(), checked) { dialog, which ->
             viewMode = modes[which]
             savePreferences()
             dialog.dismiss()
@@ -1041,7 +1041,7 @@ class MainActivity : Activity() {
 
     private fun showCompressionMenu() {
         val levels = arrayOf("Sem compressão (mais rápido)", "Rápido", "Normal", "Ultra (mais lento)")
-        AlertDialog.Builder(this).setTitle("Nível de compressão").setSingleChoiceItems(levels, compressionLevel.coerceIn(0, 3)) { dialog, which ->
+        AlertDialog.Builder(this).setTitle(tr("Nível de compressão")).setSingleChoiceItems(levels.map { tr(it) }.toTypedArray(), compressionLevel.coerceIn(0, 3)) { dialog, which ->
             compressionLevel = which
             savePreferences()
             dialog.dismiss()
@@ -1052,7 +1052,7 @@ class MainActivity : Activity() {
 
     private fun showCreateMenu() {
         val options = arrayOf("Nova pasta", "Novo ficheiro vazio", "Criar arquivo ZIP", "Criar arquivo 7Z")
-        AlertDialog.Builder(this).setTitle("Criar").setItems(options) { _, which ->
+        AlertDialog.Builder(this).setTitle(tr("Criar")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
                 0 -> promptNewItem(true)
                 1 -> promptNewItem(false)
@@ -1064,11 +1064,11 @@ class MainActivity : Activity() {
 
     private fun promptNewItem(folder: Boolean) {
         val input = EditText(this).apply {
-            hint = if (folder) "Nome da pasta" else "Nome do ficheiro"
+            hint = tr(if (folder) "Nome da pasta" else "Nome do ficheiro")
             setSingleLine(true)
         }
-        AlertDialog.Builder(this).setTitle(if (folder) "Nova pasta" else "Novo ficheiro")
-            .setView(input).setNegativeButton("Cancelar", null).setPositiveButton("Criar") { _, _ ->
+        AlertDialog.Builder(this).setTitle(tr(if (folder) "Nova pasta" else "Novo ficheiro"))
+            .setView(input).setNegativeButton(tr("Cancelar"), null).setPositiveButton(tr("Criar")) { _, _ ->
                 val name = input.text.toString().trim()
                 if (!validName(name)) { toast("Nome inválido."); return@setPositiveButton }
                 val target = File(currentDir, name)
@@ -2036,11 +2036,11 @@ class MainActivity : Activity() {
         if (files.isEmpty()) { toast("Seleciona pelo menos um ficheiro ou pasta."); return }
 
         val formatNames = arrayOf("ZIP", "7Z")
-        val formatPicker = makeSpinner(formatNames, if (initialFormat == "7z") 1 else 0)
+        val formatPicker = makeSpinner(formatNames.map { tr(it) }.toTypedArray(), if (initialFormat == "7z") 1 else 0)
         val levelNames = arrayOf("Sem compressão", "Rápida", "Normal", "Ultra")
-        val levelPicker = makeSpinner(levelNames, compressionLevel.coerceIn(0, 3))
+        val levelPicker = makeSpinner(levelNames.map { tr(it) }.toTypedArray(), compressionLevel.coerceIn(0, 3))
         val encryptionNames = arrayOf("Nenhuma", "ZipCrypto", "AES-256")
-        val encryptionPicker = makeSpinner(encryptionNames)
+        val encryptionPicker = makeSpinner(encryptionNames.map { tr(it) }.toTypedArray())
         val volumeNames = arrayOf("Não", "64 MB", "100 MB", "250 MB", "500 MB", "1 GB")
         val volumeBytes = longArrayOf(
             0L,
@@ -2050,9 +2050,9 @@ class MainActivity : Activity() {
             500L * 1024L * 1024L,
             1024L * 1024L * 1024L
         )
-        val volumePicker = makeSpinner(volumeNames)
+        val volumePicker = makeSpinner(volumeNames.map { tr(it) }.toTypedArray())
         val passwordInput = EditText(this).apply {
-            hint = "Palavra-passe (opcional)"
+            hint = tr("Palavra-passe (opcional)")
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSingleLine(true)
         }
@@ -2062,8 +2062,8 @@ class MainActivity : Activity() {
             val suggestion = if (files.size == 1) files[0].name else "Arquivo"
             setText(if (suggestion.lowercase(Locale.ROOT).endsWith(suffix)) suggestion else suggestion + suffix)
         }
-        val deleteOriginals = CheckBox(this).apply { text = "Eliminar originais depois de comprimir com sucesso" }
-        val separateArchives = CheckBox(this).apply { text = "Criar um arquivo separado por item selecionado" }
+        val deleteOriginals = CheckBox(this).apply { text = tr("Eliminar originais depois de comprimir com sucesso") }
+        val separateArchives = CheckBox(this).apply { text = tr("Criar um arquivo separado por item selecionado") }
 
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
