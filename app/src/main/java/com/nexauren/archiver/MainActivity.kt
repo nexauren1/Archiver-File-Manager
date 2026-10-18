@@ -904,8 +904,8 @@ class MainActivity : Activity() {
                         toast(if (notificationsEnabled) "As notificações estão disponíveis." else "Ativa as notificações nas definições do Android.")
                     }
                 }
-                addSettingChoice(content, "Sobre o Archiver", "0.4.0", "Gestor de ficheiros Android nativo em Kotlin") {
-                    AlertDialog.Builder(this).setTitle("Archiver 0.4.0")
+                addSettingChoice(content, "Sobre o Archiver", "0.5.0", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver 0.5.0")
                         .setMessage("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso.")
                         .setPositiveButton(tr("Fechar"), null).show()
                 }
