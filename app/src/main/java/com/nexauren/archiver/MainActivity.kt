@@ -1760,7 +1760,7 @@ class MainActivity : Activity() {
             if (dest.exists()) throw IOException("O destino já existe: " + dest.name)
             BufferedInputStream(FileInputStream(source)).use { input ->
                 BufferedOutputStream(FileOutputStream(dest)).use { output ->
-                    val buffer = ByteArray(32 * 1024)
+                    val buffer = ByteArray(128 * 1024)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
@@ -2364,7 +2364,7 @@ class MainActivity : Activity() {
         } else {
             zip.putNextEntry(ZipEntry(entryName))
             BufferedInputStream(FileInputStream(source)).use { input ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(128 * 1024)
                 while (true) {
                     val n = input.read(buffer)
                     if (n < 0) break
@@ -2439,7 +2439,7 @@ class MainActivity : Activity() {
         } else {
             tar.putArchiveEntry(TarArchiveEntry(source, safeName))
             BufferedInputStream(FileInputStream(source)).use { input ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(128 * 1024)
                 while (true) {
                     val n = input.read(buffer)
                     if (n < 0) break
@@ -2472,7 +2472,7 @@ class MainActivity : Activity() {
             entry.size = source.length()
             seven.putArchiveEntry(entry)
             BufferedInputStream(FileInputStream(source)).use { input ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(128 * 1024)
                 while (true) {
                     val n = input.read(buffer)
                     if (n < 0) break
@@ -2541,7 +2541,7 @@ class MainActivity : Activity() {
                     val target = if (output.exists()) File(output.parentFile, uniqueName(output.parentFile!!, output.name)) else output
                     zip.getInputStream(entry).use { input ->
                         BufferedOutputStream(FileOutputStream(target)).use { stream ->
-                            val buffer = ByteArray(32 * 1024)
+                            val buffer = ByteArray(128 * 1024)
                             while (true) {
                                 val n = input.read(buffer)
                                 if (n < 0) break
@@ -2568,7 +2568,7 @@ class MainActivity : Activity() {
             if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
             var count = 0
             SevenZFile(archive).use { seven ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(128 * 1024)
                 while (true) {
                     val entry = seven.nextEntry ?: break
                     val output = safeArchiveTarget(destination, entry.name, entry.isDirectory)
@@ -2615,7 +2615,7 @@ class MainActivity : Activity() {
             meter.setTotals(totals.bytes, totals.entries)
             var count = 0
             ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(128 * 1024)
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     val current = File(archive.parentFile, entry.name)
@@ -2640,7 +2640,7 @@ class MainActivity : Activity() {
             meter.setTotals(totals.bytes, totals.entries)
             var count = 0
             SevenZFile(archive).use { seven ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(128 * 1024)
                 while (true) {
                     val entry = seven.nextEntry ?: break
                     val current = File(archive.parentFile, entry.name)
@@ -2783,7 +2783,7 @@ class MainActivity : Activity() {
             if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
             var count = 0
             openTarInput(archive).use { tar ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(128 * 1024)
                 while (true) {
                     val entry = tar.nextTarEntry ?: break
                     val output = safeArchiveTarget(destination, entry.name, entry.isDirectory)
@@ -2816,7 +2816,7 @@ class MainActivity : Activity() {
         runTask("A testar TAR…", 0L, 1L) { meter ->
             var count = 0
             openTarInput(archive).use { tar ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(128 * 1024)
                 while (true) {
                     val entry = tar.nextTarEntry ?: break
                     val current = File(archive.parentFile, entry.name)
@@ -2855,7 +2855,7 @@ class MainActivity : Activity() {
                         val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
                         BufferedInputStream(zip.getInputStream(entry)).use { input ->
                             BufferedOutputStream(FileOutputStream(target)).use { output ->
-                                val buffer = ByteArray(32 * 1024)
+                                val buffer = ByteArray(128 * 1024)
                                 while (true) {
                                     val n = input.read(buffer)
                                     if (n < 0) break
@@ -2887,7 +2887,7 @@ class MainActivity : Activity() {
                                 destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
                                 val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
                                 BufferedOutputStream(FileOutputStream(target)).use { output ->
-                                    val buffer = ByteArray(32 * 1024)
+                                    val buffer = ByteArray(128 * 1024)
                                     while (true) {
                                         val n = seven.read(buffer, 0, buffer.size)
                                         if (n < 0) break
@@ -2906,7 +2906,7 @@ class MainActivity : Activity() {
                     "tar", "tgz", "tbz2" -> {
                         var found = false
                         openTarInput(archive).use { tar ->
-                            val buffer = ByteArray(32 * 1024)
+                            val buffer = ByteArray(128 * 1024)
                             while (true) {
                                 val entry = tar.nextTarEntry ?: break
                                 if (entry.name.replace('\\', '/').trimStart('/').trimEnd('/') != item.name.trimEnd('/')) {
@@ -2947,7 +2947,7 @@ class MainActivity : Activity() {
         meter: TaskProgress,
         kind: String
     ) {
-        val buffer = ByteArray(32 * 1024)
+        val buffer = ByteArray(128 * 1024)
         fun createTarget(name: String, directory: Boolean): File? {
             val normalized = name.replace('\\', '/').trimStart('/')
             if (!normalized.startsWith(prefix) || normalized == prefix) return null
