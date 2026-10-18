@@ -60,4 +60,4 @@ A release keystore must be generated and backed up securely by the project owner
 
 ## Project status
 
-Archiver is an independent project and is not affiliated with ZArchiver. Version 0.5.0 is a preview release; please test with disposable sample files before using destructive actions on important data.
+Archiver is an independent project and is not affiliated with ZArchiver. Archiver 0.5.0 is a preview release; please test with disposable sample files before using destructive actions on important data.
