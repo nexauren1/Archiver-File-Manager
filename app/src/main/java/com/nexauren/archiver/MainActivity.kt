@@ -92,6 +92,7 @@ class MainActivity : Activity() {
     private var gridRows: GridLayout? = null
     private var browserRendered = false
     private var settingsOpen = false
+    private var settingsCategory: String? = null
     private var editorOpen = false
     private var editorDirty = false
     private var editorSavedText = ""
@@ -759,10 +760,12 @@ class MainActivity : Activity() {
 
     private fun showExplorerSettings() {
         settingsOpen = true
+        settingsCategory = null
         renderSettingsScreen()
     }
 
     private fun renderSettingsScreen() {
+        val category = settingsCategory
         page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(pageBackgroundColor())
@@ -773,11 +776,16 @@ class MainActivity : Activity() {
             setPadding(dp(4), 0, dp(12), 0)
             setBackgroundColor(toolbarBackgroundColor())
         }
-        toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Voltar ao explorador") {
-            settingsOpen = false
-            renderBrowser()
+        toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, tr("Voltar")) {
+            if (settingsCategory != null) {
+                settingsCategory = null
+                renderSettingsScreen()
+            } else {
+                settingsOpen = false
+                renderBrowser()
+            }
         }, LinearLayout.LayoutParams(dp(48), dp(58)))
-        toolbar.addView(label("Explorador", 22, 0xFFFFFFFF.toInt(), true),
+        toolbar.addView(label(tr(category ?: "Configurações"), 22, primaryTextColor(), true),
             LinearLayout.LayoutParams(0, dp(58), 1f))
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
         page.addView(View(this).apply { setBackgroundColor(accentColor()) },
@@ -791,24 +799,89 @@ class MainActivity : Activity() {
         scroll.addView(content)
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        addSettingChoice(content, "Idioma", if (appLanguage == "en") "English" else "Português", "Escolher o idioma da interface") { showLanguageMenu() }
-        addSettingChoice(content, "Tema da interface", uiTheme, "Escuro, preto OLED ou claro") { showThemeMenu() }
-        addSettingChoice(content, "Cor de destaque", accentName, "Personaliza a cor dos controlos e realces") { showAccentMenu() }
-        addSettingChoice(content, "Ordenar arquivos", sortBy, "Escolher a ordem dos ficheiros") { showSortMenu() }
-        addSettingSwitch(content, "Decrescente", "Inverte a ordem de ordenação dos arquivos", descending) { descending = it }
-        addSettingSwitch(content, "Usar item \"..\" ", "Permite subir para o diretório anterior a partir da lista", useParentEntry) { useParentEntry = it }
-        addSettingSwitch(content, "Exibir arquivos ocultos", "Mostra ficheiros e diretórios cujo nome começa por ponto", showHidden) { showHidden = it }
-        addSettingChoice(content, "Modo de exibição", viewMode, "Detalhado, compacto ou grelha") { showViewModeMenu() }
-        addSettingSwitch(content, "Exibir tamanho", "Mostra o tamanho dos ficheiros na lista", showSize) { showSize = it }
-        addSettingSwitch(content, "Exibir data", "Mostra a data da última modificação", showDate) { showDate = it }
-        addSettingSwitch(content, "Exibir hora", "Mostra a hora da última modificação", showTime, showDate) { showTime = it }
-        addSettingSwitch(content, "Miniaturas", "Permite a exibição de miniaturas", showThumbnails) { showThumbnails = it }
-        addSettingSwitch(content, "Miniaturas do PDF", "Mostrar miniaturas de documentos PDF (pode causar erros em alguns dispositivos)", showPdfThumbnails) { showPdfThumbnails = it }
-        addSettingSwitch(content, "Miniaturas de vídeo", "Mostrar miniaturas de vídeo", showVideoThumbnails) { showVideoThumbnails = it }
-        addSettingSwitch(content, "Capa do álbum", "Mostrar a capa do álbum nos ficheiros de música", showAlbumCovers) { showAlbumCovers = it }
-        addSettingSwitch(content, "Ícones do APK", "Exibir os ícones das aplicações APK", showApkIcons) { showApkIcons = it }
-        addSettingSwitch(content, "Miniaturas quadradas", "Recorta as miniaturas para formato quadrado", squareThumbnails) { squareThumbnails = it }
-        addSettingChoice(content, "Nível de compressão", compressionName(), "ZIP e 7Z") { showCompressionMenu() }
+        when (category) {
+            null -> {
+                addSettingChoice(content, "Geral", "2 idiomas", "Idioma, notificações e informações") {
+                    settingsCategory = "Geral"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "Interface", uiTheme, "Tema, cor de destaque e aparência") {
+                    settingsCategory = "Interface"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "Explorador", tr(viewMode), "Ordenação, ficheiros ocultos e miniaturas") {
+                    settingsCategory = "Explorador"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "Compressão", compressionName(), "Formato, velocidade e opções de arquivos") {
+                    settingsCategory = "Compressão"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "ROOT", "Não configurado", "O acesso root não está ativo no Archiver") {
+                    settingsCategory = "ROOT"; renderSettingsScreen()
+                }
+                addSettingChoice(content, "Plugins", "Nenhum", "O sistema de plugins ainda não está disponível") {
+                    settingsCategory = "Plugins"; renderSettingsScreen()
+                }
+            }
+            "Geral" -> {
+                addSettingChoice(content, "Idioma", if (appLanguage == "en") "English" else "Português",
+                    "Escolher o idioma da interface") { showLanguageMenu() }
+                val notificationsEnabled = Build.VERSION.SDK_INT < 33 ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                addSettingChoice(content, "Notificações", if (notificationsEnabled) "Ligado" else "Desligado",
+                    "Progresso e conclusão das operações de ficheiros") {
+                    if (Build.VERSION.SDK_INT >= 33 && !notificationsEnabled) {
+                        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 742)
+                    } else {
+                        toast(if (notificationsEnabled) "As notificações estão disponíveis." else "Ativa as notificações nas definições do Android.")
+                    }
+                }
+                addSettingChoice(content, "Sobre o Archiver", "0.4.0", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver 0.4.0")
+                        .setMessage("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso.")
+                        .setPositiveButton(tr("Fechar"), null).show()
+                }
+            }
+            "Interface" -> {
+                addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escuro, preto OLED ou claro") { showThemeMenu() }
+                addSettingChoice(content, "Cor de destaque", tr(accentName), "Personaliza os controlos e realces") { showAccentMenu() }
+                addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor no menu de cada pasta") {
+                    toast("Abre o menu de uma pasta e escolhe Cor da pasta.")
+                }
+            }
+            "Explorador" -> {
+                addSettingChoice(content, "Ordenar arquivos", tr(sortBy), "Escolher a ordem dos ficheiros") { showSortMenu() }
+                addSettingSwitch(content, "Decrescente", "Inverte a ordem de ordenação dos arquivos", descending) { descending = it }
+                addSettingSwitch(content, "Usar item \"..\" ", "Permite subir para o diretório anterior a partir da lista", useParentEntry) { useParentEntry = it }
+                addSettingSwitch(content, "Exibir arquivos ocultos", "Mostra ficheiros e diretórios cujo nome começa por ponto", showHidden) { showHidden = it }
+                addSettingChoice(content, "Modo de exibição", tr(viewMode), "Detalhado, compacto ou grelha") { showViewModeMenu() }
+                addSettingSwitch(content, "Exibir tamanho", "Mostra o tamanho dos ficheiros na lista", showSize) { showSize = it }
+                addSettingSwitch(content, "Exibir data", "Mostra a data da última modificação", showDate) { showDate = it }
+                addSettingSwitch(content, "Exibir hora", "Mostra a hora da última modificação", showTime, showDate) { showTime = it }
+                addSettingSwitch(content, "Miniaturas", "Permite a exibição de miniaturas", showThumbnails) { showThumbnails = it }
+                addSettingSwitch(content, "Miniaturas do PDF", "Mostrar miniaturas de documentos PDF", showPdfThumbnails) { showPdfThumbnails = it }
+                addSettingSwitch(content, "Miniaturas de vídeo", "Mostrar miniaturas de vídeo", showVideoThumbnails) { showVideoThumbnails = it }
+                addSettingSwitch(content, "Capa do álbum", "Mostrar a capa do álbum nos ficheiros de música", showAlbumCovers) { showAlbumCovers = it }
+                addSettingSwitch(content, "Ícones do APK", "Exibir os ícones das aplicações APK", showApkIcons) { showApkIcons = it }
+                addSettingSwitch(content, "Miniaturas quadradas", "Recorta as miniaturas para formato quadrado", squareThumbnails) { squareThumbnails = it }
+            }
+            "Compressão" -> {
+                addSettingChoice(content, "Nível de compressão", compressionName(), "Sem compressão, rápida, normal ou ultra") { showCompressionMenu() }
+                content.addView(label(
+                    "ZIP: suporta ZipCrypto, AES-256 e divisão em volumes. 7Z: criação e extração com níveis de compressão; palavra-passe e volumes não estão ligados nesta versão.",
+                    14, mutedTextColor(), false
+                ).apply { setPadding(dp(8), dp(16), dp(8), dp(16)) }, LinearLayout.LayoutParams(-1, -2))
+            }
+            "ROOT" -> {
+                content.addView(label(
+                    "O Archiver não implementa acesso ROOT nem Shizuku nesta versão. A permissão Android «Gerir todos os ficheiros» permite gerir o armazenamento partilhado, mas não desbloqueia as pastas privadas de outras aplicações nem concede root.",
+                    15, mutedTextColor(), false
+                ).apply { setPadding(dp(8), dp(20), dp(8), dp(20)) }, LinearLayout.LayoutParams(-1, -2))
+            }
+            "Plugins" -> {
+                content.addView(label(
+                    "Ainda não existe um sistema de plugins nesta versão. Os formatos e leitores disponíveis são os integrados na aplicação ou nas aplicações instaladas no dispositivo.",
+                    15, mutedTextColor(), false
+                ).apply { setPadding(dp(8), dp(20), dp(8), dp(20)) }, LinearLayout.LayoutParams(-1, -2))
+            }
+        }
         setContentView(page)
     }
 
@@ -825,9 +898,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        copy.addView(label(title, 16, 0xFFF0F0F3.toInt(), false))
-        copy.addView(label(value, 14, 0xFFD0CBFF.toInt(), false).apply { setPadding(0, dp(4), 0, 0) })
-        copy.addView(label(summary, 12, 0xFF9D9DA8.toInt(), false).apply { setPadding(0, dp(3), 0, 0) })
+        copy.addView(label(tr(title), 16, primaryTextColor(), false))
+        copy.addView(label(tr(value), 14, accentColor(), false).apply { setPadding(0, dp(4), 0, 0) })
+        copy.addView(label(tr(summary), 12, mutedTextColor(), false).apply { setPadding(0, dp(3), 0, 0) })
         row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(TextView(this).apply {
             text = "›"
@@ -858,8 +931,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        copy.addView(label(title, 16, if (enabled) 0xFFF0F0F3.toInt() else 0xFF777780.toInt(), false))
-        copy.addView(label(summary, 13, if (enabled) 0xFFABABB5.toInt() else 0xFF777780.toInt(), false).apply { setPadding(0, dp(4), 0, 0) })
+        copy.addView(label(tr(title), 16, if (enabled) primaryTextColor() else 0xFF777780.toInt(), false))
+        copy.addView(label(tr(summary), 13, if (enabled) mutedTextColor() else 0xFF777780.toInt(), false).apply { setPadding(0, dp(4), 0, 0) })
         row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
         val toggle = Switch(this).apply {
             isChecked = checked
@@ -2695,8 +2768,13 @@ class MainActivity : Activity() {
             return
         }
         if (settingsOpen) {
-            settingsOpen = false
-            renderBrowser()
+            if (settingsCategory != null) {
+                settingsCategory = null
+                renderSettingsScreen()
+            } else {
+                settingsOpen = false
+                renderBrowser()
+            }
             return
         }
 
