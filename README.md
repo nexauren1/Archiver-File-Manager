@@ -1,6 +1,6 @@
 # Archiver – File Manager
 
-A lightweight Android file manager project focused on practical file operations and dependable ZIP handling.
+A lightweight Android file manager project focused on practical file operations and dependable archive handling.
 
 ## First milestone
 
@@ -8,26 +8,32 @@ A lightweight Android file manager project focused on practical file operations 
 - Navigate folders and sort by name, size, date, or type.
 - Search recursively by filename, including wildcard patterns such as `*.zip`.
 - Show or hide dot-prefixed files; optionally show size and modification date.
-- Create folders and empty files, open and share files in compatible apps, and inspect item information.
-- Rename, recursively delete, copy, move, and paste files and folders.
-- Avoid copying folders into themselves and choose another name instead of overwriting on copy/extraction collisions.
+- Choose detailed, compact, or grid views.
+- Optional on-device thumbnails for images, PDF pages, video frames, music album art, and APK icons.
+- Create folders and empty files, open/share files, and inspect item information.
+- Rename, recursively delete, copy, move, and paste files/folders, with safeguards against recursive copies and name collisions.
 - Create ZIP archives with store, fast, normal, or ultra compression.
-- Optionally delete source items only after ZIP creation succeeds.
-- Extract ZIP files here or into a new folder, with checks against unsafe parent-directory paths.
-- Test ZIP contents by reading each entry to detect common read/CRC errors.
+- Create and extract 7z archives; test ZIP and 7z contents for common read/CRC errors.
+- Optionally delete source items only after archive creation succeeds.
+- Extract supported archives here or into a new folder while blocking unsafe parent-directory paths.
 - Remember the selected folder and preferences.
 
-## Known limitations in this first milestone
+## Known limitations
 
-The initial implementation uses Java's built-in ZIP support to keep dependencies small. It does not yet support RAR or 7z extraction, TAR-family formats, encrypted/password-protected archives, split volumes, PDF/video thumbnails, or full Android/data access. ZIP password encryption is not available in this baseline. The first APK must still pass an automated build and on-device functional testing before it can be considered stable. Please test with disposable sample files before using it on important data.
+- This preview focuses on ZIP and 7z. RAR, TAR and other formats are not yet implemented.
+- Password-protected archive creation and password prompts are not yet wired into the UI.
+- Split volumes and Android/data or Android/obb access are not implemented.
+- PDF/video previews are disabled by default because they can use additional CPU and memory.
+- Large archive operations currently use app-cache temporary files; ensure the device has sufficient free storage.
+- The app has been compiled and released via GitHub Actions, but still requires hands-on testing on real Android devices. Test with disposable sample files before using it on important data.
 
 ## Build and release
 
-GitHub Actions is configured to build the debug APK with JDK 17, Gradle 8.13, and Android Gradle Plugin 8.13.2. Pushes to `main` are configured to upload an Actions artifact and publish a GitHub prerelease for testing.
+GitHub Actions builds the debug APK with JDK 17, Gradle 8.13 and Android Gradle Plugin 8.13.2. Pushes to `main` upload an Actions artifact and publish a GitHub prerelease.
 
 ## Roadmap
 
-1. Confirm the automated build and validate the APK.
-2. Test ZIP creation/extraction, copy/move, permissions, large files, and error cases on an Android device.
-3. Add automated tests and improve progress/cancellation feedback.
-4. Add broader archive-format support only after measuring package size and compatibility.
+1. Validate ZIP and 7z creation/extraction on device, including large files and low storage.
+2. Add archive listing/preview and improve progress, cancellation, and overwrite handling.
+3. Evaluate RAR extraction and TAR/GZIP support, including licensing and APK-size cost.
+4. Add automated tests and only then consider stable release status.
