@@ -1657,6 +1657,7 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply { isFillViewport = false }
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val visibleHits = hits.take(100)
+        var resultsDialog: AlertDialog? = null
         visibleHits.forEach { found ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1699,12 +1700,11 @@ class MainActivity : Activity() {
             }
             row.addView(more, LinearLayout.LayoutParams(dp(42), dp(52)))
             row.setOnClickListener {
-                val resultDialog = (content.parent as? View)
+                resultsDialog?.dismiss()
                 if (found.isDirectory) {
                     currentDir = found
                     selected.clear()
                     refreshFiles()
-                    // The surrounding dialog is dismissed by the user after navigation if still visible.
                 } else {
                     currentDir = found.parentFile ?: rootDir
                     selected.clear()
@@ -1720,11 +1720,12 @@ class MainActivity : Activity() {
         }
         scroll.addView(list)
         content.addView(scroll, LinearLayout.LayoutParams(-1, dp(420)))
-        AlertDialog.Builder(this)
+        resultsDialog = AlertDialog.Builder(this)
             .setTitle(tr("Resultados da pesquisa") + " (" + hits.size + ")")
             .setView(content)
             .setPositiveButton(tr("Fechar"), null)
-            .show()
+            .create()
+        resultsDialog?.show()
     }
 
     private fun showFavorites() {
@@ -3700,26 +3701,110 @@ class MainActivity : Activity() {
             tr("Preto OLED (ecrãs OLED)"),
             tr("Claro (boa visibilidade à luz do dia)")
         )
-        AlertDialog.Builder(this).setTitle(tr("Tema da interface"))
-            .setMessage(tr("O tema altera o fundo e o contraste. A cor de destaque controla os botões e a seleção."))
-            .setSingleChoiceItems(descriptions, options.indexOf(uiTheme).coerceAtLeast(0)) { dialog, which ->
-                uiTheme = options[which]
+        val previewBackgrounds = intArrayOf(0xFF19191D.toInt(), 0xFF000000.toInt(), 0xFFF5F6FA.toInt())
+        val previewPanels = intArrayOf(0xFF292D40.toInt(), 0xFF08080A.toInt(), 0xFFE0E3F0.toInt())
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(6))
+        }
+        var themeDialog: AlertDialog? = null
+        options.forEachIndexed { index, option ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(10), dp(8), dp(10))
+                background = roundedBackground(
+                    if (uiTheme == option) selectedRowColor() else rowSurfaceColor(), 12
+                )
+                isClickable = true
+                isFocusable = true
+            }
+            val sample = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+                background = roundedBackground(previewBackgrounds[index], 7)
+            }
+            sample.addView(View(this).apply {
+                setBackgroundColor(previewPanels[index])
+            }, LinearLayout.LayoutParams(dp(42), dp(5)).apply { bottomMargin = dp(4) })
+            sample.addView(View(this).apply {
+                setBackgroundColor(if (option == "Claro") 0xFFB5B8C6.toInt() else 0xFF454551.toInt())
+            }, LinearLayout.LayoutParams(dp(29), dp(4)))
+            row.addView(sample, LinearLayout.LayoutParams(dp(54), dp(42)).apply { rightMargin = dp(12) })
+            val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            copy.addView(label(tr(option), 15, primaryTextColor(), true))
+            copy.addView(label(descriptions[index], 12, mutedTextColor(), false).apply {
+                setPadding(0, dp(3), 0, 0)
+            })
+            row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(label(if (uiTheme == option) "✓" else "›", 20, accentColor(), true),
+                LinearLayout.LayoutParams(dp(24), dp(34)))
+            row.setOnClickListener {
+                uiTheme = option
                 savePreferences()
                 applyPaletteToWindow()
-                dialog.dismiss()
+                themeDialog?.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+            }
+            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
+        }
+        themeDialog = AlertDialog.Builder(this)
+            .setTitle(tr("Tema da interface"))
+            .setMessage(tr("O tema altera o fundo e o contraste. A cor de destaque controla os botões e a seleção."))
+            .setView(content)
+            .setNegativeButton(tr("Fechar"), null)
+            .create()
+        themeDialog?.show()
     }
 
     private fun showAccentMenu() {
         val options = arrayOf("Lavanda", "Azul", "Verde", "Laranja", "Rosa", "Vermelho", "Amarelo")
-        AlertDialog.Builder(this).setTitle(tr("Cor de destaque"))
-            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), options.indexOf(accentName).coerceAtLeast(0)) { dialog, which ->
-                accentName = options[which]
+        val colorValues = intArrayOf(
+            0xFFB8B5FF.toInt(), 0xFF64B5F6.toInt(), 0xFF81C784.toInt(),
+            0xFFFFB74D.toInt(), 0xFFF48FB1.toInt(), 0xFFE57373.toInt(), 0xFFFFD54F.toInt()
+        )
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(6), dp(16), dp(6))
+        }
+        var accentDialog: AlertDialog? = null
+        options.forEachIndexed { index, option ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(9), dp(8), dp(9))
+                background = roundedBackground(
+                    if (accentName == option) selectedRowColor() else rowSurfaceColor(), 10
+                )
+                isClickable = true
+                isFocusable = true
+            }
+            val chip = View(this).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(colorValues[index])
+                    setStroke(dp(1), if (uiTheme == "Claro") 0x55000000 else 0x55FFFFFF)
+                }
+            }
+            row.addView(chip, LinearLayout.LayoutParams(dp(28), dp(28)).apply { rightMargin = dp(12) })
+            row.addView(label(tr(option), 15, primaryTextColor(), accentName == option),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            if (accentName == option) row.addView(label("✓", 18, colorValues[index], true))
+            row.setOnClickListener {
+                accentName = option
                 savePreferences()
-                dialog.dismiss()
+                accentDialog?.dismiss()
                 if (settingsOpen) renderSettingsScreen() else renderBrowser()
-            }.setNegativeButton(tr("Cancelar"), null).show()
+            }
+            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(5) })
+        }
+        accentDialog = AlertDialog.Builder(this)
+            .setTitle(tr("Cor de destaque"))
+            .setMessage(tr("Cor dos botões, seleção e indicadores"))
+            .setView(content)
+            .setNegativeButton(tr("Fechar"), null)
+            .create()
+        accentDialog?.show()
     }
 
     private fun showFolderColorMenu(file: File) {
