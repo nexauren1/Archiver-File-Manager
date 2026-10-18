@@ -4,3 +4,13 @@
 /build/
 /app/build/
 *.iml
+
+# Android signing material — never commit private keys or passwords
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.key
+keystore/
+app/build/keystore/
+key.properties
