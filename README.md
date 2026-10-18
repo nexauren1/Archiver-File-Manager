@@ -1,26 +1,48 @@
-# Archiver — Android File Manager
+# Archiver 0.4.0 — Android File Manager
 
-Archiver is a native Android application written in **Kotlin**. It is not a website. The interface is built inside the Android app and uses Android file APIs, with a lightweight dark explorer layout inspired by common file-manager conventions.
+**Archiver** is a native Android file manager written in Kotlin, inspired by classic archive managers such as ZArchiver. It is not a website wrapped in an app. Website and app are separate: the Android app runs on-device, while the website is published from `docs/`.
 
-## Current capabilities
+## Features
 
-- Browse shared internal storage after granting Android's special **Allow access to manage all files** permission.
-- Navigate across shared-storage folders without having to choose each folder individually.
-- Native vector icons for folders, archives, images, audio, video, APKs and PDF files.
-- Detailed, compact and grid modes; file size, modified date/time and configurable thumbnails.
-- Create folders and empty files, open/share, rename, delete, copy, move and paste items.
-- Multi-select, recursive filename search, sorting, hidden-file visibility, persistent favorites and explorer settings.
-- Create, browse, extract and test ZIP and 7Z archives.
-- ZIP/7Z extraction blocks unsafe paths and avoids overwriting conflicting file names in supported operations.
+- Shared-storage explorer with Android's special **Allow access to manage all files** permission, breadcrumb navigation, parent-folder entry, search, favorites, sorting, hidden-file toggle, multi-selection, and detailed/compact/grid views.
+- File actions: open/share, create, rename, copy, move, paste, delete, information, and per-folder color choices.
+- Type-aware icons for folders, text/code, documents, spreadsheets, archives, images, audio, video, APKs, PDFs and 3D-model files.
+- Image thumbnails, optional PDF/video/music/APK previews, and folder thumbnails when a folder contains an image.
+- ZIP and 7Z create, browse, test and extract; ZIP supports ZipCrypto/AES-256 passwords and split volumes. Compression levels are configurable.
+- Operation feedback: percentage, horizontal progress bar, current path/item, counts where available, in-app completion/error state and an ongoing/final notification when Android notification permission is allowed.
+- Built-in UTF-8 text editor for common text/code files up to 4 MiB, with save confirmation for unsaved changes.
+- GLB/GLTF metadata inspector for scene/node/mesh/material/texture/animation counts; interactive 3D rendering is delegated to a compatible external viewer.
+- UI preferences: Portuguese/English, dark/OLED-black/light themes, seven accent colors, custom folder colors, thumbnails and sorting preferences.
+- Two-language public project site under `docs/`, with a privacy page.
 
-## Storage permissions
+## Supported archive formats and limits
 
-On Android 11 and later, the application opens the system's special all-files-access settings screen. The user must enable it manually. This is needed for a file manager that operates across shared-storage folders. Android still restricts some app-private locations, including most of `Android/data`; this permission does not bypass those operating-system restrictions. Google Play also reviews broad storage access, so publication to Play Store requires an appropriate policy justification.
+The current archive engine focuses on ZIP and 7Z. ZIP creation supports encryption and split volumes; these options are not implemented for 7Z. RAR, TAR-family formats, root/Shizuku access, a plugin system, and embedded interactive 3D rendering are not implemented in this release. Android can still restrict private app directories such as `Android/data`, even when all-files access is granted.
 
-## Build and release
+## Website
 
-GitHub Actions builds a debug APK using JDK 17, Gradle 8.13, Android Gradle Plugin 8.13.2 and Kotlin. Pushes to `main` publish a GitHub prerelease.
+The GitHub Pages deployment workflow publishes `docs/` from `main`. If Pages is enabled for this repository, the site is available at:
 
-## Testing status
+https://nexauren1.github.io/Archiver-File-Manager/
 
-A successful CI build confirms compilation, not that every operation has been exercised on a physical device. Test destructive operations with disposable sample files before using the app on important data. The UI and storage workflow are still being refined toward the intended feature set.
+The site is independent from the APK; it is not used as the app UI.
+
+## Build
+
+- JDK 17
+- Gradle 8.13
+- Android Gradle Plugin 8.13.2
+- Kotlin
+- `gradle --no-daemon assembleDebug`
+
+GitHub Actions builds a debug APK and uploads it as the `Archiver-debug-APK` workflow artifact. A successful build validates compilation only; it does not replace physical-device testing.
+
+## Storage permission and privacy
+
+Android 11+ opens Android's special all-files-access settings page. The user must grant it explicitly. The permission does **not** grant root and does not bypass operating-system restrictions on other apps' private storage. Google Play also reviews broad storage access and requires an appropriate policy justification for distribution.
+
+Files are processed locally by the app. Before destructive actions or encryption/extraction, test with disposable sample files and verify that the selected paths and password are correct.
+
+## License and project status
+
+Archiver is an independent project and is not affiliated with ZArchiver. This is an early preview release; feature coverage and device behavior should be tested before important data is used.
