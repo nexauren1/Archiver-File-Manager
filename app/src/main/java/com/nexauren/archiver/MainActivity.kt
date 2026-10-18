@@ -30,6 +30,7 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.GridLayout
+import android.widget.HorizontalScrollView
 import android.widget.Switch
 import android.widget.ImageButton
 import android.widget.FrameLayout
@@ -74,6 +75,9 @@ class MainActivity : Activity() {
     private lateinit var pathView: TextView
     private lateinit var selectionView: TextView
     private lateinit var countView: TextView
+    private lateinit var breadcrumbRow: LinearLayout
+    private var selectionBar: LinearLayout? = null
+    private var addFab: ImageButton? = null
     private var gridRows: GridLayout? = null
     private var browserRendered = false
     private var settingsOpen = false
@@ -280,6 +284,19 @@ class MainActivity : Activity() {
         page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) },
             LinearLayout.LayoutParams(-1, dp(2)))
 
+        val breadcrumbScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            setPadding(dp(8), 0, dp(8), 0)
+            setBackgroundColor(0xFF202025.toInt())
+        }
+        breadcrumbRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        breadcrumbScroll.addView(breadcrumbRow, HorizontalScrollView.LayoutParams(-2, -1))
+        page.addView(breadcrumbScroll, LinearLayout.LayoutParams(-1, dp(38)))
+
         countView = label("", 13, 0xFFB9B9C3.toInt(), false).apply {
             setPadding(dp(16), dp(7), dp(16), dp(7))
             gravity = Gravity.CENTER_VERTICAL
@@ -294,7 +311,7 @@ class MainActivity : Activity() {
         }
         rows = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(4), dp(8), dp(88))
+            setPadding(dp(8), dp(4), dp(8), dp(104))
         }
         scroll.addView(rows)
         body.addView(scroll, FrameLayout.LayoutParams(-1, -1))
@@ -311,6 +328,27 @@ class MainActivity : Activity() {
         val fabParams = FrameLayout.LayoutParams(dp(58), dp(58), Gravity.END or Gravity.BOTTOM)
         fabParams.setMargins(0, 0, dp(20), dp(20))
         body.addView(fab, fabParams)
+        addFab = fab
+
+        selectionBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(2), dp(4), dp(2))
+            setBackgroundColor(0xFF292D40.toInt())
+            elevation = dp(10).toFloat()
+            visibility = View.GONE
+        }
+        selectionBar?.addView(selectionAction("▢", "Copiar") { stageClipboard(false) },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        selectionBar?.addView(selectionAction("⇄", "Mover") { stageClipboard(true) },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        selectionBar?.addView(selectionAction("ZIP", "Comprimir") { promptArchive(chosen(), "zip") },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        selectionBar?.addView(selectionAction("⌫", "Eliminar") { confirmDelete(chosen()) },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        selectionBar?.addView(selectionAction("⋮", "Mais") { showSelectionActions() },
+            LinearLayout.LayoutParams(0, dp(66), 1f))
+        body.addView(selectionBar, FrameLayout.LayoutParams(-1, dp(70), Gravity.BOTTOM))
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
         refreshFiles()
@@ -322,6 +360,7 @@ class MainActivity : Activity() {
         gridRows = null
         pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
         selectionView.text = currentDir.absolutePath
+        renderBreadcrumbs()
         if (useParentEntry && currentDir.canonicalFile != rootDir.canonicalFile) addParentRow()
 
         if (viewMode == "Grelha") {
@@ -352,6 +391,67 @@ class MainActivity : Activity() {
             else -> files.size.toString() + if (files.size == 1) " item" else " itens"
         }
         files.forEach { addFileRow(it) }
+        updateSelectionBar()
+    }
+
+    private fun renderBreadcrumbs() {
+        if (!::breadcrumbRow.isInitialized || !::rootDir.isInitialized || !::currentDir.isInitialized) return
+        breadcrumbRow.removeAllViews()
+        val root = rootDir.canonicalFile
+        val current = currentDir.canonicalFile
+        val rootIsCurrent = pathKey(root) == pathKey(current)
+        val rootSegment = TextView(this).apply {
+            text = "Armazenamento interno"
+            textSize = 12f
+            setTextColor(if (rootIsCurrent) 0xFFD8D3FF.toInt() else 0xFFE2E2E8.toInt())
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                currentDir = rootDir
+                selected.clear()
+                refreshFiles()
+            }
+        }
+        breadcrumbRow.addView(rootSegment, LinearLayout.LayoutParams(-2, -2))
+
+        val relative = if (pathKey(current) == pathKey(root)) "" else
+            current.path.removePrefix(root.path).trimStart(File.separatorChar)
+        var cursor = root
+        relative.split(File.separatorChar).filter { it.isNotBlank() }.forEach { part ->
+            breadcrumbRow.addView(TextView(this).apply {
+                text = "›"
+                textSize = 18f
+                setTextColor(0xFF858596.toInt())
+                gravity = Gravity.CENTER
+            }, LinearLayout.LayoutParams(-2, -2))
+            cursor = File(cursor, part)
+            val target = cursor
+            val isCurrent = pathKey(target) == pathKey(current)
+            val segment = TextView(this).apply {
+                text = part
+                textSize = 12f
+                setTextColor(if (isCurrent) 0xFFD8D3FF.toInt() else 0xFFE2E2E8.toInt())
+                setPadding(dp(6), dp(5), dp(8), dp(5))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    if (target.exists() && target.isDirectory && isWithinRoot(target)) {
+                        currentDir = target
+                        selected.clear()
+                        refreshFiles()
+                    }
+                }
+            }
+            breadcrumbRow.addView(segment, LinearLayout.LayoutParams(-2, -2))
+        }
+    }
+
+    private fun updateSelectionBar() {
+        val bar = selectionBar ?: return
+        val hasSelection = selected.isNotEmpty()
+        bar.visibility = if (hasSelection) View.VISIBLE else View.GONE
+        addFab?.visibility = if (hasSelection) View.GONE else View.VISIBLE
     }
 
     private fun safeList(dir: File): List<File> {
@@ -393,9 +493,9 @@ class MainActivity : Activity() {
         val item = LinearLayout(this).apply {
             orientation = if (inGrid) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
             gravity = if (inGrid) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
-            setPadding(dp(if (inGrid) 8 else 6), dp(if (inGrid) 12 else 8),
-                dp(if (inGrid) 8 else 10), dp(if (inGrid) 12 else 8))
-            background = roundedBackground(if (isSelected) 0xFF353348.toInt() else if (inGrid) 0xFF24242A.toInt() else 0xFF19191D.toInt(), 10)
+            setPadding(dp(if (inGrid) 8 else 4), dp(if (inGrid) 12 else 6),
+                dp(if (inGrid) 8 else 6), dp(if (inGrid) 12 else 6))
+            background = roundedBackground(if (isSelected) 0xFF353348.toInt() else if (inGrid) 0xFF24242A.toInt() else 0xFF19191D.toInt(), if (inGrid) 10 else 4)
             isClickable = true
             isFocusable = true
         }
@@ -404,8 +504,8 @@ class MainActivity : Activity() {
             contentDescription = if (file.isDirectory) "Pasta " + file.name else file.name
             scaleType = if (squareThumbnails) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
         }
-        val iconWidth = dp(if (inGrid) 72 else 64)
-        val iconHeight = dp(if (inGrid) 66 else 58)
+        val iconWidth = dp(if (inGrid) 72 else 48)
+        val iconHeight = dp(if (inGrid) 66 else 48)
         if (inGrid) item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { gravity = Gravity.CENTER_HORIZONTAL })
         else item.addView(icon, LinearLayout.LayoutParams(iconWidth, iconHeight).apply { rightMargin = dp(8) })
         if (shouldLoadThumbnail(file)) loadThumbnailAsync(file, icon)
@@ -422,7 +522,7 @@ class MainActivity : Activity() {
         }
         val name = TextView(this).apply {
             text = file.name.ifBlank { "(sem nome)" }
-            textSize = if (inGrid) 13f else if (viewMode == "Compacto") 14f else 16f
+            textSize = if (inGrid) 13f else if (viewMode == "Compacto") 13f else 15f
             setTextColor(if (isSelected) 0xFFD8D3FF.toInt() else 0xFFF3F3F5.toInt())
             typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
             maxLines = if (inGrid) 2 else if (viewMode == "Detalhado") 2 else 1
@@ -571,6 +671,23 @@ class MainActivity : Activity() {
                 13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
             }
         }.show()
+    }
+
+    private fun showSelectionActions() {
+        val options = arrayOf("Comprimir em ZIP", "Comprimir em 7Z", "Renomear", "Informações", "Limpar seleção")
+        AlertDialog.Builder(this)
+            .setTitle("${selected.size} selecionado(s)")
+            .setItems(options) { _, which ->
+                val items = chosen()
+                when (which) {
+                    0 -> promptArchive(items, "zip")
+                    1 -> promptArchive(items, "7z")
+                    2 -> if (items.size == 1) promptRename(items[0]) else toast("Para renomear, seleciona apenas um item.")
+                    3 -> if (items.size == 1) showInfo(items[0]) else toast("Seleciona apenas um item para ver as informações.")
+                    4 -> { selected.clear(); refreshFiles() }
+                }
+            }
+            .show()
     }
 
     private fun showSortMenu() {
@@ -1482,6 +1599,32 @@ class MainActivity : Activity() {
             }
             isClickable = true
             isFocusable = true
+            setOnClickListener { click() }
+        }
+
+    private fun selectionAction(symbol: String, title: String, click: () -> Unit): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(1), dp(2), dp(1), dp(2))
+            addView(TextView(this@MainActivity).apply {
+                text = symbol
+                textSize = if (symbol == "ZIP") 13f else 22f
+                gravity = Gravity.CENTER
+                setTextColor(0xFFD8D3FF.toInt())
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                maxLines = 1
+            }, LinearLayout.LayoutParams(-1, dp(30)))
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 10f
+                gravity = Gravity.CENTER
+                setTextColor(0xFFF0F0F4.toInt())
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(-1, dp(22)))
             setOnClickListener { click() }
         }
 
