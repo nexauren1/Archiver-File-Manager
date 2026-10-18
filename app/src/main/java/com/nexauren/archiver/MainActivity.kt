@@ -86,6 +86,11 @@ class MainActivity : Activity() {
     private var gridRows: GridLayout? = null
     private var browserRendered = false
     private var settingsOpen = false
+    private var editorOpen = false
+    private var editorDirty = false
+    private var editorFile: File? = null
+    private var editorInput: EditText? = null
+    private var closeEditorAfterSave = false
 
     private val selected = linkedSetOf<String>()
     private val favorites = linkedSetOf<String>()
@@ -363,7 +368,7 @@ class MainActivity : Activity() {
     }
 
     private fun refreshFiles() {
-        if (!browserRendered || settingsOpen || !hasStorageAccess()) return
+        if (!browserRendered || settingsOpen || editorOpen || !hasStorageAccess()) return
         rows.removeAllViews()
         gridRows = null
         pathView.text = currentDir.name?.ifBlank { "Armazenamento interno" } ?: "Armazenamento interno"
@@ -588,14 +593,31 @@ class MainActivity : Activity() {
     }
 
     private fun iconForFile(file: File): Int {
-        if (file.isDirectory) return R.drawable.ic_folder
+        if (file.isDirectory) {
+            return when (file.name.lowercase(Locale.ROOT)) {
+                "android" -> R.drawable.ic_folder_android
+                "dcim", "pictures", "picture", "collage", "myalbums" -> R.drawable.ic_folder_camera
+                "download", "downloads" -> R.drawable.ic_folder_download
+                "music", "musicas" -> R.drawable.ic_folder_music
+                "movies", "videos" -> R.drawable.ic_folder_video
+                "documents", "documentos" -> R.drawable.ic_folder_documents
+                else -> R.drawable.ic_folder
+            }
+        }
         return when (extension(file.name)) {
-            "zip", "7z", "rar", "tar", "gz", "bz2" -> R.drawable.ic_archive
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> R.drawable.ic_image
-            "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus" -> R.drawable.ic_audio
-            "mp4", "mkv", "webm", "avi", "mov", "3gp" -> R.drawable.ic_video
-            "apk" -> R.drawable.ic_android_file
+            "zip", "7z", "rar", "tar", "gz", "bz2", "xz", "lz4", "zst", "tgz", "tbz", "iso", "cab", "arj" -> R.drawable.ic_archive
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tif", "tiff", "svg" -> R.drawable.ic_image
+            "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus", "wma", "mid", "midi" -> R.drawable.ic_audio
+            "mp4", "mkv", "webm", "avi", "mov", "3gp", "m4v", "mpeg", "mpg" -> R.drawable.ic_video
+            "apk", "aab", "apks", "xapk" -> R.drawable.ic_android_file
             "pdf" -> R.drawable.ic_pdf
+            "txt", "md", "markdown", "log", "readme", "nfo" -> R.drawable.ic_text_file
+            "json", "xml", "yaml", "yml", "properties", "ini", "cfg", "conf", "toml",
+            "java", "kt", "kts", "js", "ts", "tsx", "jsx", "py", "html", "htm", "css",
+            "scss", "sql", "sh", "bat", "c", "cpp", "h", "hpp", "gradle", "gitignore" -> R.drawable.ic_code_file
+            "doc", "docx", "odt", "rtf", "pages", "epub" -> R.drawable.ic_document_file
+            "xls", "xlsx", "ods", "csv", "tsv" -> R.drawable.ic_spreadsheet_file
+            "glb", "gltf", "obj", "stl", "fbx", "3mf", "dae", "ply", "blend" -> R.drawable.ic_model3d_file
             else -> R.drawable.ic_file
         }
     }
@@ -918,16 +940,155 @@ class MainActivity : Activity() {
     }
 
     private fun openFile(file: File) {
+        if (isEditableTextFile(file) && file.length() <= 4L * 1024L * 1024L) {
+            showTextEditor(file)
+            return
+        }
         try {
             val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
             val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension(file.name)) ?: "*/*"
             val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            toast("Não existe uma aplicação para abrir este ficheiro.")
+            toast(if (isEditableTextFile(file)) "O ficheiro é demasiado grande para o editor integrado e não existe outra aplicação para o abrir." else "Não existe uma aplicação para abrir este ficheiro.")
         } catch (e: Exception) {
             toast("Não foi possível abrir: " + (e.message ?: "erro desconhecido"))
         }
+    }
+
+    private fun isEditableTextFile(file: File): Boolean = extension(file.name) in setOf(
+        "txt", "md", "markdown", "log", "nfo", "readme", "json", "xml", "yaml", "yml",
+        "properties", "ini", "cfg", "conf", "toml", "java", "kt", "kts", "js", "ts", "tsx",
+        "jsx", "py", "html", "htm", "css", "scss", "sql", "sh", "bat", "c", "cpp", "h",
+        "hpp", "gradle", "gitignore", "csv", "tsv"
+    )
+
+    private fun showTextEditor(file: File) {
+        val sourceText = try {
+            file.readText(Charsets.UTF_8)
+        } catch (e: Exception) {
+            toast("Não foi possível ler o ficheiro: " + (e.message ?: "erro"))
+            return
+        }
+        editorOpen = true
+        editorDirty = false
+        editorFile = file
+        closeEditorAfterSave = false
+
+        page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF19191D.toInt())
+        }
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, dp(8), 0)
+            setBackgroundColor(0xFF292D40.toInt())
+        }
+        toolbar.addView(toolbarIcon(R.drawable.ic_arrow_back, "Voltar ao gestor") { requestLeaveTextEditor() },
+            LinearLayout.LayoutParams(dp(48), dp(58)))
+        toolbar.addView(label(file.name, 16, 0xFFFFFFFF.toInt(), true).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        }, LinearLayout.LayoutParams(0, dp(58), 1f))
+        toolbar.addView(actionButton("Guardar") { saveTextEditor() }, LinearLayout.LayoutParams(-2, dp(44)))
+        page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
+        page.addView(View(this).apply { setBackgroundColor(0xFFB8B5FF.toInt()) }, LinearLayout.LayoutParams(-1, dp(2)))
+
+        val status = label("UTF-8  •  " + sourceText.count { it == '\n' }.plus(1) + " linhas", 11, 0xFFAAAAB4.toInt(), false)
+            .apply { setPadding(dp(14), dp(8), dp(14), dp(8)) }
+        val input = EditText(this).apply {
+            setText(sourceText)
+            setTextColor(0xFFF1F1F4.toInt())
+            setHintTextColor(0xFF8F8F99.toInt())
+            textSize = 14f
+            typeface = android.graphics.Typeface.MONOSPACE
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(dp(14), dp(12), dp(14), dp(24))
+            setBackgroundColor(0xFF19191D.toInt())
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setHorizontallyScrolling(false)
+        }
+        editorInput = input
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) {
+                editorDirty = text?.toString() != sourceText
+                status.text = "UTF-8  •  " + (text?.count { it == '\n' } ?: 0).plus(1) + " linhas" +
+                    if (editorDirty) "  •  alterações por guardar" else ""
+            }
+            override fun afterTextChanged(text: android.text.Editable?) = Unit
+        })
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(input, ScrollView.LayoutParams(-1, -1))
+        }
+        page.addView(status, LinearLayout.LayoutParams(-1, -2))
+        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+        input.requestFocus()
+    }
+
+    private fun saveTextEditor() {
+        val target = editorFile ?: return
+        val content = editorInput?.text?.toString() ?: return
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        runTask("A guardar texto…", bytes.size.toLong(), 1L) { meter ->
+            meter.show(target)
+            val parent = target.parentFile ?: throw IOException("A pasta do ficheiro não está disponível.")
+            val temp = File.createTempFile(".archiver-", ".tmp", parent)
+            val backup = File.createTempFile(".archiver-backup-", ".bak", parent)
+            backup.delete()
+            try {
+                FileOutputStream(temp).use { output ->
+                    var offset = 0
+                    while (offset < bytes.size) {
+                        val amount = minOf(32 * 1024, bytes.size - offset)
+                        output.write(bytes, offset, amount)
+                        offset += amount
+                        meter.bytesRead(amount.toLong(), target)
+                    }
+                }
+                if (!target.renameTo(backup)) throw IOException("Não foi possível proteger a versão anterior do ficheiro.")
+                if (!temp.renameTo(target)) {
+                    backup.renameTo(target)
+                    throw IOException("Não foi possível substituir o ficheiro original.")
+                }
+                backup.delete()
+                meter.itemDone(target)
+                "Ficheiro guardado: " + target.name
+            } finally {
+                temp.delete()
+                if (backup.exists() && target.exists()) backup.delete()
+            }
+        }
+    }
+
+    private fun requestLeaveTextEditor() {
+        if (!editorDirty) {
+            closeTextEditor()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Alterações por guardar")
+            .setMessage("Queres guardar as alterações antes de sair do editor?")
+            .setPositiveButton("Sair sem guardar") { _, _ -> closeTextEditor() }
+            .setNegativeButton("Continuar a editar", null)
+            .setNeutralButton("Guardar") { _, _ ->
+                closeEditorAfterSave = true
+                saveTextEditor()
+            }.show()
+    }
+
+    private fun closeTextEditor() {
+        editorOpen = false
+        editorDirty = false
+        editorFile = null
+        editorInput = null
+        closeEditorAfterSave = false
+        renderBrowser()
     }
 
     private fun shareFile(file: File) {
@@ -1547,9 +1708,14 @@ class MainActivity : Activity() {
     private fun showInfoPlaceholder() {}
 
     private fun shouldLoadThumbnail(file: File): Boolean {
-        if (file.isDirectory || !showThumbnails) return false
+        if (!showThumbnails) return false
+        if (file.isDirectory) {
+            return safeList(file).any { child ->
+                !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif")
+            }
+        }
         return when (extension(file.name)) {
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> true
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif" -> true
             "pdf" -> showPdfThumbnails
             "mp4", "mkv", "webm", "3gp", "avi", "mov", "m4v" -> showVideoThumbnails
             "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus" -> showAlbumCovers
@@ -1557,6 +1723,8 @@ class MainActivity : Activity() {
             else -> false
         }
     }
+
+    private fun thumbnailKey(file: File): String
 
     private fun thumbnailKey(file: File): String = file.absolutePath + ":" + file.lastModified() + ":" + file.length()
 
@@ -1572,6 +1740,7 @@ class MainActivity : Activity() {
     }
 
     private fun loadThumbnail(file: File): Bitmap? {
+        if (file.isDirectory) return folderThumbnail(file)
         return when (extension(file.name)) {
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -1590,6 +1759,33 @@ class MainActivity : Activity() {
             "apk" -> if (showApkIcons) apkThumbnail(file) else null
             else -> null
         }
+    }
+
+    private fun folderThumbnail(directory: File): Bitmap? {
+        val sample = safeList(directory).firstOrNull { child ->
+            !child.isDirectory && extension(child.name) in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif")
+        } ?: return null
+        val preview = loadThumbnail(sample) ?: return null
+        val size = dp(64)
+        val folderBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(folderBitmap)
+        val folderDrawable: Drawable = getDrawable(R.drawable.ic_folder) ?: return null
+        folderDrawable.setBounds(0, 0, size, size)
+        folderDrawable.draw(canvas)
+        val target = android.graphics.Rect(size / 3, size / 3, size * 3 / 4, size * 3 / 4)
+        val framePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF24242A.toInt() }
+        val targetRect = android.graphics.RectF(target)
+        canvas.drawRoundRect(targetRect, dp(3).toFloat(), dp(3).toFloat(), framePaint)
+        canvas.save()
+        canvas.clipRect(target)
+        canvas.drawBitmap(preview, null, target, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG))
+        canvas.restore()
+        framePaint.style = android.graphics.Paint.Style.STROKE
+        framePaint.strokeWidth = dp(1).toFloat()
+        framePaint.color = 0xFFFFFFFF.toInt()
+        canvas.drawRoundRect(targetRect, dp(3).toFloat(), dp(3).toFloat(), framePaint)
+        preview.recycle()
+        return folderBitmap
     }
 
     private fun scaleThumbnail(source: Bitmap?): Bitmap? {
@@ -1864,12 +2060,18 @@ class MainActivity : Activity() {
             val finalResult = result
             runOnUiThread {
                 if (dialog.isShowing) dialog.dismiss()
+                if (finalResult.startsWith("Ficheiro guardado:")) {
+                    editorDirty = false
+                    if (closeEditorAfterSave) closeTextEditor()
+                } else if (finalResult.startsWith("Erro:")) {
+                    closeEditorAfterSave = false
+                }
                 if (!isFinishing) {
                     percentView.text = "100%"
                     progressBar.progress = 100
                     detailView.text = finalResult
                     Toast.makeText(this, finalResult, Toast.LENGTH_LONG).show()
-                    if (hasStorageAccess() && browserRendered && !settingsOpen) refreshFiles()
+                    if (hasStorageAccess() && browserRendered && !settingsOpen && !editorOpen) refreshFiles()
                 }
                 showOperationNotification(message, finalResult, null, finished = true, failed = finalResult.startsWith("Erro:"))
             }
@@ -1967,6 +2169,10 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
+        if (editorOpen) {
+            requestLeaveTextEditor()
+            return
+        }
         if (settingsOpen) {
             settingsOpen = false
             renderBrowser()
