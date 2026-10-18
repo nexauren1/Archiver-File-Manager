@@ -520,6 +520,8 @@ public class MainActivity extends Activity {
                 String name = input.getText().toString().trim();
                 if (name.isEmpty()) { toast("Indique um nome."); return; }
                 if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(".zip")) name += ".zip";
+                try { name = uniqueName(current(), name); }
+                catch (IOException e) { toast("Não foi possível verificar o nome de destino."); return; }
                 DocumentFile out = current().createFile("application/zip", name);
                 if (out == null) { toast("Não foi possível criar o ZIP. Confirme o nome e as permissões."); return; }
                 final List<DocumentFile> sources = new ArrayList<>(files);
@@ -628,6 +630,8 @@ public class MainActivity extends Activity {
         if (makeSubfolder) {
             String name = archive.getName() == null ? "Arquivo" : archive.getName();
             int dot = name.lastIndexOf('.'); if (dot > 0) name = name.substring(0,dot);
+            try { name = uniqueName(targetDir, name); }
+            catch (IOException e) { toast("Não foi possível verificar o destino."); return; }
             destination = targetDir.createDirectory(name);
             if (destination == null) { toast("Não foi possível criar a pasta de destino."); return; }
         }
