@@ -1238,6 +1238,8 @@ class MainActivity : Activity() {
         if (canEditText) actions += "Ver/editar texto"
         actions += "Copiar para pasta atual"
         actions += "Mover para pasta atual"
+        actions += "Copiar para outra pasta…"
+        actions += "Mover para outra pasta…"
         actions += "Informações"
         actions += "Renomear"
         actions += if (isDirectory && (restrictedAccessIdentity.contains("ROOT", ignoreCase = true) || restrictedAccessIdentity.contains("UID 0"))) "Eliminar pasta e conteúdo" else if (isDirectory) "Eliminar pasta vazia" else "Eliminar ficheiro"
@@ -1249,6 +1251,8 @@ class MainActivity : Activity() {
                     "Ver/editar texto" -> openRestrictedTextFile(path, containingDirectory)
                     "Copiar para pasta atual" -> confirmTransferRestrictedEntry(path, name, false)
                     "Mover para pasta atual" -> confirmTransferRestrictedEntry(path, name, true)
+                    "Copiar para outra pasta…" -> chooseRestrictedDestination(path, name, false)
+                    "Mover para outra pasta…" -> chooseRestrictedDestination(path, name, true)
                     "Informações" -> showRestrictedFileInfo(entry)
                     "Renomear" -> promptRenameRestrictedEntry(path, name, containingDirectory)
                     "Eliminar pasta vazia", "Eliminar ficheiro", "Eliminar pasta e conteúdo" ->
@@ -1280,7 +1284,7 @@ class MainActivity : Activity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val name = input.text.toString()
                 if (name.isBlank() || name == "." || name == ".." ||
-                    name.any { it == '/' || it == '\\' || it == 0.toChar() }) {
+                    name.any { it == '/' || it == 92.toChar() || it == 0.toChar() }) {
                     toast("Nome de ficheiro inválido.")
                     return@setOnClickListener
                 }
@@ -1344,6 +1348,106 @@ class MainActivity : Activity() {
                 runRestrictedOperation(if (move) "A mover item…" else "A copiar item…", {
                     if (move) service.movePath(path, destination) else service.copyPath(path, destination)
                 }) { browseRestrictedDirectory(destinationDirectory.absolutePath) }
+            }
+            .show()
+    }
+
+    private fun chooseRestrictedDestination(sourcePath: String, name: String, move: Boolean) {
+        val roots = restrictedRootPaths.toList()
+        if (roots.isEmpty()) { showRestrictedStorageRoots(); return }
+        val labels = roots.map { root -> File(root).name.ifBlank { "/" } + " — " + root }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(if (move) "Mover para…" else "Copiar para…")
+            .setMessage("Escolhe a pasta de destino. Ficheiros existentes não serão substituídos.")
+            .setItems(labels) { _, which ->
+                browseRestrictedDestination(roots[which], sourcePath, name, move)
+            }
+            .setNegativeButton(tr("Cancelar"), null)
+            .show()
+    }
+
+    private fun browseRestrictedDestination(path: String, sourcePath: String, name: String, move: Boolean) {
+        val service = restrictedStorageService ?: return
+        thumbnailWorker.execute {
+            var payload: JSONObject? = null
+            var failure: String? = null
+            try {
+                payload = JSONObject(service.listDirectory(path))
+                if (payload?.has("error") == true) failure = payload.optString("error")
+            } catch (e: Exception) {
+                failure = e.message ?: "Não foi possível ler esta pasta."
+            }
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                if (failure != null || payload == null) {
+                    AlertDialog.Builder(this).setTitle("Destino inacessível")
+                        .setMessage(failure ?: "Não foi possível ler esta pasta.")
+                        .setPositiveButton(tr("OK"), null).show()
+                    return@runOnUiThread
+                }
+                val rootMode = restrictedAccessIdentity.contains("ROOT", ignoreCase = true) || restrictedAccessIdentity.contains("UID 0")
+                val atRoot = if (rootMode) {
+                    try { File(path).canonicalPath == File("/").canonicalPath } catch (_: Exception) { path == "/" }
+                } else {
+                    restrictedRootPaths.any { root ->
+                        try { File(root).canonicalPath == File(path).canonicalPath } catch (_: Exception) { root == path }
+                    }
+                }
+                val entries = payload!!.optJSONArray("entries")
+                val dirs = (0 until (entries?.length() ?: 0))
+                    .mapNotNull { entries?.optJSONObject(it) }
+                    .filter { it.optBoolean("directory") && !it.optBoolean("symlink") }
+                val labels = mutableListOf("Usar esta pasta: " + path)
+                if (!atRoot) labels += "↑ Pasta anterior"
+                val dirStart = labels.size
+                dirs.forEach { labels += "📁 " + it.optString("name") }
+                AlertDialog.Builder(this)
+                    .setTitle("Destino • " + File(path).name.ifBlank { "/" })
+                    .setMessage(path)
+                    .setItems(labels.toTypedArray()) { _, which ->
+                        when {
+                            which == 0 -> confirmRestrictedDestination(sourcePath, File(path, name).absolutePath, move, path)
+                            !atRoot && which == 1 -> {
+                                val parent = File(path).parentFile
+                                val parentAllowed = parent != null && restrictedRootPaths.any { root ->
+                                    try {
+                                        val rootPath = File(root).canonicalPath
+                                        val parentPath = parent.canonicalPath
+                                        rootPath == File("/").canonicalPath ||
+                                            parentPath == rootPath ||
+                                            parentPath.startsWith(rootPath.trimEnd(File.separatorChar) + File.separator)
+                                    } catch (_: Exception) { false }
+                                }
+                                if (parentAllowed) browseRestrictedDestination(parent!!.absolutePath, sourcePath, name, move)
+                                else showRestrictedStorageRoots()
+                            }
+                            which >= dirStart -> {
+                                val dir = dirs.getOrNull(which - dirStart) ?: return@setItems
+                                browseRestrictedDestination(dir.optString("path"), sourcePath, name, move)
+                            }
+                        }
+                    }
+                    .setNegativeButton(tr("Cancelar"), null)
+                    .show()
+            }
+        }
+    }
+
+    private fun confirmRestrictedDestination(source: String, destination: String, move: Boolean, refreshPath: String) {
+        val service = restrictedStorageService ?: return
+        val operation = if (move) "Mover" else "Copiar"
+        AlertDialog.Builder(this)
+            .setTitle("Confirmar " + operation.lowercase(Locale.ROOT))
+            .setMessage(operation + " para:\\n" + destination +
+                "\\n\\nA operação não substitui ficheiros existentes. Em modo ROOT, operações em pastas de aplicações podem causar perda de dados.")
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(operation) { _, _ ->
+                runRestrictedOperation(if (move) "A mover item…" else "A copiar item…", {
+                    if (move) service.movePath(source, destination) else service.copyPath(source, destination)
+                }) {
+                    val parent = File(source).parentFile?.absolutePath
+                    if (parent != null) browseRestrictedDirectory(parent) else showRestrictedStorageRoots()
+                }
             }
             .show()
     }
@@ -1519,9 +1623,13 @@ class MainActivity : Activity() {
     }
 
     private fun confirmDeleteRestrictedEntry(path: String, name: String, containingDirectory: String, isDirectory: Boolean) {
+        val rootMode = restrictedAccessIdentity.contains("ROOT", ignoreCase = true) || restrictedAccessIdentity.contains("UID 0")
+        val recursiveDirectoryDelete = isDirectory && rootMode
         AlertDialog.Builder(this)
-            .setTitle(if (isDirectory) "Eliminar pasta vazia" else "Eliminar ficheiro")
-            .setMessage("Eliminar «$name»? Esta ação não pode ser desfeita. As pastas só são eliminadas se estiverem vazias.")
+            .setTitle(if (recursiveDirectoryDelete) "Eliminar pasta e conteúdo" else if (isDirectory) "Eliminar pasta vazia" else "Eliminar ficheiro")
+            .setMessage(if (recursiveDirectoryDelete)
+                "ATENÇÃO: será eliminado todo o conteúdo de " + path + " recursivamente. Esta operação ROOT não pode ser desfeita. Confirma o caminho completo antes de continuar."
+                else "Eliminar " + name + "? Esta ação não pode ser desfeita. No modo ADB/Shell, só são eliminadas pastas vazias.")
             .setNegativeButton(tr("Cancelar"), null)
             .setPositiveButton("Eliminar") { _, _ ->
                 val service = restrictedStorageService ?: return@setPositiveButton
