@@ -28,6 +28,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 16 SDK
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
@@ -84,6 +90,7 @@ jobs:
             - Per-folder icon choices and folder background customization.
             - Storage usage summary and automatic current-folder refresh.
             - Updated bilingual website, privacy policy and terms of use.
+            - Targets Android 16 (API 36) for current Play submission requirements.
             - Version code 10.
 
       - name: Publish GitHub prerelease
