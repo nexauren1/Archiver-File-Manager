@@ -32,6 +32,7 @@ Features:
 - Search from the current folder, optionally including subfolders, with filename patterns and file-type filters.
 - Copy, move, rename, delete, share, inspect, and calculate SHA-256 checksums for files.
 - Create, browse, verify, and extract ZIP, 7Z, TAR, TAR.GZ, and TAR.BZ2 archives.
+- Optional, user-authorized advanced browsing for `Android/data` and `Android/obb` via Shizuku/Sui on compatible devices. It supports folder browsing, directory creation, renaming, deleting individual files or empty folders, and editing small UTF-8 text files. Access varies by Android version and manufacturer and does not include other apps' private `/data/data` directories.
 - Browse archive folders and extract individual files or a selected archived folder.
 - Use ZIP password protection with ZipCrypto or AES-256, split ZIP volumes, and configurable compression levels where supported.
 - Read PDFs, view common raster images, play supported audio, edit small UTF-8 text files, and inspect GLB/GLTF metadata.
@@ -56,6 +57,7 @@ Funcionalidades:
 - Pesquisar a partir da pasta atual, com opção de incluir subpastas, padrões de nomes e filtros por tipo.
 - Copiar, mover, renomear, eliminar, partilhar, consultar informações e calcular SHA-256 de ficheiros.
 - Criar, navegar, verificar e extrair arquivos ZIP, 7Z, TAR, TAR.GZ e TAR.BZ2.
+- Navegação avançada opcional e autorizada pelo utilizador em `Android/data` e `Android/obb` via Shizuku/Sui, em dispositivos compatíveis. Inclui navegação, criação de pastas, renomeação, eliminação de ficheiros individuais ou pastas vazias e edição de pequenos ficheiros de texto UTF-8. O acesso varia com a versão do Android e o fabricante e não inclui as pastas privadas `/data/data` de outras aplicações.
 - Navegar pelas pastas dentro de arquivos e extrair ficheiros individuais ou uma pasta selecionada.
 - Proteger ZIP com palavra-passe usando ZipCrypto ou AES-256, criar volumes ZIP divididos e ajustar a compressão quando suportado.
 - Ler PDF, visualizar imagens comuns, reproduzir áudio suportado, editar pequenos ficheiros de texto UTF-8 e consultar metadados GLB/GLTF.
@@ -82,6 +84,7 @@ O Archiver processa os ficheiros localmente. O manifesto atual não pede acesso 
 - [ ] Add the publisher's legal/display name and a monitored support contact to the website privacy/terms pages. The current legal pages explicitly note this outstanding commercial-distribution step.
 - [ ] Complete each store's developer verification, content rating, privacy declarations, country/region availability, and permission disclosures.
 - [ ] Test a clean install and upgrade path on physical devices, including storage permission denial/grant, archive extraction, password-protected ZIP files, copy/move/delete, PDF/audio readers, and Arabic RTL layout.
+- [ ] Test the optional Shizuku/Sui mode when the service is absent, denied, started, and stopped; confirm standard browsing still works and Android/data/obb access failures are explained rather than treated as app crashes.
 - [ ] Check the public APK's package ID, version name/code, certificate, and SHA-256 before uploading the same artifact to each store.
 
 ## Store-specific path

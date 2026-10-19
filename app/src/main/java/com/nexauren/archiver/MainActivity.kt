@@ -968,7 +968,7 @@ class MainActivity : Activity() {
             }
             if (Shizuku.isPreV11()) {
                 AlertDialog.Builder(this)
-                    .setTitle("Shizuku não suportado")
+                    .setTitle(tr("Shizuku não suportado"))
                     .setMessage("Esta função requer uma versão recente do Shizuku. O gestor normal continua disponível.")
                     .setPositiveButton(tr("OK"), null)
                     .show()
@@ -981,7 +981,7 @@ class MainActivity : Activity() {
             connectRestrictedStorageService()
         } catch (e: Exception) {
             AlertDialog.Builder(this)
-                .setTitle("Acesso avançado indisponível")
+                .setTitle(tr("Acesso avançado indisponível"))
                 .setMessage((e.message ?: "Não foi possível verificar o Shizuku.") +
                     "\n\nA navegação normal do Archiver não é afetada.")
                 .setPositiveButton(tr("OK"), null)
@@ -991,21 +991,21 @@ class MainActivity : Activity() {
 
     private fun showShizukuSetupDialog() {
         AlertDialog.Builder(this)
-            .setTitle("Pastas avançadas")
+            .setTitle(tr("Pastas avançadas"))
             .setMessage(
                 "Para tentar aceder a Android/data e Android/obb, instala e inicia o Shizuku (ou Sui num dispositivo com root) e autoriza o Archiver. " +
                 "Em Android 11 ou superior, o Shizuku pode ser iniciado através da Depuração sem fios. " +
                 "A compatibilidade depende da versão do Android e do fabricante; este recurso não garante que todas as pastas possam ser lidas ou alteradas.\n\n" +
                 "O Archiver limita esta sessão a Android/data e Android/obb. Não abre /data/data de outras aplicações: o Android mantém esses dados privados."
             )
-            .setPositiveButton("Obter Shizuku") { _, _ ->
+            .setPositiveButton(tr("Obter Shizuku")) { _, _ ->
                 try {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
                 } catch (_: Exception) {
                     toast("Abre https://shizuku.rikka.app/download/ no navegador.")
                 }
             }
-            .setNeutralButton("Verificar novamente") { _, _ -> openRestrictedFoldersFeature() }
+            .setNeutralButton(tr("Verificar novamente")) { _, _ -> openRestrictedFoldersFeature() }
             .setNegativeButton(tr("Cancelar"), null)
             .show()
     }
@@ -1031,7 +1031,7 @@ class MainActivity : Activity() {
             restrictedServiceBound = false
             restrictedServiceArgs = null
             AlertDialog.Builder(this)
-                .setTitle("Não foi possível iniciar o acesso avançado")
+                .setTitle(tr("Não foi possível iniciar o acesso avançado"))
                 .setMessage((e.message ?: "Confirma que o Shizuku está ativo e que o Archiver foi autorizado.") +
                     "\n\nO acesso depende das permissões que o Android e o fabricante concedem ao serviço.")
                 .setPositiveButton(tr("OK"), null)
@@ -1066,18 +1066,18 @@ class MainActivity : Activity() {
                 if (isFinishing) return@runOnUiThread
                 if (failure != null) {
                     AlertDialog.Builder(this)
-                        .setTitle("Acesso avançado indisponível")
+                        .setTitle(tr("Acesso avançado indisponível"))
                         .setMessage(failure + "\n\nConfirma se o Shizuku continua ativo e tenta novamente.")
-                        .setPositiveButton("Tentar novamente") { _, _ -> openRestrictedFoldersFeature() }
+                        .setPositiveButton(tr("Tentar novamente")) { _, _ -> openRestrictedFoldersFeature() }
                         .setNegativeButton(tr("Fechar"), null)
                         .show()
                     return@runOnUiThread
                 }
                 restrictedRootPaths = roots
                 val labels = arrayOf(
-                    "Android/data — dados externos das aplicações",
-                    "Android/obb — ficheiros de expansão",
-                    "Sobre permissões e limites"
+                    tr("Android/data — dados externos das aplicações"),
+                    tr("Android/obb — ficheiros de expansão"),
+                    tr("Sobre permissões e limites")
                 )
                 AlertDialog.Builder(this)
                     .setTitle("Pastas avançadas • $identity")
@@ -1097,7 +1097,7 @@ class MainActivity : Activity() {
 
     private fun showRestrictedStorageLimits() {
         AlertDialog.Builder(this)
-            .setTitle("Permissões das pastas")
+            .setTitle(tr("Permissões das pastas"))
             .setMessage(
                 "• Android/data e Android/obb são pastas externas restringidas por versões recentes do Android.\n\n" +
                 "• O modo avançado usa apenas um serviço Shizuku/Sui explicitamente autorizado. Em alguns dispositivos, o Android ou o fabricante ainda bloqueia a leitura, escrita, renomeação ou eliminação.\n\n" +
@@ -1133,10 +1133,10 @@ class MainActivity : Activity() {
                 if (isFinishing) return@runOnUiThread
                 if (failure != null || payload == null) {
                     AlertDialog.Builder(this)
-                        .setTitle("Pasta inacessível")
+                        .setTitle(tr("Pasta inacessível"))
                         .setMessage((failure ?: "Não foi possível ler a pasta.") +
                             "\n\nO acesso avançado não contorna todas as restrições de Android ou do fabricante.")
-                        .setPositiveButton("Tentar novamente") { _, _ -> browseRestrictedDirectory(path) }
+                        .setPositiveButton(tr("Tentar novamente")) { _, _ -> browseRestrictedDirectory(path) }
                         .setNeutralButton("Raízes") { _, _ -> showRestrictedStorageRoots() }
                         .setNegativeButton(tr("Fechar"), null)
                         .show()
@@ -1195,7 +1195,7 @@ class MainActivity : Activity() {
                 val entry = entries.getOrNull(itemIndex) ?: return@setItems
                 showRestrictedEntryActions(entry, path)
             }
-            .setNegativeButton("Raízes") { _, _ -> showRestrictedStorageRoots() }
+            .setNegativeButton(tr("Raízes")) { _, _ -> showRestrictedStorageRoots() }
             .setPositiveButton(tr("Fechar"), null)
             .show()
     }
@@ -4348,7 +4348,7 @@ class MainActivity : Activity() {
             "Cores das pastas" to "Folder colors", "Por pasta" to "Per folder",
             "Escolhe uma cor no menu de cada pasta" to "Choose a color from each folder's menu",
             "Abre o menu de uma pasta e escolhe Cor da pasta." to "Open a folder menu and choose Folder color.",
-            "O Archiver não implementa acesso ROOT nem Shizuku nesta versão. A permissão Android «Gerir todos os ficheiros» permite gerir o armazenamento partilhado, mas não desbloqueia as pastas privadas de outras aplicações nem concede root." to "Root or Shizuku access is not implemented in this version. Android's all-files permission manages shared storage, but it does not unlock other apps' private folders or grant root access.",
+            "O modo normal gere o armazenamento partilhado. O menu Pastas avançadas pode usar Shizuku/Sui, após autorização explícita, para tentar navegar em Android/data e Android/obb. O Android ou o fabricante ainda pode bloquear operações; /data/data de outras aplicações continua privado." to "Normal mode manages shared storage. The Advanced folders menu can use Shizuku/Sui, after explicit authorization, to try browsing Android/data and Android/obb. Android or the device maker may still block operations; other apps' /data/data remains private.",
             "Ainda não existe um sistema de plugins nesta versão. Os formatos e leitores disponíveis são os integrados na aplicação ou nas aplicações instaladas no dispositivo." to "A plugin system is not available yet. Supported formats and readers are built into Archiver or provided by apps installed on the device.",
             "ZIP: suporta ZipCrypto, AES-256 e divisão em volumes. 7Z: criação e extração com níveis de compressão; palavra-passe e volumes não estão ligados nesta versão." to "ZIP supports ZipCrypto, AES-256 and split volumes. 7Z supports create/extract and compression levels; password protection and split volumes are not wired up for 7Z in this version.",
             "Leitor de modelo 3D" to "3D model inspector", "Abrir noutra aplicação" to "Open in another app",
@@ -4365,7 +4365,7 @@ class MainActivity : Activity() {
             "Inspecionar modelo 3D" to "Inspect 3D model",
             "Comprimir para ZIP" to "Compress to ZIP", "Comprimir para 7Z" to "Compress to 7Z",
             "Comprimir…" to "Compress…", "text" to "text",
-            "Conceder acesso aos ficheiros" to "Grant file access", "Opções" to "Options",
+            "Conceder acesso aos ficheiros" to "Grant file access", "Opções" to "Options", "Pastas avançadas (Android/data e Android/obb)" to "Advanced folders (Android/data and Android/obb)",
             "Selecionar tudo" to "Select all", "Limpar seleção" to "Clear selection",
             "Copiar seleção" to "Copy selection", "Recortar seleção" to "Cut selection",
             "Colar" to "Paste", "Criar novo…" to "Create new…", "Comprimir em ZIP" to "Compress to ZIP",
@@ -4495,6 +4495,31 @@ class MainActivity : Activity() {
             "Oceano" to "Ocean", "Floresta" to "Forest", "Ameixa" to "Plum",
             "Fundo azul profundo" to "Deep blue background", "Fundo verde floresta" to "Forest green background", "Fundo ameixa" to "Plum background",
             "Escolhe entre seis fundos" to "Choose from six backgrounds"
+        ) + mapOf(
+            "Pastas avançadas" to "Advanced folders",
+            "Acesso avançado indisponível" to "Advanced access unavailable",
+            "Não foi possível iniciar o acesso avançado" to "Could not start advanced access",
+            "Shizuku não suportado" to "Unsupported Shizuku version",
+            "Obter Shizuku" to "Get Shizuku",
+            "Verificar novamente" to "Check again",
+            "Sobre permissões e limites" to "Permissions and limitations",
+            "Android/data — dados externos das aplicações" to "Android/data — apps' external data",
+            "Android/obb — ficheiros de expansão" to "Android/obb — expansion files",
+            "Pasta inacessível" to "Folder inaccessible",
+            "Permissões das pastas" to "Folder permissions",
+            "Não foi possível ligar o serviço de acesso avançado." to "Could not connect to the advanced-access service.",
+            "O serviço de acesso avançado ainda não está ligado." to "The advanced-access service is not connected yet.",
+            "Tentar novamente" to "Try again",
+            "Raízes" to "Root folders",
+            "Criar pasta" to "Create folder",
+            "Nome da pasta" to "Folder name",
+            "Ficheiro atualizado." to "File updated.",
+            "Não foi possível guardar" to "Could not save",
+            "Não foi possível abrir o texto" to "Could not open text",
+            "O texto excede o limite de 1 MiB." to "Text exceeds the 1 MiB limit.",
+            "A edição pode afetar a aplicação proprietária. Fecha-a primeiro e faz uma cópia de segurança." to "Editing may affect the owning app. Close it first and make a backup.",
+            "Por segurança, o Archiver não segue nem altera links simbólicos nesta vista." to "For safety, Archiver does not follow or modify symbolic links in this view.",
+            "Esta ação não pode ser desfeita. As pastas só são eliminadas se estiverem vazias." to "This action cannot be undone. Folders can only be deleted when empty."
         )
         if (appLanguage == "en") return english[text] ?: text
         val localized = when (appLanguage) {

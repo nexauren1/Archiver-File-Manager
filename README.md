@@ -27,7 +27,8 @@ Archiver is a native Android file manager written in Kotlin. It is an independen
 
 - Archive operations are built in for ZIP, 7Z, TAR, TAR.GZ and TAR.BZ2. RAR, ISO, CAB, ARJ and other formats may be identified by their file icons but are not yet supported for archive extraction. A file icon does not imply that the format can be decompressed.
 - ZIP supports encryption and split volumes. Password protection and split volumes are not implemented for 7Z or TAR-family archives.
-- Root/Shizuku access and a plugin system are not implemented and are intentionally not presented as available settings.
+- Optional advanced browsing can attempt to open `Android/data` and `Android/obb` through Shizuku/Sui after the user installs/starts and explicitly authorizes it. Availability is Android/OEM-dependent; this mode does not access other apps' private `/data/data` directories, and it does not grant root on its own.
+- A plugin system is not implemented in this version.
 - PDF rendering uses Android's `PdfRenderer`; audio playback depends on the codecs supported by the Android device. SVG, Office documents and unsupported image/audio/video formats can be opened through a compatible installed app.
 - Android may restrict access to private app directories such as `Android/data`, even when broad shared-storage access is granted. All-files permission does not grant root and does not bypass other apps' private storage protections.
 
@@ -53,7 +54,7 @@ No keystore or signing secrets belong in the repository. For permanent release s
 
 ## Storage and privacy
 
-The user must grant Android's special all-files-access permission when requested. This does not grant root and does not bypass OS restrictions on other apps' private storage. Files are processed locally by the app.
+The user must grant Android's special all-files-access permission when requested. This does not grant root and does not bypass OS restrictions on other apps' private storage. The optional Shizuku/Sui view of `Android/data` and `Android/obb` requires separate user authorization and remains subject to system and manufacturer restrictions. Files are processed locally by the app.
 
 Archiver is an independent project and is not affiliated with ZArchiver.
 
