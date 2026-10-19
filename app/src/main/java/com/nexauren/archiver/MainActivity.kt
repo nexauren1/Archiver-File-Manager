@@ -641,7 +641,9 @@ class MainActivity : Activity() {
             sum += value
             xor = xor xor java.lang.Long.rotateLeft(value, (value and 63L).toInt())
         }
-        return sum xor java.lang.Long.rotateLeft(xor, 17) xor entries.size.toLong()
+        val signature = sum xor java.lang.Long.rotateLeft(xor, 17) xor entries.size.toLong()
+        // Zero is reserved by the refresh scheduler to mean "not initialized".
+        return if (signature == 0L) Long.MIN_VALUE else signature
     }
 
     private fun updateStorageSummary() {
