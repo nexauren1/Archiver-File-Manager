@@ -1,6 +1,7 @@
 package com.nexauren.archiver;
 
 interface IRestrictedStorageService {
+    void destroy() = 16777114;
     String[] getRestrictedRootPaths();
     String getAccessIdentity();
     String listDirectory(String path);
