@@ -29,6 +29,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
 import android.provider.Settings
 import android.util.LruCache
 import android.view.Gravity
@@ -679,6 +681,17 @@ class MainActivity : Activity() {
 
     private fun safeList(dir: File): List<File> {
         return try { dir.listFiles()?.toList() ?: emptyList() } catch (_: SecurityException) { emptyList() }
+    }
+
+    /**
+     * Detect links without following them. Recursive file operations must not traverse
+     * symbolic links because their target can be outside the selected directory.
+     * Android's Os.lstat is available from API 21, below this app's minSdk.
+     */
+    private fun isSymbolicLink(file: File): Boolean = try {
+        (Os.lstat(file.absolutePath).st_mode and OsConstants.S_IFMT) == OsConstants.S_IFLNK
+    } catch (_: Exception) {
+        false
     }
 
     private fun addParentRow() {
@@ -1939,7 +1952,8 @@ class MainActivity : Activity() {
     ): Boolean {
         return try {
             onDeleting?.invoke(file)
-            if (file.isDirectory) {
+            // Unlink a symbolic link itself; never traverse and delete its target.
+            if (!isSymbolicLink(file) && file.isDirectory) {
                 val children = file.listFiles() ?: return false
                 for (child in children) {
                     if (!deleteRecursively(child, onDeleting, onDeleted)) return false
@@ -1999,7 +2013,13 @@ class MainActivity : Activity() {
             for (source in effectiveSources) {
                 val destination = File(target, uniqueName(target, source.name))
                 meter.show(source)
-                copyFileTree(source, destination, meter)
+                try {
+                    copyFileTree(source, destination, meter)
+                } catch (e: Exception) {
+                    // Do not leave a partial tree behind if a nested link or I/O error aborts the copy.
+                    deleteRecursively(destination)
+                    throw e
+                }
                 if (cut && !deleteRecursively(
                     source,
                     onDeleting = { working -> meter.show(working) },
@@ -2037,6 +2057,9 @@ class MainActivity : Activity() {
     }
 
     private fun copyFileTree(source: File, dest: File, meter: TaskProgress? = null) {
+        if (isSymbolicLink(source)) {
+            throw IOException("Por segurança, o Archiver não copia links simbólicos.")
+        }
         if (source.isDirectory) {
             if (!dest.mkdirs()) throw IOException("Não foi possível criar " + dest.name)
             meter?.show(source)
@@ -3512,7 +3535,10 @@ class MainActivity : Activity() {
             if (!visited.add(key)) return
             onVisit?.invoke(file)
             entries++
-            if (file.isFile) {
+            // Treat links as one entry but never follow them during search/size scans.
+            if (isSymbolicLink(file)) {
+                return@walk
+            } else if (file.isFile) {
                 bytes += file.length().coerceAtLeast(0L)
             } else if (file.isDirectory) {
                 safeList(file).forEach { walk(it, depth + 1) }
