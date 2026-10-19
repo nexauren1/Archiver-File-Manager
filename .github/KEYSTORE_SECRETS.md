@@ -1,28 +1,34 @@
 # Assinatura Android no GitHub Actions
 
-O repositório não deve conter ficheiros .jks/.keystore, passwords ou chaves privadas. O workflow continua a produzir o APK debug sem estas variáveis; quando as quatro variáveis abaixo existem, também gera um APK release assinado.
+O repositório usa um único fluxo de compilação, **Archiver — Single Signed APK**. Ele produz exclusivamente o APK de produção assinado. O fluxo não gera uma variante debug nem recorre a uma compilação sem assinatura.
 
-## Criar os secrets
+A mesma identidade de assinatura deve ser usada em todas as versões para permitir atualizações. Nunca coloques ficheiros `.jks`/`.keystore`, passwords ou chaves privadas no repositório.
 
-Em GitHub: Settings → Secrets and variables → Actions → New repository secret. Cria estes quatro secrets (não os coloques em Variables públicas):
+## Secrets obrigatórios
 
-- ANDROID_KEYSTORE_BASE64: conteúdo Base64 do ficheiro keystore.
-- ANDROID_KEYSTORE_PASSWORD: password do keystore.
-- ANDROID_KEY_ALIAS: alias da chave de assinatura.
-- ANDROID_KEY_PASSWORD: password da chave.
+Em GitHub: **Settings → Secrets and variables → Actions → New repository secret**. Configura estes quatro secrets protegidos:
+
+- `ANDROID_KEYSTORE_BASE64`: conteúdo Base64 do ficheiro keystore permanente.
+- `ANDROID_KEYSTORE_PASSWORD`: password do keystore.
+- `ANDROID_KEY_ALIAS`: alias da chave de assinatura.
+- `ANDROID_KEY_PASSWORD`: password da chave.
 
 Para gerar o Base64 localmente:
 
-- Linux: base64 -w 0 minha-chave.jks
-- macOS: base64 minha-chave.jks | tr -d '\n'
-- PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes('minha-chave.jks'))
+- Linux: `base64 -w 0 minha-chave.jks`
+- macOS: `base64 minha-chave.jks | tr -d '\\n'`
+- PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes('minha-chave.jks'))`
 
-Copia apenas a saída Base64 para o secret ANDROID_KEYSTORE_BASE64. Nunca publiques o keystore, Base64, passwords ou o ficheiro original no repositório.
+Copia apenas a saída Base64 para `ANDROID_KEYSTORE_BASE64`. Nunca publiques o keystore, o Base64, as passwords ou o ficheiro original no repositório.
 
-## Se já foram expostas chaves
+Se algum secret estiver em falta, o workflow falha e não publica APK algum; não existe fallback para debug ou APK sem assinatura.
 
-Apagar o ficheiro do branch não apaga o histórico Git. Se uma chave privada já esteve num repositório público, considera-a comprometida: gera uma nova chave e planeia a rotação de assinatura antes de distribuir atualizações.
+## Onde obter o único APK
 
-## Onde obter os APKs
+Abre **Actions → Archiver — Single Signed APK → execução concluída → Artifacts**. O artefacto `Archiver-<versão>-signed` contém apenas `Archiver-<versão>.apk` e o respetivo `.sha256`.
 
-Abre Actions → Android APK → execução concluída → Artifacts. O APK debug é sempre gerado. O APK release aparece apenas quando todos os quatro secrets estão configurados.
+Para criar uma GitHub Release, publica uma tag `vX.Y.Z` que corresponda a `versionName` em `app/build.gradle`, ou executa manualmente o workflow e marca `Publish a GitHub Release from this same signed APK`. O ficheiro anexado ao release é o mesmo APK produzido e verificado pelo workflow.
+
+## Se uma chave já foi exposta
+
+Apagar um ficheiro da branch não o apaga do histórico Git. Se uma chave privada já esteve num repositório público, considera-a comprometida e planeia uma rotação de assinatura antes de distribuir atualizações. Não troques a chave de assinatura de uma aplicação publicada sem uma estratégia de atualização compatível.

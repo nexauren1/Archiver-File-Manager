@@ -76,8 +76,8 @@ O Archiver processa os ficheiros localmente. O manifesto atual não pede acesso 
 ## Required before submission
 
 - [ ] Configure the four protected GitHub Actions secrets described in [KEYSTORE_SECRETS.md](../.github/KEYSTORE_SECRETS.md). Never commit the keystore or passwords.
-- [ ] Run the **Android Stable Release** workflow for version `0.8.0`; require a successful signed build, signature verification, ZIP alignment verification, and attached SHA-256 checksum.
-- [ ] Download the APK from the stable GitHub release, not from a preview release, and compare its checksum to the attached `.sha256` file.
+- [ ] Use the single **Archiver — Single Signed APK** workflow; for a stable release, push a matching `v0.8.0` tag (or run it manually with release publication enabled). Require the signed build, signature verification, ZIP alignment verification, and attached SHA-256 checksum.
+- [ ] Download the sole APK attached to the stable GitHub release and compare its checksum to the attached `.sha256` file. The current workflow does not create new debug/preview APKs.
 - [ ] Confirm that the release keystore is the intended long-term signing identity and back it up securely. A signing-key mismatch can prevent upgrades.
 - [ ] Add real screenshots captured from the release build on a supported Android device. Do not use mockups that imply unverified app behavior.
 - [ ] Export a square store icon from the app artwork at the resolution requested by the selected store.
@@ -102,6 +102,6 @@ Create the app in AppGallery Connect with a verified HUAWEI Developer account, u
 
 - The archive extraction code already rejects absolute paths and `..`/dot path components and checks canonical destination containment.
 - Recursive copy, measuring, and delete operations now explicitly avoid following symbolic links.
-- The release workflow is isolated from pull-request builds; signing secrets are only injected into the release job, checkout credentials are not persisted, and the release workflow verifies APK signature, alignment, and SHA-256 before creating a stable release.
+- The single production workflow builds only the signed release variant, checks that there is exactly one APK output, does not persist checkout credentials, and verifies the APK signature, alignment, and SHA-256 before creating a stable release.
 - CI compilation and static workflow checks do not replace device testing, store review, or an independent malware scan of the final APK.
 - No store upload or store approval is performed by this repository workflow.

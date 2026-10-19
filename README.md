@@ -38,19 +38,17 @@ The website is separate from the app and is published from `docs/` through GitHu
 
 https://nexauren1.github.io/Archiver-File-Manager/
 
-## Build
+## Build and release
 
-- JDK 17
-- Gradle 8.13
-- Android Gradle Plugin 8.13.2
-- Kotlin
-- `gradle --no-daemon assembleDebug`
-
-GitHub Actions builds a debug APK and publishes it as a workflow artifact. A successful build validates compilation, not physical-device behavior; test destructive and archive operations with disposable sample files first.
+- JDK 17, Gradle 8.13, Android Gradle Plugin 8.13.2, and Kotlin.
+- The single GitHub Actions workflow is **Archiver — Single Signed APK**. Every push to `main` builds one signed production APK. A matching version tag (for example `v0.8.0`) builds that same release variant and attaches the APK and its SHA-256 checksum to the GitHub Release.
+- The workflow runs `assembleRelease`, checks that exactly one APK exists, verifies its signature with `apksigner`, and checks ZIP alignment with `zipalign`. No debug APK is built, uploaded, or published by the current workflow.
+- The downloadable workflow artifact contains one APK plus its checksum file; the GitHub Release attaches that exact APK and checksum. The checksum is a text file, not a second application.
+- A permanent signing identity is mandatory. If any required signing secret is missing, the workflow fails rather than publishing an unsigned or debug build. Configure the four protected secrets described in [`.github/KEYSTORE_SECRETS.md`](.github/KEYSTORE_SECRETS.md).
 
 ## Signing
 
-No keystore or signing secrets belong in the repository. For permanent release signing, keep the keystore outside version control and configure the signing passwords, key alias and keystore file through protected release secrets or a secure local environment.
+The release keystore and passwords must never be committed to the repository. GitHub Actions reads the long-term release identity from protected repository secrets and uses that same identity for every build, allowing signed releases to be upgraded without changing their signing certificate.
 
 ## Storage and privacy
 
@@ -65,5 +63,5 @@ Archiver is an independent project and is not affiliated with ZArchiver.
 - O seletor de idioma apresenta cada idioma como uma opção tocável, com indicação da seleção atual.
 - A opção de cores permite escolher uma subpasta e aplicar/remover uma cor visual.
 - O leitor de áudio tem barra de progresso, navegação temporal e transferência explícita para reprodução em segundo plano, com notificação para parar.
-- O workflow Actions produz sempre um APK debug e, quando os quatro secrets de assinatura estão configurados, também gera um APK release assinado.
+- O workflow Actions unificado produz apenas um APK de produção assinado; não compila nem publica variantes debug/teste.
 - Configuração de assinatura: consulte [`.github/KEYSTORE_SECRETS.md`](.github/KEYSTORE_SECRETS.md). Nunca carregue keystores ou passwords para o repositório.
