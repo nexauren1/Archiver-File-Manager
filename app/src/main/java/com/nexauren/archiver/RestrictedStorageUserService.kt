@@ -30,6 +30,13 @@ import java.util.Locale
  * Android/obb trees; it never accesses /data/data or other apps' internal sandboxes.
  */
 class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
+    private data class ListedEntry(
+        val file: File,
+        val symbolicLink: Boolean,
+        val directory: Boolean,
+        val sortName: String
+    )
+
 
     override fun destroy() { System.exit(0) }
 
@@ -66,15 +73,40 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
             val files = directory.listFiles() ?: throw IOException(
                 "O Android ou o fabricante bloqueou a leitura desta pasta. A permissão avançada não garante acesso em todos os dispositivos."
             )
+
+            // Cache metadata so sorting never repeats lstat() for every comparator call.
+            // For very large folders, retain only the first N entries using a bounded
+            // heap instead of sorting every entry just to discard everything after N.
+            val comparator = compareByDescending<ListedEntry> { it.directory }.thenBy { it.sortName }
+            val sorted = if (files.size <= MAX_DIRECTORY_ENTRIES) {
+                files.map { child ->
+                    val link = isSymbolicLink(child)
+                    ListedEntry(child, link, !link && child.isDirectory, child.name.lowercase(Locale.ROOT))
+                }.sortedWith(comparator)
+            } else {
+                // A reversed comparator places the worst retained candidate at the heap head.
+                val best = java.util.PriorityQueue<ListedEntry>(MAX_DIRECTORY_ENTRIES, comparator.reversed())
+                files.forEach { child ->
+                    val link = isSymbolicLink(child)
+                    val entry = ListedEntry(child, link, !link && child.isDirectory, child.name.lowercase(Locale.ROOT))
+                    if (best.size < MAX_DIRECTORY_ENTRIES) {
+                        best.add(entry)
+                    } else if (comparator.compare(entry, best.peek()) < 0) {
+                        best.poll()
+                        best.add(entry)
+                    }
+                }
+                best.toList().sortedWith(comparator)
+            }
+
             val entries = JSONArray()
-            val sorted = files.sortedWith(compareByDescending<File> { it.isDirectory && !isSymbolicLink(it) }
-                .thenBy { it.name.lowercase() })
-            sorted.take(MAX_DIRECTORY_ENTRIES).forEach { child ->
-                val link = isSymbolicLink(child)
+            sorted.forEach { item ->
+                val child = item.file
+                val link = item.symbolicLink
                 entries.put(JSONObject()
                     .put("name", child.name)
                     .put("path", child.absolutePath)
-                    .put("directory", !link && child.isDirectory)
+                    .put("directory", item.directory)
                     .put("symlink", link)
                     .put("size", if (!link && child.isFile) child.length().coerceAtLeast(0L) else 0L)
                     .put("modified", child.lastModified())
@@ -477,7 +509,8 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
                     output.write(buffer, 0, n)
                     totalBytes[0] += n
                 }
-                output.fd.sync()
+                // Closing the stream flushes writes. Avoid forcing a disk sync for every
+                // archive member; many small files otherwise make extraction very slow.
             }
         } catch (e: Exception) {
             try { target.delete() } catch (_: Exception) {}
@@ -494,13 +527,13 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         } else if (source.isFile) {
             FileInputStream(source).use { input ->
                 FileOutputStream(destination).use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 4)
+                    // Larger blocks reduce system-call overhead when transferring large files.
+                    val buffer = ByteArray(128 * 1024)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
-                        output.write(buffer, 0, count)
+                        if (count > 0) output.write(buffer, 0, count)
                     }
-                    output.fd.sync()
                 }
             }
         } else throw IOException("Tipo de ficheiro especial não suportado: " + source.absolutePath)
