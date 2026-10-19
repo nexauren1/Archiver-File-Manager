@@ -280,7 +280,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
     private fun ensureNotCriticalSystemRoot(file: File, action: String) {
         val critical = setOf(
             "/", "/data", "/system", "/system/vendor", "/system/product",
-            "/vendor", "/product", "/apex", "/proc", "/sys", "/dev"
+            "/vendor", "/product", "/apex", "/proc", "/sys", "/dev", "/system_ext", "/odm", "/metadata", "/mnt", "/storage", "/config", "/linkerconfig"
         )
         if (file.canonicalPath in critical) {
             throw IOException("A ação '" + action + "' está bloqueada para uma raiz crítica do Android: " + file.absolutePath)
