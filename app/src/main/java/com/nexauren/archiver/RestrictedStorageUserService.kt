@@ -517,8 +517,8 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
                     output.write(buffer, 0, n)
                     totalBytes[0] += n
                 }
-                // Closing the stream flushes writes. Avoid forcing a disk sync for every
-                // archive member; many small files otherwise make extraction very slow.
+                // Close normally and let the OS batch writes; avoid forcing a disk sync for
+                // every archive member, which makes extraction of many small files very slow.
             }
         } catch (e: Exception) {
             try { target.delete() } catch (_: Exception) {}
