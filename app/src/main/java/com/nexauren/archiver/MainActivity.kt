@@ -955,6 +955,485 @@ class MainActivity : Activity() {
 
     private fun pathKey(file: File): String = try { file.canonicalPath } catch (_: Exception) { file.absolutePath }
 
+
+    /**
+     * Optional user-authorized view into the shared Android/data and Android/obb trees.
+     * Ordinary file browsing remains unchanged if Shizuku/Sui is absent or denied.
+     */
+    private fun openRestrictedFoldersFeature() {
+        try {
+            if (!Shizuku.pingBinder()) {
+                showShizukuSetupDialog()
+                return
+            }
+            if (Shizuku.isPreV11()) {
+                AlertDialog.Builder(this)
+                    .setTitle("Shizuku não suportado")
+                    .setMessage("Esta função requer uma versão recente do Shizuku. O gestor normal continua disponível.")
+                    .setPositiveButton(tr("OK"), null)
+                    .show()
+                return
+            }
+            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                Shizuku.requestPermission(restrictedPermissionRequestCode)
+                return
+            }
+            connectRestrictedStorageService()
+        } catch (e: Exception) {
+            AlertDialog.Builder(this)
+                .setTitle("Acesso avançado indisponível")
+                .setMessage((e.message ?: "Não foi possível verificar o Shizuku.") +
+                    "\n\nA navegação normal do Archiver não é afetada.")
+                .setPositiveButton(tr("OK"), null)
+                .show()
+        }
+    }
+
+    private fun showShizukuSetupDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Pastas avançadas")
+            .setMessage(
+                "Para tentar aceder a Android/data e Android/obb, instala e inicia o Shizuku (ou Sui num dispositivo com root) e autoriza o Archiver. " +
+                "Em Android 11 ou superior, o Shizuku pode ser iniciado através da Depuração sem fios. " +
+                "A compatibilidade depende da versão do Android e do fabricante; este recurso não garante que todas as pastas possam ser lidas ou alteradas.\n\n" +
+                "O Archiver limita esta sessão a Android/data e Android/obb. Não abre /data/data de outras aplicações: o Android mantém esses dados privados."
+            )
+            .setPositiveButton("Obter Shizuku") { _, _ ->
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
+                } catch (_: Exception) {
+                    toast("Abre https://shizuku.rikka.app/download/ no navegador.")
+                }
+            }
+            .setNeutralButton("Verificar novamente") { _, _ -> openRestrictedFoldersFeature() }
+            .setNegativeButton(tr("Cancelar"), null)
+            .show()
+    }
+
+    private fun connectRestrictedStorageService() {
+        if (restrictedStorageService != null) {
+            showRestrictedStorageRoots()
+            return
+        }
+        if (restrictedServiceBound) return
+        try {
+            val args = Shizuku.UserServiceArgs(
+                ComponentName(packageName, RestrictedStorageUserService::class.java.name)
+            )
+                .daemon(false)
+                .processNameSuffix("restricted_storage")
+                .tag("archiver-restricted-storage")
+                .version(1)
+            restrictedServiceArgs = args
+            restrictedServiceBound = true
+            Shizuku.bindUserService(args, restrictedServiceConnection)
+        } catch (e: Exception) {
+            restrictedServiceBound = false
+            restrictedServiceArgs = null
+            AlertDialog.Builder(this)
+                .setTitle("Não foi possível iniciar o acesso avançado")
+                .setMessage((e.message ?: "Confirma que o Shizuku está ativo e que o Archiver foi autorizado.") +
+                    "\n\nO acesso depende das permissões que o Android e o fabricante concedem ao serviço.")
+                .setPositiveButton(tr("OK"), null)
+                .show()
+        }
+    }
+
+    private fun showRestrictedStorageRoots() {
+        val service = restrictedStorageService ?: run {
+            toast("O serviço de acesso avançado ainda não está ligado.")
+            return
+        }
+        val progress = ProgressDialog(this).apply {
+            setMessage("A verificar Android/data e Android/obb…")
+            setProgressStyle(ProgressDialog.STYLE_SPINNER)
+            setCancelable(false)
+            show()
+        }
+        thumbnailWorker.execute {
+            var identity = "Shizuku"
+            var roots: List<String> = emptyList()
+            var failure: String? = null
+            try {
+                identity = service.getAccessIdentity()
+                roots = service.getRestrictedRootPaths().toList()
+                if (roots.size < 2) throw IOException("Não foi possível identificar as pastas protegidas do armazenamento principal.")
+            } catch (e: Exception) {
+                failure = e.message ?: "O serviço deixou de responder."
+            }
+            runOnUiThread {
+                progress.dismiss()
+                if (isFinishing) return@runOnUiThread
+                if (failure != null) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Acesso avançado indisponível")
+                        .setMessage(failure + "\n\nConfirma se o Shizuku continua ativo e tenta novamente.")
+                        .setPositiveButton("Tentar novamente") { _, _ -> openRestrictedFoldersFeature() }
+                        .setNegativeButton(tr("Fechar"), null)
+                        .show()
+                    return@runOnUiThread
+                }
+                restrictedRootPaths = roots
+                val labels = arrayOf(
+                    "Android/data — dados externos das aplicações",
+                    "Android/obb — ficheiros de expansão",
+                    "Sobre permissões e limites"
+                )
+                AlertDialog.Builder(this)
+                    .setTitle("Pastas avançadas • $identity")
+                    .setMessage("O acesso é opcional. Modificar ficheiros de outras aplicações pode causar falhas ou perda de dados. Fecha a aplicação proprietária antes de alterar os seus ficheiros.")
+                    .setItems(labels) { _, which ->
+                        when (which) {
+                            0 -> browseRestrictedDirectory(roots[0])
+                            1 -> browseRestrictedDirectory(roots[1])
+                            2 -> showRestrictedStorageLimits()
+                        }
+                    }
+                    .setNegativeButton(tr("Fechar"), null)
+                    .show()
+            }
+        }
+    }
+
+    private fun showRestrictedStorageLimits() {
+        AlertDialog.Builder(this)
+            .setTitle("Permissões das pastas")
+            .setMessage(
+                "• Android/data e Android/obb são pastas externas restringidas por versões recentes do Android.\n\n" +
+                "• O modo avançado usa apenas um serviço Shizuku/Sui explicitamente autorizado. Em alguns dispositivos, o Android ou o fabricante ainda bloqueia a leitura, escrita, renomeação ou eliminação.\n\n" +
+                "• /data/data contém dados internos privados de outras aplicações e não é acessível através do Shizuku iniciado como ADB/shell. Não faz parte deste explorador.\n\n" +
+                "• O Archiver não abre links simbólicos nesta vista, não elimina pastas não vazias e limita o editor de texto a 1 MiB."
+            )
+            .setPositiveButton(tr("OK"), null)
+            .show()
+    }
+
+    private fun browseRestrictedDirectory(path: String) {
+        val service = restrictedStorageService ?: run {
+            toast("O Shizuku foi desligado. Liga-o e tenta novamente.")
+            return
+        }
+        val progress = ProgressDialog(this).apply {
+            setMessage("A ler pasta protegida…")
+            setProgressStyle(ProgressDialog.STYLE_SPINNER)
+            setCancelable(false)
+            show()
+        }
+        thumbnailWorker.execute {
+            var payload: JSONObject? = null
+            var failure: String? = null
+            try {
+                payload = JSONObject(service.listDirectory(path))
+                if (payload?.has("error") == true) failure = payload?.optString("error")
+            } catch (e: Exception) {
+                failure = e.message ?: "O Android recusou a leitura desta pasta."
+            }
+            runOnUiThread {
+                progress.dismiss()
+                if (isFinishing) return@runOnUiThread
+                if (failure != null || payload == null) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Pasta inacessível")
+                        .setMessage((failure ?: "Não foi possível ler a pasta.") +
+                            "\n\nO acesso avançado não contorna todas as restrições de Android ou do fabricante.")
+                        .setPositiveButton("Tentar novamente") { _, _ -> browseRestrictedDirectory(path) }
+                        .setNeutralButton("Raízes") { _, _ -> showRestrictedStorageRoots() }
+                        .setNegativeButton(tr("Fechar"), null)
+                        .show()
+                } else {
+                    presentRestrictedDirectory(path, payload!!)
+                }
+            }
+        }
+    }
+
+    private fun presentRestrictedDirectory(path: String, payload: JSONObject) {
+        val array = payload.optJSONArray("entries") ?: org.json.JSONArray()
+        val entries = (0 until array.length()).mapNotNull { index -> array.optJSONObject(index) }
+        val atRoot = restrictedRootPaths.any { root ->
+            try { File(root).canonicalPath == File(path).canonicalPath } catch (_: Exception) { root == path }
+        }
+        val labels = ArrayList<String>()
+        labels += "＋ Criar pasta"
+        if (!atRoot) labels += "↑ Pasta anterior"
+        entries.forEach { entry ->
+            val name = entry.optString("name", "(sem nome)")
+            labels += when {
+                entry.optBoolean("symlink") -> "🔗 $name (atalho)"
+                entry.optBoolean("directory") -> "📁 $name"
+                else -> "📄 $name  •  " + formatSize(entry.optLong("size", 0L))
+            }
+        }
+        val message = buildString {
+            append(path)
+            if (payload.optBoolean("truncated")) append("\nA mostrar apenas os primeiros 2000 itens.")
+        }
+        AlertDialog.Builder(this)
+            .setTitle(File(path).name.ifBlank { "Android" })
+            .setMessage(message)
+            .setItems(labels.toTypedArray()) { _, which ->
+                if (which == 0) {
+                    promptCreateRestrictedDirectory(path)
+                    return@setItems
+                }
+                var itemIndex = which - 1
+                if (!atRoot) {
+                    if (which == 1) {
+                        val parent = File(path).parentFile
+                        if (parent != null && restrictedRootPaths.any { root ->
+                                try {
+                                    val rootPath = File(root).canonicalPath
+                                    val parentPath = parent.canonicalPath
+                                    parentPath == rootPath || parentPath.startsWith(rootPath + File.separator)
+                                } catch (_: Exception) { false }
+                            }) browseRestrictedDirectory(parent.absolutePath)
+                        else showRestrictedStorageRoots()
+                        return@setItems
+                    }
+                    itemIndex = which - 2
+                }
+                val entry = entries.getOrNull(itemIndex) ?: return@setItems
+                showRestrictedEntryActions(entry, path)
+            }
+            .setNegativeButton("Raízes") { _, _ -> showRestrictedStorageRoots() }
+            .setPositiveButton(tr("Fechar"), null)
+            .show()
+    }
+
+    private fun showRestrictedEntryActions(entry: JSONObject, containingDirectory: String) {
+        val path = entry.optString("path")
+        val name = entry.optString("name")
+        val isDirectory = entry.optBoolean("directory")
+        val isLink = entry.optBoolean("symlink")
+        if (isLink) {
+            AlertDialog.Builder(this)
+                .setTitle("Atalho simbólico")
+                .setMessage("Por segurança, o Archiver não segue nem altera links simbólicos nesta vista.")
+                .setPositiveButton(tr("OK"), null)
+                .show()
+            return
+        }
+        val canEditText = !isDirectory && isRestrictedTextFile(name)
+        val actions = ArrayList<String>()
+        if (isDirectory) actions += "Abrir pasta"
+        if (canEditText) actions += "Ver/editar texto"
+        actions += "Renomear"
+        actions += if (isDirectory) "Eliminar pasta vazia" else "Eliminar ficheiro"
+        AlertDialog.Builder(this)
+            .setTitle(name)
+            .setItems(actions.toTypedArray()) { _, which ->
+                when (actions[which]) {
+                    "Abrir pasta" -> browseRestrictedDirectory(path)
+                    "Ver/editar texto" -> openRestrictedTextFile(path, containingDirectory)
+                    "Renomear" -> promptRenameRestrictedEntry(path, name, containingDirectory)
+                    "Eliminar pasta vazia", "Eliminar ficheiro" ->
+                        confirmDeleteRestrictedEntry(path, name, containingDirectory, isDirectory)
+                }
+            }
+            .setNegativeButton(tr("Cancelar"), null)
+            .show()
+    }
+
+    private fun isRestrictedTextFile(name: String): Boolean =
+        name.substringAfterLast('.', "").lowercase(Locale.ROOT) in setOf(
+            "txt", "xml", "json", "ini", "cfg", "conf", "properties", "log", "yml", "yaml",
+            "html", "htm", "css", "js", "md", "csv", "toml", "sh", "kt", "java", "kts", "sql", "py", "env"
+        )
+
+    private fun openRestrictedTextFile(path: String, containingDirectory: String) {
+        val service = restrictedStorageService ?: return
+        val progress = ProgressDialog(this).apply {
+            setMessage("A abrir texto…")
+            setProgressStyle(ProgressDialog.STYLE_SPINNER)
+            setCancelable(false)
+            show()
+        }
+        thumbnailWorker.execute {
+            var text: String? = null
+            var failure: String? = null
+            try { text = service.readTextFile(path) } catch (e: Exception) {
+                failure = e.message ?: "O ficheiro não pode ser lido como texto."
+            }
+            runOnUiThread {
+                progress.dismiss()
+                if (isFinishing) return@runOnUiThread
+                if (failure != null || text == null) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Não foi possível abrir o texto")
+                        .setMessage(failure ?: "Conteúdo indisponível.")
+                        .setPositiveButton(tr("OK"), null)
+                        .show()
+                    return@runOnUiThread
+                }
+                showRestrictedTextEditor(path, containingDirectory, text!!)
+            }
+        }
+    }
+
+    private fun showRestrictedTextEditor(path: String, containingDirectory: String, initialText: String) {
+        val input = EditText(this).apply {
+            setText(initialText)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+            typeface = android.graphics.Typeface.MONOSPACE
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            minLines = 8
+            maxLines = 24
+        }
+        val scroll = ScrollView(this).apply { addView(input, LinearLayout.LayoutParams(-1, -2)) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(File(path).name)
+            .setMessage("A edição pode afetar a aplicação proprietária. Fecha-a primeiro e faz uma cópia de segurança.")
+            .setView(scroll)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setNeutralButton("Guardar", null)
+            .setPositiveButton(tr("Fechar"), null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val service = restrictedStorageService ?: run {
+                    toast("O serviço Shizuku deixou de estar disponível.")
+                    return@setOnClickListener
+                }
+                val value = input.text?.toString().orEmpty()
+                if (value.toByteArray(Charsets.UTF_8).size > 1024 * 1024) {
+                    toast("O texto excede o limite de 1 MiB.")
+                    return@setOnClickListener
+                }
+                val progress = ProgressDialog(this).apply {
+                    setMessage("A guardar texto…")
+                    setProgressStyle(ProgressDialog.STYLE_SPINNER)
+                    setCancelable(false)
+                    show()
+                }
+                thumbnailWorker.execute {
+                    var success = false
+                    var failure: String? = null
+                    try { success = service.writeTextFile(path, value) } catch (e: Exception) {
+                        failure = e.message ?: "O Android recusou a gravação."
+                    }
+                    runOnUiThread {
+                        progress.dismiss()
+                        if (success) {
+                            toast("Ficheiro atualizado.")
+                            dialog.dismiss()
+                            browseRestrictedDirectory(containingDirectory)
+                        } else {
+                            AlertDialog.Builder(this)
+                                .setTitle("Não foi possível guardar")
+                                .setMessage(failure ?: "O Android ou o fabricante bloqueou a escrita. O ficheiro pode continuar inalterado.")
+                                .setPositiveButton(tr("OK"), null)
+                                .show()
+                        }
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun promptCreateRestrictedDirectory(parentPath: String) {
+        val input = EditText(this).apply {
+            hint = "Nome da pasta"
+            setSingleLine(true)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Criar pasta")
+            .setView(input)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton("Criar", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = input.text.toString()
+                if (name.isBlank() || name == "." || name == ".." || name.contains('/') || name.contains('\\')) {
+                    toast("Nome de pasta inválido.")
+                    return@setOnClickListener
+                }
+                val service = restrictedStorageService ?: return@setOnClickListener
+                runRestrictedOperation("A criar pasta…", { service.createDirectory(File(parentPath, name).absolutePath) }) {
+                    browseRestrictedDirectory(parentPath)
+                }
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun promptRenameRestrictedEntry(path: String, currentName: String, containingDirectory: String) {
+        val input = EditText(this).apply {
+            setText(currentName)
+            setSingleLine(true)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Renomear")
+            .setView(input)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton("Renomear", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val newName = input.text.toString()
+                if (newName.isBlank() || newName == "." || newName == ".." ||
+                    newName.contains('/') || newName.contains('\\')) {
+                    toast("Nome inválido.")
+                    return@setOnClickListener
+                }
+                val service = restrictedStorageService ?: return@setOnClickListener
+                runRestrictedOperation("A renomear…", { service.renamePath(path, newName) }) {
+                    browseRestrictedDirectory(containingDirectory)
+                }
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun confirmDeleteRestrictedEntry(path: String, name: String, containingDirectory: String, isDirectory: Boolean) {
+        AlertDialog.Builder(this)
+            .setTitle(if (isDirectory) "Eliminar pasta vazia" else "Eliminar ficheiro")
+            .setMessage("Eliminar «$name»? Esta ação não pode ser desfeita. As pastas só são eliminadas se estiverem vazias.")
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton("Eliminar") { _, _ ->
+                val service = restrictedStorageService ?: return@setPositiveButton
+                runRestrictedOperation("A eliminar…", { service.deletePath(path) }) {
+                    browseRestrictedDirectory(containingDirectory)
+                }
+            }
+            .show()
+    }
+
+    private fun runRestrictedOperation(message: String, operation: () -> Boolean, onSuccess: () -> Unit) {
+        val progress = ProgressDialog(this).apply {
+            setMessage(message)
+            setProgressStyle(ProgressDialog.STYLE_SPINNER)
+            setCancelable(false)
+            show()
+        }
+        thumbnailWorker.execute {
+            var success = false
+            var failure: String? = null
+            try { success = operation() } catch (e: Exception) {
+                failure = e.message ?: "O Android recusou a operação."
+            }
+            runOnUiThread {
+                progress.dismiss()
+                if (success) {
+                    toast("Operação concluída.")
+                    onSuccess()
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("Operação bloqueada")
+                        .setMessage(failure ?: "O Android ou o fabricante não permitiu a operação.")
+                        .setPositiveButton(tr("OK"), null)
+                        .show()
+                }
+            }
+        }
+    }
+
     private fun showMainMenu() {
         val options = arrayOf(
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
