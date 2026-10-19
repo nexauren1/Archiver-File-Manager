@@ -30,6 +30,14 @@ import java.util.Locale
  * Android/obb trees; it never accesses /data/data or other apps' internal sandboxes.
  */
 class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
+    private data class ListedEntry(
+        val file: File,
+        val symbolicLink: Boolean,
+        val directory: Boolean,
+        val sortName: String,
+        val stat: android.system.StructStat?
+    )
+
 
     override fun destroy() { System.exit(0) }
 
@@ -66,23 +74,55 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
             val files = directory.listFiles() ?: throw IOException(
                 "O Android ou o fabricante bloqueou a leitura desta pasta. A permissão avançada não garante acesso em todos os dispositivos."
             )
+
+            // Cache stat data once per entry so sorting and JSON serialization do not
+            // repeatedly issue lstat() system calls for the same file.
+            // For very large folders, retain only the first N entries using a bounded
+            // heap instead of sorting every entry just to discard everything after N.
+            fun listEntry(child: File): ListedEntry {
+                val stat = try { Os.lstat(child.absolutePath) } catch (_: Exception) { null }
+                val type = stat?.let { it.st_mode and OsConstants.S_IFMT }
+                val link = if (type == null) isSymbolicLink(child) else type == OsConstants.S_IFLNK
+                val directoryEntry = !link && (if (type == null) child.isDirectory else type == OsConstants.S_IFDIR)
+                return ListedEntry(child, link, directoryEntry, child.name.lowercase(Locale.ROOT), stat)
+            }
+
+            val comparator = compareByDescending<ListedEntry> { it.directory }.thenBy { it.sortName }
+            val sorted = if (files.size <= MAX_DIRECTORY_ENTRIES) {
+                files.map(::listEntry).sortedWith(comparator)
+            } else {
+                // A reversed comparator places the worst retained candidate at the heap head.
+                val best = java.util.PriorityQueue<ListedEntry>(MAX_DIRECTORY_ENTRIES, comparator.reversed())
+                files.forEach { child ->
+                    val entry = listEntry(child)
+                    if (best.size < MAX_DIRECTORY_ENTRIES) {
+                        best.add(entry)
+                    } else if (comparator.compare(entry, best.peek()) < 0) {
+                        best.poll()
+                        best.add(entry)
+                    }
+                }
+                best.toList().sortedWith(comparator)
+            }
+
             val entries = JSONArray()
-            val sorted = files.sortedWith(compareByDescending<File> { it.isDirectory && !isSymbolicLink(it) }
-                .thenBy { it.name.lowercase() })
-            sorted.take(MAX_DIRECTORY_ENTRIES).forEach { child ->
-                val link = isSymbolicLink(child)
+            sorted.forEach { item ->
+                val child = item.file
+                val link = item.symbolicLink
+                val type = item.stat?.let { it.st_mode and OsConstants.S_IFMT }
+                val regularFile = if (type == null) child.isFile else type == OsConstants.S_IFREG
                 entries.put(JSONObject()
                     .put("name", child.name)
                     .put("path", child.absolutePath)
-                    .put("directory", !link && child.isDirectory)
+                    .put("directory", item.directory)
                     .put("symlink", link)
-                    .put("size", if (!link && child.isFile) child.length().coerceAtLeast(0L) else 0L)
+                    .put("size", if (!link && regularFile) (item.stat?.st_size ?: child.length()).coerceAtLeast(0L) else 0L)
                     .put("modified", child.lastModified())
                     .put("readable", !link && child.canRead())
                     .put("writable", !link && child.canWrite())
-                    .put("mode", if (link) "" else try { Integer.toOctalString(Os.lstat(child.absolutePath).st_mode) } catch (_: Exception) { "" })
-                    .put("uid", if (link) -1 else try { Os.lstat(child.absolutePath).st_uid } catch (_: Exception) { -1 })
-                    .put("gid", if (link) -1 else try { Os.lstat(child.absolutePath).st_gid } catch (_: Exception) { -1 }))
+                    .put("mode", if (link) "" else (item.stat?.let { Integer.toOctalString(it.st_mode) } ?: ""))
+                    .put("uid", if (link) -1 else (item.stat?.st_uid ?: -1))
+                    .put("gid", if (link) -1 else (item.stat?.st_gid ?: -1)))
             }
             JSONObject()
                 .put("path", directory.absolutePath)
@@ -477,7 +517,8 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
                     output.write(buffer, 0, n)
                     totalBytes[0] += n
                 }
-                output.fd.sync()
+                // Close normally and let the OS batch writes; avoid forcing a disk sync for
+                // every archive member, which makes extraction of many small files very slow.
             }
         } catch (e: Exception) {
             try { target.delete() } catch (_: Exception) {}
@@ -494,13 +535,13 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         } else if (source.isFile) {
             FileInputStream(source).use { input ->
                 FileOutputStream(destination).use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 4)
+                    // Larger blocks reduce system-call overhead when transferring large files.
+                    val buffer = ByteArray(128 * 1024)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
-                        output.write(buffer, 0, count)
+                        if (count > 0) output.write(buffer, 0, count)
                     }
-                    output.fd.sync()
                 }
             }
         } else throw IOException("Tipo de ficheiro especial não suportado: " + source.absolutePath)

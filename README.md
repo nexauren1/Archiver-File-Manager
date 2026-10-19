@@ -1,6 +1,14 @@
-# Archiver 0.9.2 — Android File Manager
+# Archiver 0.9.3 — Android File Manager
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
+
+## Archiver 0.9.3
+
+- Reduce directory-change detection overhead by calculating the folder signature without sorting all entries.
+- Accelerate Shizuku/Sui advanced browsing by caching file metadata and selecting the first 2,000 displayed entries without sorting the entire directory.
+- Improve advanced copy and extraction throughput with 128 KiB transfer buffers and without forcing a disk sync after every copied or extracted file.
+- Keep explicit Shizuku authorization, Android/data and Android/obb access attempts, and Root-mode safeguards.
+- Version code: 14.
 
 ## Archiver 0.9.2
 
@@ -41,8 +49,8 @@ https://nexauren1.github.io/Archiver-File-Manager/
 ## Build and release
 
 - JDK 17, Gradle 8.13, Android Gradle Plugin 8.13.2, and Kotlin.
-- The single GitHub Actions workflow is **Archiver — Single Signed APK**. Every push to `main` builds one signed production APK. A matching version tag (for example `v0.8.0`) builds that same release variant and attaches the APK and its SHA-256 checksum to the GitHub Release.
-- The workflow runs `assembleRelease`, checks that exactly one APK exists, verifies its signature with `apksigner`, and checks ZIP alignment with `zipalign`. No debug APK is built, uploaded, or published by the current workflow. Resource shrinking and R8 code shrinking are disabled in the release variant to keep all app code/resources in the production package.
+- The single GitHub Actions workflow is **Archiver — Single Signed APK**. Every push to `main` builds one signed production APK. A matching version tag (for example `v0.9.3`) builds that same release variant and attaches the APK and its SHA-256 checksum to the GitHub Release.
+- The production workflow runs `assembleRelease`, checks that exactly one APK exists, verifies its signature with `apksigner`, and checks ZIP alignment with `zipalign`. A separate pull-request compile check builds a temporary debug APK solely to detect source/build errors; it does not upload or publish that APK. Resource shrinking and R8 code shrinking are disabled in the release variant to keep all app code/resources in the production package.
 - The downloadable workflow artifact contains one APK plus its checksum file; the GitHub Release attaches that exact APK and checksum. The checksum is a text file, not a second application.
 - A permanent signing identity is mandatory. If any required signing secret is missing, the workflow fails rather than publishing an unsigned or debug build. Configure the four protected secrets described in [`.github/KEYSTORE_SECRETS.md`](.github/KEYSTORE_SECRETS.md).
 
