@@ -3536,12 +3536,12 @@ class MainActivity : Activity() {
             onVisit?.invoke(file)
             entries++
             // Treat links as one entry but never follow them during search/size scans.
-            if (isSymbolicLink(file)) {
-                return@walk
-            } else if (file.isFile) {
-                bytes += file.length().coerceAtLeast(0L)
-            } else if (file.isDirectory) {
-                safeList(file).forEach { walk(it, depth + 1) }
+            if (!isSymbolicLink(file)) {
+                if (file.isFile) {
+                    bytes += file.length().coerceAtLeast(0L)
+                } else if (file.isDirectory) {
+                    safeList(file).forEach { walk(it, depth + 1) }
+                }
             }
         }
         files.forEach { walk(it, 0) }
