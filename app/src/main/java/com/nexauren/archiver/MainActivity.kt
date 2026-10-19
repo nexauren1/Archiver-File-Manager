@@ -9,6 +9,8 @@ import android.app.PendingIntent
 import android.app.ProgressDialog
 import android.content.ActivityNotFoundException
 import android.content.ClipData
+import android.content.ComponentName
+import android.content.ServiceConnection
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
@@ -26,6 +28,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.os.Environment
 import android.os.ParcelFileDescriptor
@@ -74,6 +77,7 @@ import net.lingala.zip4j.ZipFile as Zip4jFile
 import net.lingala.zip4j.model.ZipParameters
 import net.lingala.zip4j.progress.ProgressMonitor
 import org.json.JSONObject
+import rikka.shizuku.Shizuku
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -212,6 +216,35 @@ class MainActivity : Activity() {
     private val workActive = AtomicBoolean(false)
     private val notificationChannelId = "archiver_file_operations"
     private val operationNotificationId = 7410
+
+    private var restrictedStorageService: IRestrictedStorageService? = null
+    private var restrictedServiceArgs: Shizuku.UserServiceArgs? = null
+    private var restrictedServiceBound = false
+    private var restrictedRootPaths: List<String> = emptyList()
+    private val restrictedPermissionRequestCode = 9847
+
+    private val restrictedPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode == restrictedPermissionRequestCode) {
+            if (grantResult == PackageManager.PERMISSION_GRANTED) connectRestrictedStorageService()
+            else toast("O acesso avançado foi recusado. O gestor normal continua disponível.")
+        }
+    }
+
+    private val restrictedServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            restrictedStorageService = IRestrictedStorageService.Stub.asInterface(binder)
+            runOnUiThread {
+                if (restrictedStorageService != null) showRestrictedStorageRoots()
+                else toast("Não foi possível ligar o serviço de acesso avançado.")
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            restrictedStorageService = null
+            restrictedServiceBound = false
+            runOnUiThread { toast("O serviço de acesso avançado foi desligado. Inicia Shizuku e tenta novamente.") }
+        }
+    }
     private val thumbnailCache = object : LruCache<String, Bitmap>(2 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = maxOf(1, value.byteCount / 1024)
     }
@@ -235,6 +268,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        Shizuku.addRequestPermissionResultListener(restrictedPermissionListener)
         window.statusBarColor = 0xFF292D40.toInt()
         window.navigationBarColor = 0xFF101014.toInt()
         prefs = getSharedPreferences("archiver_preferences", MODE_PRIVATE)
@@ -925,7 +959,8 @@ class MainActivity : Activity() {
         val options = arrayOf(
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
             "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisa avançada", "Favoritos",
-            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar o Archiver"
+            "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar o Archiver",
+            "Pastas avançadas (Android/data e Android/obb)"
         )
         AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
@@ -948,6 +983,7 @@ class MainActivity : Activity() {
                 12 -> refreshFiles()
                 13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
                 14 -> shareApplication()
+                15 -> openRestrictedFoldersFeature()
             }
         }.show()
     }
@@ -5133,6 +5169,15 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(restrictedPermissionListener)
+        try {
+            val args = restrictedServiceArgs
+            if (restrictedServiceBound && args != null) {
+                Shizuku.unbindUserService(args, restrictedServiceConnection, true)
+            }
+        } catch (_: Exception) { }
+        restrictedStorageService = null
+        restrictedServiceBound = false
         worker.shutdown()
         thumbnailWorker.shutdown()
         super.onDestroy()
