@@ -3,15 +3,26 @@ package com.nexauren.archiver
 import android.os.Environment
 import android.system.Os
 import android.system.OsConstants
+import com.github.junrar.Archive as JunrarArchive
+import net.lingala.zip4j.ZipFile as Zip4jFile
+import org.apache.commons.compress.archivers.sevenz.SevenZFile
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
+import java.io.BufferedInputStream
+import java.io.InputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 
 /**
  * Optional Shizuku UserService used only when the user explicitly enables advanced
@@ -121,7 +132,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         if (!target.isFile) throw IOException("Só é possível guardar texto em ficheiros existentes.")
         if (target.extension.lowercase() !in TEXT_EXTENSIONS) throw IOException("Formato de texto não permitido.")
         val bytes = content.toByteArray(StandardCharsets.UTF_8)
-        if (bytes.size > MAX_TEXT_BYTES) throw IOException("O texto excede o limite de 1 MiB.")
+        if (bytes.size > MAX_TEXT_BYTES) throw IOException("O texto excede o limite de 4 MiB.")
         val parent = target.parentFile ?: throw IOException("Pasta de destino indisponível.")
         val temp = File.createTempFile(".archiver-advanced-", ".tmp", parent)
         val backup = File.createTempFile(".archiver-advanced-", ".bak", parent)
@@ -220,6 +231,258 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         if (!parent.isDirectory) throw IOException("A pasta de destino não existe.")
         if (!file.createNewFile()) throw IOException("Não foi possível criar o ficheiro.")
         return true
+    }
+
+    override fun extractArchive(
+        archivePath: String,
+        destinationDirectory: String,
+        format: String,
+        password: String
+    ): String {
+        var count = 0
+        var skippedLinks = 0
+        val totalBytes = longArrayOf(0L)
+        return try {
+            val archive = resolveAllowedPath(archivePath, allowRoot = false)
+            val destination = resolveAllowedPath(destinationDirectory, allowRoot = true)
+            if (isSymbolicLink(File(archivePath)) || isSymbolicLink(File(destinationDirectory))) {
+                throw IOException("Não é permitido usar um link simbólico como arquivo ou destino.")
+            }
+            if (!archive.isFile || !archive.canRead()) throw IOException("O arquivo não existe ou não pode ser lido.")
+            if (!destination.isDirectory || !destination.canWrite()) throw IOException("A pasta de destino não é gravável.")
+            ensureNotCriticalSystemRoot(destination, "extrair arquivo em")
+            val kind = format.lowercase(Locale.ROOT)
+            if (kind !in setOf("zip", "7z", "rar", "tar", "tgz", "tbz2", "txz")) {
+                throw IOException("Formato de arquivo não suportado nesta pasta avançada.")
+            }
+
+            fun processDirectory(name: String) {
+                if (count + skippedLinks >= MAX_ARCHIVE_ENTRIES) throw IOException("O arquivo excede o limite de entradas.")
+                val target = prepareArchiveTarget(destination, name, true) ?: return
+                if (!target.exists() && !target.mkdirs()) throw IOException("Não foi possível criar a pasta: " + target.absolutePath)
+                count++
+            }
+
+            fun processFile(name: String, input: InputStream) {
+                if (count + skippedLinks >= MAX_ARCHIVE_ENTRIES) throw IOException("O arquivo excede o limite de entradas.")
+                val target = prepareArchiveTarget(destination, name, false)
+                if (target == null) {
+                    val buffer = ByteArray(8192)
+                    while (input.read(buffer) >= 0) { }
+                    return
+                }
+                try {
+                    writeArchiveStream(input, target, totalBytes)
+                } finally {
+                    // Caller owns the stream and closes it when needed.
+                }
+                count++
+            }
+
+            when (kind) {
+                "zip" -> {
+                    val zip = if (password.isNotEmpty()) Zip4jFile(archive, password.toCharArray()) else Zip4jFile(archive)
+                    try {
+                        val headers = zip.fileHeaders
+                        if (headers.size > MAX_ARCHIVE_ENTRIES) throw IOException("O arquivo excede o limite de entradas.")
+                        headers.forEach { header ->
+                            if (header.isDirectory) processDirectory(header.fileName)
+                            else zip.getInputStream(header).use { input -> processFile(header.fileName, input) }
+                        }
+                    } finally {
+                        try { zip.close() } catch (_: Exception) {}
+                    }
+                }
+                "7z" -> {
+                    val seven = if (password.isNotEmpty()) SevenZFile(archive, password.toCharArray()) else SevenZFile(archive)
+                    seven.use { reader ->
+                        while (true) {
+                            val entry = reader.nextEntry ?: break
+                            if (entry.isDirectory) {
+                                processDirectory(entry.name)
+                            } else {
+                                if (count + skippedLinks >= MAX_ARCHIVE_ENTRIES) throw IOException("O arquivo excede o limite de entradas.")
+                                val target = prepareArchiveTarget(destination, entry.name, false)
+                                if (target == null) {
+                                    val skip = ByteArray(8192)
+                                    while (reader.read(skip, 0, skip.size) >= 0) { }
+                                } else {
+                                    try {
+                                        FileOutputStream(target).use { output ->
+                                            val buffer = ByteArray(128 * 1024)
+                                            while (true) {
+                                                val n = reader.read(buffer, 0, buffer.size)
+                                                if (n < 0) break
+                                                if (n == 0) continue
+                                                if (n.toLong() > MAX_ARCHIVE_OUTPUT_BYTES - totalBytes[0]) {
+                                                    throw IOException("O arquivo excede o limite de segurança de extração.")
+                                                }
+                                                output.write(buffer, 0, n)
+                                                totalBytes[0] += n
+                                            }
+                                            output.fd.sync()
+                                        }
+                                    } catch (e: Exception) {
+                                        try { target.delete() } catch (_: Exception) {}
+                                        throw e
+                                    }
+                                    count++
+                                }
+                            }
+                        }
+                    }
+                }
+                "rar" -> {
+                    val rar = if (password.isNotEmpty()) JunrarArchive(archive, password) else JunrarArchive(archive)
+                    rar.use { reader ->
+                        val headers = reader.fileHeaders
+                        if (headers.size > MAX_ARCHIVE_ENTRIES) throw IOException("O arquivo excede o limite de entradas.")
+                        headers.forEach { header ->
+                            if (header.redirection != null) {
+                                skippedLinks++
+                            } else if (header.isDirectory) {
+                                processDirectory(header.fileName)
+                            } else {
+                                reader.getInputStream(header).use { input -> processFile(header.fileName, input) }
+                            }
+                        }
+                    }
+                }
+                "tar", "tgz", "tbz2", "txz" -> {
+                    val raw = BufferedInputStream(FileInputStream(archive))
+                    val decompressed: InputStream = when (kind) {
+                        "tgz" -> GzipCompressorInputStream(raw)
+                        "tbz2" -> BZip2CompressorInputStream(raw)
+                        "txz" -> XZCompressorInputStream(raw)
+                        else -> raw
+                    }
+                    TarArchiveInputStream(decompressed).use { tar ->
+                        while (true) {
+                            val entry: TarArchiveEntry = tar.nextTarEntry ?: break
+                            if (entry.isSymbolicLink || entry.isLink || (!entry.isDirectory && !entry.isFile)) {
+                                skippedLinks++
+                                continue
+                            }
+                            if (entry.isDirectory) processDirectory(entry.name)
+                            else processFile(entry.name, tar)
+                        }
+                    }
+                }
+            }
+            JSONObject()
+                .put("success", true)
+                .put("entries", count)
+                .put("skippedLinks", skippedLinks)
+                .put("bytes", totalBytes[0])
+                .toString()
+        } catch (e: Exception) {
+            JSONObject()
+                .put("success", false)
+                .put("error", e.message ?: "A extração foi bloqueada.")
+                .put("partialEntries", count)
+                .put("partialBytes", totalBytes[0])
+                .toString()
+        }
+    }
+
+    private fun prepareArchiveTarget(destination: File, rawName: String, isDirectory: Boolean): File? {
+        var normalized = rawName.replace('\\', '/').trim()
+        while (normalized.startsWith("./")) normalized = normalized.substring(2)
+        if (normalized.isBlank() || normalized == ".") return null
+        if (normalized.startsWith("/") || normalized.startsWith("//") ||
+            normalized.matches(Regex("^[A-Za-z]:.*")) || normalized.contains(0.toChar())) {
+            throw IOException("O arquivo contém um caminho absoluto inválido: " + rawName)
+        }
+        val parts = normalized.split('/')
+        if (parts.any { it == ".." }) throw IOException("O arquivo contém '..' no caminho: " + rawName)
+        val safeParts = parts.filter { it.isNotEmpty() && it != "." }
+        if (safeParts.isEmpty()) return null
+
+        var lexical = destination.canonicalFile
+        safeParts.forEachIndexed { index, component ->
+            lexical = File(lexical, component)
+            if (index < safeParts.lastIndex && lexical.exists() && isSymbolicLink(lexical)) {
+                throw IOException("O destino contém um link simbólico; extração bloqueada.")
+            }
+        }
+        val rootPath = destination.canonicalPath
+        val target = lexical.canonicalFile
+        val prefix = if (rootPath == File.separator) File.separator else rootPath.trimEnd(File.separatorChar) + File.separator
+        if (target.path != rootPath && !target.path.startsWith(prefix)) {
+            throw IOException("O caminho extraído sairia da pasta de destino.")
+        }
+        if (isSymbolicLink(target)) throw IOException("O destino já é um link simbólico.")
+        if (target.path == rootPath) return if (isDirectory) destination else null
+
+        if (isDirectory) {
+            if (target.exists() && target.isDirectory) return target
+            val actual = if (target.exists()) uniqueArchiveTarget(target) else target
+            actual.parentFile?.let { ensureArchiveDirectory(it, destination) }
+            if (!actual.exists() && !actual.mkdirs()) throw IOException("Não foi possível criar a pasta: " + actual.absolutePath)
+            if (isSymbolicLink(actual)) throw IOException("A pasta criada é um link simbólico.")
+            return actual
+        }
+
+        val parent = target.parentFile ?: throw IOException("Pasta de destino indisponível.")
+        ensureArchiveDirectory(parent, destination)
+        val actual = if (target.exists()) uniqueArchiveTarget(target) else target
+        if (isSymbolicLink(actual)) throw IOException("O ficheiro de destino é um link simbólico.")
+        return actual
+    }
+
+    private fun ensureArchiveDirectory(directory: File, destinationRoot: File) {
+        val rootPath = destinationRoot.canonicalPath
+        val prefix = if (rootPath == File.separator) File.separator else rootPath.trimEnd(File.separatorChar) + File.separator
+        val canonical = directory.canonicalFile
+        if (canonical.path != rootPath && !canonical.path.startsWith(prefix)) {
+            throw IOException("A pasta necessária sairia do destino permitido.")
+        }
+        if (isSymbolicLink(directory)) throw IOException("Não é permitido criar ficheiros através de links simbólicos.")
+        if (directory.exists()) {
+            if (!directory.isDirectory) throw IOException("O caminho já existe e não é uma pasta: " + directory.absolutePath)
+            return
+        }
+        directory.parentFile?.let { ensureArchiveDirectory(it, destinationRoot) }
+        if (!directory.mkdir()) throw IOException("Não foi possível criar a pasta: " + directory.absolutePath)
+        if (isSymbolicLink(directory)) throw IOException("A pasta criada é um link simbólico.")
+    }
+
+    private fun uniqueArchiveTarget(file: File): File {
+        val parent = file.parentFile ?: throw IOException("Pasta de destino indisponível.")
+        val name = file.name
+        val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+        val stem = name.substring(0, dot)
+        val extension = name.substring(dot)
+        var counter = 1
+        var candidate: File
+        do {
+            candidate = File(parent, stem + " (" + counter + ")" + extension)
+            counter++
+        } while (candidate.exists() && counter < 100000)
+        if (candidate.exists()) throw IOException("Não foi possível criar um nome de destino único.")
+        return candidate
+    }
+
+    private fun writeArchiveStream(input: InputStream, target: File, totalBytes: LongArray) {
+        try {
+            FileOutputStream(target).use { output ->
+                val buffer = ByteArray(128 * 1024)
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    if (n == 0) continue
+                    if (n.toLong() > MAX_ARCHIVE_OUTPUT_BYTES - totalBytes[0]) {
+                        throw IOException("O arquivo excede o limite de segurança de extração.")
+                    }
+                    output.write(buffer, 0, n)
+                    totalBytes[0] += n
+                }
+                output.fd.sync()
+            }
+        } catch (e: Exception) {
+            try { target.delete() } catch (_: Exception) {}
+            throw e
+        }
     }
 
     private fun copyTree(source: File, destination: File) {
@@ -323,6 +586,8 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
     companion object {
         private const val MAX_DIRECTORY_ENTRIES = 2000
         private const val MAX_TEXT_BYTES = 4 * 1024 * 1024
+        private const val MAX_ARCHIVE_ENTRIES = 100000
+        private const val MAX_ARCHIVE_OUTPUT_BYTES = 64L * 1024L * 1024L * 1024L
         private val TEXT_EXTENSIONS = setOf(
             "txt", "xml", "json", "ini", "cfg", "conf", "properties", "log", "yml", "yaml",
             "html", "htm", "css", "js", "md", "csv", "toml", "sh", "kt", "kts", "java", "gradle",

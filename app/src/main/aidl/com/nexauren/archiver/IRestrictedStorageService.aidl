@@ -13,4 +13,5 @@ interface IRestrictedStorageService {
     boolean copyPath(String sourcePath, String destinationPath) = 9;
     boolean movePath(String sourcePath, String destinationPath) = 10;
     boolean createEmptyFile(String path) = 11;
+    String extractArchive(String archivePath, String destinationDirectory, String format, String password) = 12;
 }
