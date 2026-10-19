@@ -4751,7 +4751,7 @@ class MainActivity : Activity() {
             putExtra(
                 Intent.EXTRA_TEXT,
                 tr("Experimenta o Archiver, um gestor de ficheiros Android independente:") +
-                    "\nhttps://github.com/nexauren1/Archiver-File-Manager"
+                    "\nhttps://nexauren1.github.io/Archiver-File-Manager/"
             )
         }
         startActivity(Intent.createChooser(intent, tr("Partilhar o Archiver")))
