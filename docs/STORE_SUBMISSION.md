@@ -77,7 +77,7 @@ O Archiver processa os ficheiros localmente. O manifesto atual não pede acesso 
 
 - [ ] Configure the four protected GitHub Actions secrets described in [KEYSTORE_SECRETS.md](../.github/KEYSTORE_SECRETS.md). Never commit the keystore or passwords.
 - [ ] Use the single **Archiver — Single Signed APK** workflow; for a stable release, push a matching `v0.9.3` tag (or run it manually with release publication enabled). Require the signed build, signature verification, ZIP alignment verification, and attached SHA-256 checksum.
-- [ ] Download the sole APK attached to the stable GitHub release and compare its checksum to the attached `.sha256` file. The current workflow does not create new debug/preview APKs.
+- [ ] Download the sole production APK attached to the stable GitHub release and compare its checksum to the attached `.sha256` file. The separate pull-request compile check creates a temporary debug APK only for validation and never publishes it.
 - [ ] Confirm that the release keystore is the intended long-term signing identity and back it up securely. A signing-key mismatch can prevent upgrades.
 - [ ] Add real screenshots captured from the release build on a supported Android device. Do not use mockups that imply unverified app behavior.
 - [ ] Export a square store icon from the app artwork at the resolution requested by the selected store.
