@@ -221,6 +221,7 @@ class MainActivity : Activity() {
     private var restrictedServiceArgs: Shizuku.UserServiceArgs? = null
     private var restrictedServiceBound = false
     private var restrictedRootPaths: List<String> = emptyList()
+    private var restrictedAccessIdentity: String = "Shizuku"
     private val restrictedPermissionRequestCode = 9847
 
     private val restrictedPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
@@ -993,10 +994,9 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(tr("Pastas avançadas"))
             .setMessage(
-                "Para tentar aceder a Android/data e Android/obb, instala e inicia o Shizuku (ou Sui num dispositivo com root) e autoriza o Archiver. " +
-                "Em Android 11 ou superior, o Shizuku pode ser iniciado através da Depuração sem fios. " +
-                "A compatibilidade depende da versão do Android e do fabricante; este recurso não garante que todas as pastas possam ser lidas ou alteradas.\n\n" +
-                "O Archiver limita esta sessão a Android/data e Android/obb. Não abre /data/data de outras aplicações: o Android mantém esses dados privados."
+                "Instala e inicia o Shizuku e autoriza o Archiver. Em Android 11 ou superior, o Shizuku pode ser iniciado através da Depuração sem fios. " +
+                "Num dispositivo com root, inicia Shizuku/Sui com UID 0 para navegar no sistema completo, incluindo /data. Sem root, o modo ADB/Shell tenta Android/data e Android/obb, mas não acede às pastas privadas internas de outras aplicações. " +
+                "A compatibilidade depende do Android e do fabricante; operações privilegiadas podem causar perda de dados."
             )
             .setPositiveButton(tr("Obter Shizuku")) { _, _ ->
                 try {
@@ -1023,7 +1023,7 @@ class MainActivity : Activity() {
                 .daemon(false)
                 .processNameSuffix("restricted_storage")
                 .tag("archiver-restricted-storage")
-                .version(1)
+                .version(2)
             restrictedServiceArgs = args
             restrictedServiceBound = true
             Shizuku.bindUserService(args, restrictedServiceConnection)
@@ -1074,20 +1074,32 @@ class MainActivity : Activity() {
                     return@runOnUiThread
                 }
                 restrictedRootPaths = roots
-                val labels = arrayOf(
-                    tr("Android/data — dados externos das aplicações"),
-                    tr("Android/obb — ficheiros de expansão"),
-                    tr("Sobre permissões e limites")
-                )
+                restrictedAccessIdentity = identity
+                val isRoot = identity.contains("ROOT", ignoreCase = true) || identity.contains("UID 0")
+                val labels = if (isRoot) {
+                    roots.map { root ->
+                        val rootPath = try { File(root).canonicalPath } catch (_: Exception) { root }
+                        val shortName = File(rootPath).name.ifBlank { "/" }
+                        shortName + " — " + rootPath
+                    }.toMutableList().apply { add(tr("Sobre permissões e limites")) }.toTypedArray()
+                } else {
+                    arrayOf(
+                        tr("Android/data — dados externos das aplicações"),
+                        tr("Android/obb — ficheiros de expansão"),
+                        tr("Sobre permissões e limites")
+                    )
+                }
+                val accessMessage = if (isRoot) {
+                    "Acesso ROOT detetado (UID 0). Podes explorar diretórios do sistema, /data e o armazenamento partilhado. Operações recursivas podem causar perda de dados ou impedir o arranque do Android; confirma sempre o caminho."
+                } else {
+                    "Acesso ADB/Shell via Shizuku. É possível tentar Android/data e Android/obb e transferir ficheiros entre essas pastas e o armazenamento partilhado. /data/data continua bloqueado sem UID 0."
+                }
                 AlertDialog.Builder(this)
                     .setTitle("Pastas avançadas • $identity")
-                    .setMessage("O acesso é opcional. Modificar ficheiros de outras aplicações pode causar falhas ou perda de dados. Fecha a aplicação proprietária antes de alterar os seus ficheiros.")
+                    .setMessage(accessMessage)
                     .setItems(labels) { _, which ->
-                        when (which) {
-                            0 -> browseRestrictedDirectory(roots[0])
-                            1 -> browseRestrictedDirectory(roots[1])
-                            2 -> showRestrictedStorageLimits()
-                        }
+                        if (which < roots.size) browseRestrictedDirectory(roots[which])
+                        else showRestrictedStorageLimits()
                     }
                     .setNegativeButton(tr("Fechar"), null)
                     .show()
@@ -1099,10 +1111,9 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(tr("Permissões das pastas"))
             .setMessage(
-                "• Android/data e Android/obb são pastas externas restringidas por versões recentes do Android.\n\n" +
-                "• O modo avançado usa apenas um serviço Shizuku/Sui explicitamente autorizado. Em alguns dispositivos, o Android ou o fabricante ainda bloqueia a leitura, escrita, renomeação ou eliminação.\n\n" +
-                "• /data/data contém dados internos privados de outras aplicações e não é acessível através do Shizuku iniciado como ADB/shell. Não faz parte deste explorador.\n\n" +
-                "• O Archiver não abre links simbólicos nesta vista, não elimina pastas não vazias e limita o editor de texto a 1 MiB."
+                "• ADB/Shell consegue ler e alterar apenas o que a versão do Android e o fabricante permitem. Sem UID 0, o acesso a /data/data é normalmente bloqueado.\n\n" +
+                "• Com Shizuku/Sui a executar como ROOT (UID 0), o explorador pode navegar no sistema de ficheiros completo.\n\n" +
+                "• Links simbólicos são recusados para impedir operações acidentais fora do caminho selecionado. O editor de texto suporta ficheiros UTF-8 até 4 MiB."
             )
             .setPositiveButton(tr("OK"), null)
             .show()
@@ -1150,12 +1161,20 @@ class MainActivity : Activity() {
     private fun presentRestrictedDirectory(path: String, payload: JSONObject) {
         val array = payload.optJSONArray("entries") ?: org.json.JSONArray()
         val entries = (0 until array.length()).mapNotNull { index -> array.optJSONObject(index) }
-        val atRoot = restrictedRootPaths.any { root ->
-            try { File(root).canonicalPath == File(path).canonicalPath } catch (_: Exception) { root == path }
+        val isRootMode = restrictedAccessIdentity.contains("ROOT", ignoreCase = true) || restrictedAccessIdentity.contains("UID 0")
+        val atRoot = if (isRootMode) {
+            try { File(path).canonicalPath == File("/").canonicalPath } catch (_: Exception) { path == "/" }
+        } else {
+            restrictedRootPaths.any { root ->
+                try { File(root).canonicalPath == File(path).canonicalPath } catch (_: Exception) { root == path }
+            }
         }
         val labels = ArrayList<String>()
         labels += "＋ Criar pasta"
-        if (!atRoot) labels += "↑ Pasta anterior"
+        labels += "＋ Criar ficheiro vazio"
+        val pasteIndex = if (clipboard.isNotEmpty()) labels.size.also { labels += "📥 Colar seleção aqui (" + clipboard.size + ")" } else -1
+        val parentIndex = if (!atRoot) labels.size.also { labels += "↑ Pasta anterior" } else -1
+        val entryStartIndex = labels.size
         entries.forEach { entry ->
             val name = entry.optString("name", "(sem nome)")
             labels += when {
@@ -1172,28 +1191,28 @@ class MainActivity : Activity() {
             .setTitle(File(path).name.ifBlank { "Android" })
             .setMessage(message)
             .setItems(labels.toTypedArray()) { _, which ->
-                if (which == 0) {
-                    promptCreateRestrictedDirectory(path)
-                    return@setItems
-                }
-                var itemIndex = which - 1
-                if (!atRoot) {
-                    if (which == 1) {
+                when {
+                    which == 0 -> { promptCreateRestrictedDirectory(path); return@setItems }
+                    which == 1 -> { promptCreateRestrictedFile(path); return@setItems }
+                    pasteIndex >= 0 && which == pasteIndex -> { pasteSelectionIntoRestrictedDirectory(path); return@setItems }
+                    parentIndex >= 0 && which == parentIndex -> {
                         val parent = File(path).parentFile
-                        if (parent != null && restrictedRootPaths.any { root ->
-                                try {
-                                    val rootPath = File(root).canonicalPath
-                                    val parentPath = parent.canonicalPath
-                                    parentPath == rootPath || parentPath.startsWith(rootPath + File.separator)
-                                } catch (_: Exception) { false }
-                            }) browseRestrictedDirectory(parent.absolutePath)
-                        else showRestrictedStorageRoots()
+                        val parentAllowed = parent != null && restrictedRootPaths.any { root ->
+                            try {
+                                val rootPath = File(root).canonicalPath
+                                val parentPath = parent.canonicalPath
+                                rootPath == File("/").canonicalPath ||
+                                    parentPath == rootPath || parentPath.startsWith(rootPath.trimEnd(File.separatorChar) + File.separator)
+                            } catch (_: Exception) { false }
+                        }
+                        if (parentAllowed) browseRestrictedDirectory(parent!!.absolutePath) else showRestrictedStorageRoots()
                         return@setItems
                     }
-                    itemIndex = which - 2
+                    which >= entryStartIndex -> {
+                        val entry = entries.getOrNull(which - entryStartIndex) ?: return@setItems
+                        showRestrictedEntryActions(entry, path)
+                    }
                 }
-                val entry = entries.getOrNull(itemIndex) ?: return@setItems
-                showRestrictedEntryActions(entry, path)
             }
             .setNegativeButton(tr("Raízes")) { _, _ -> showRestrictedStorageRoots() }
             .setPositiveButton(tr("Fechar"), null)
@@ -1217,16 +1236,22 @@ class MainActivity : Activity() {
         val actions = ArrayList<String>()
         if (isDirectory) actions += "Abrir pasta"
         if (canEditText) actions += "Ver/editar texto"
+        actions += "Copiar para pasta atual"
+        actions += "Mover para pasta atual"
+        actions += "Informações"
         actions += "Renomear"
-        actions += if (isDirectory) "Eliminar pasta vazia" else "Eliminar ficheiro"
+        actions += if (isDirectory && (restrictedAccessIdentity.contains("ROOT", ignoreCase = true) || restrictedAccessIdentity.contains("UID 0"))) "Eliminar pasta e conteúdo" else if (isDirectory) "Eliminar pasta vazia" else "Eliminar ficheiro"
         AlertDialog.Builder(this)
             .setTitle(name)
             .setItems(actions.toTypedArray()) { _, which ->
                 when (actions[which]) {
                     "Abrir pasta" -> browseRestrictedDirectory(path)
                     "Ver/editar texto" -> openRestrictedTextFile(path, containingDirectory)
+                    "Copiar para pasta atual" -> confirmTransferRestrictedEntry(path, name, false)
+                    "Mover para pasta atual" -> confirmTransferRestrictedEntry(path, name, true)
+                    "Informações" -> showRestrictedFileInfo(entry)
                     "Renomear" -> promptRenameRestrictedEntry(path, name, containingDirectory)
-                    "Eliminar pasta vazia", "Eliminar ficheiro" ->
+                    "Eliminar pasta vazia", "Eliminar ficheiro", "Eliminar pasta e conteúdo" ->
                         confirmDeleteRestrictedEntry(path, name, containingDirectory, isDirectory)
                 }
             }
@@ -1239,6 +1264,108 @@ class MainActivity : Activity() {
             "txt", "xml", "json", "ini", "cfg", "conf", "properties", "log", "yml", "yaml",
             "html", "htm", "css", "js", "md", "csv", "toml", "sh", "kt", "java", "kts", "sql", "py", "env"
         )
+
+    private fun promptCreateRestrictedFile(parentPath: String) {
+        val input = EditText(this).apply {
+            hint = "Nome do ficheiro"
+            setSingleLine(true)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Criar ficheiro vazio")
+            .setView(input)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton("Criar", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = input.text.toString()
+                if (name.isBlank() || name == "." || name == ".." ||
+                    name.any { it == '/' || it == '\\' || it == 0.toChar() }) {
+                    toast("Nome de ficheiro inválido.")
+                    return@setOnClickListener
+                }
+                val service = restrictedStorageService ?: return@setOnClickListener
+                runRestrictedOperation("A criar ficheiro…", { service.createEmptyFile(File(parentPath, name).absolutePath) }) {
+                    browseRestrictedDirectory(parentPath)
+                }
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun pasteSelectionIntoRestrictedDirectory(destinationDirectory: String) {
+        val service = restrictedStorageService ?: run { toast("O serviço de acesso avançado não está disponível."); return }
+        val sources = clipboard.toList()
+        if (sources.isEmpty()) { toast("Copia ou recorta primeiro os ficheiros no explorador normal."); return }
+        val move = clipboardIsCut
+        val operation = if (move) "Mover" else "Copiar"
+        AlertDialog.Builder(this)
+            .setTitle("Confirmar transferência")
+            .setMessage(operation + " " + sources.size + " item(ns) para " + destinationDirectory +
+                "?\n\nNão serão substituídos itens com nomes existentes. Acesso e velocidade dependem do Android e do fabricante.")
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(operation) { _, _ ->
+                runRestrictedOperation("A transferir ficheiros…", {
+                    sources.forEach { source ->
+                        val target = File(destinationDirectory, source.name).absolutePath
+                        val ok = if (move) service.movePath(source.absolutePath, target)
+                                 else service.copyPath(source.absolutePath, target)
+                        if (!ok) throw IOException("A transferência falhou para " + source.name)
+                    }
+                    true
+                }) {
+                    if (move) {
+                        clipboard = emptyList()
+                        clipboardIsCut = false
+                        selected.clear()
+                        refreshFiles()
+                    }
+                    browseRestrictedDirectory(destinationDirectory)
+                }
+            }
+            .show()
+    }
+
+    private fun confirmTransferRestrictedEntry(path: String, name: String, move: Boolean) {
+        val destinationDirectory = try { currentDir.canonicalFile } catch (_: Exception) { currentDir }
+        if (!hasStorageAccess() || !isWithinRoot(destinationDirectory)) {
+            toast("Abre primeiro uma pasta de destino no armazenamento partilhado.")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(if (move) "Mover para pasta atual" else "Copiar para pasta atual")
+            .setMessage((if (move) "Mover" else "Copiar") + " «" + name + "» para:\n" +
+                destinationDirectory.absolutePath + "\n\nO destino não pode já conter um item com o mesmo nome.")
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(if (move) "Mover" else "Copiar") { _, _ ->
+                val destination = File(destinationDirectory, name).absolutePath
+                val service = restrictedStorageService ?: return@setPositiveButton
+                runRestrictedOperation(if (move) "A mover item…" else "A copiar item…", {
+                    if (move) service.movePath(path, destination) else service.copyPath(path, destination)
+                }) { browseRestrictedDirectory(containingDirectory = destinationDirectory.absolutePath) }
+            }
+            .show()
+    }
+
+    private fun showRestrictedFileInfo(entry: JSONObject) {
+        val name = entry.optString("name")
+        val path = entry.optString("path")
+        val isDirectory = entry.optBoolean("directory")
+        val size = if (isDirectory) "Pasta" else formatSize(entry.optLong("size", 0L))
+        val modified = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.getDefault())
+            .format(Date(entry.optLong("modified", 0L)))
+        val message = "Caminho: " + path +
+            "\nTipo: " + size +
+            "\nModificado: " + modified +
+            "\nPermissões (octal): " + entry.optString("mode", "indisponível") +
+            "\nUID proprietário: " + entry.optInt("uid", -1) +
+            "\nGID grupo: " + entry.optInt("gid", -1) +
+            "\nLeitura: " + (if (entry.optBoolean("readable")) "sim" else "não") +
+            "\nEscrita: " + (if (entry.optBoolean("writable")) "sim" else "não")
+        AlertDialog.Builder(this).setTitle(name).setMessage(message)
+            .setPositiveButton(tr("OK"), null).show()
+    }
 
     private fun openRestrictedTextFile(path: String, containingDirectory: String) {
         val service = restrictedStorageService ?: return
@@ -1298,8 +1425,8 @@ class MainActivity : Activity() {
                     return@setOnClickListener
                 }
                 val value = input.text?.toString().orEmpty()
-                if (value.toByteArray(Charsets.UTF_8).size > 1024 * 1024) {
-                    toast("O texto excede o limite de 1 MiB.")
+                if (value.toByteArray(Charsets.UTF_8).size > 4 * 1024 * 1024) {
+                    toast("O texto excede o limite de 4 MiB.")
                     return@setOnClickListener
                 }
                 val progress = ProgressDialog(this).apply {
@@ -1439,7 +1566,7 @@ class MainActivity : Activity() {
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
             "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisa avançada", "Favoritos",
             "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar o Archiver",
-            "Pastas avançadas (Android/data e Android/obb)"
+            "Pastas avançadas (Shizuku/Sui + Root)"
         )
         AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
@@ -4365,7 +4492,7 @@ class MainActivity : Activity() {
             "Inspecionar modelo 3D" to "Inspect 3D model",
             "Comprimir para ZIP" to "Compress to ZIP", "Comprimir para 7Z" to "Compress to 7Z",
             "Comprimir…" to "Compress…", "text" to "text",
-            "Conceder acesso aos ficheiros" to "Grant file access", "Opções" to "Options", "Pastas avançadas (Android/data e Android/obb)" to "Advanced folders (Android/data and Android/obb)",
+            "Conceder acesso aos ficheiros" to "Grant file access", "Opções" to "Options", "Pastas avançadas (Shizuku/Sui + Root)" to "Advanced folders (Android/data and Android/obb)",
             "Selecionar tudo" to "Select all", "Limpar seleção" to "Clear selection",
             "Copiar seleção" to "Copy selection", "Recortar seleção" to "Cut selection",
             "Colar" to "Paste", "Criar novo…" to "Create new…", "Comprimir em ZIP" to "Compress to ZIP",
