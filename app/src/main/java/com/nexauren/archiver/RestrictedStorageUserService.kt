@@ -193,8 +193,8 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         private const val MAX_TEXT_BYTES = 1024 * 1024
         private val TEXT_EXTENSIONS = setOf(
             "txt", "xml", "json", "ini", "cfg", "conf", "properties", "log", "yml", "yaml",
-            "html", "htm", "css", "js", "md", "csv", "toml", "sh", "kt", "java", "gradle",
-            "gradle.kts", "sql", "py", "env"
+            "html", "htm", "css", "js", "md", "csv", "toml", "sh", "kt", "kts", "java", "gradle",
+            "sql", "py", "env"
         )
     }
 }
