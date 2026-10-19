@@ -191,6 +191,7 @@ class MainActivity : Activity() {
             ) {
                 val visible = safeList(currentDir).filter { showHidden || !it.name.startsWith(".") }
                 if (directorySignature(visible) != currentDirectorySignature) refreshFiles()
+                else if (::storageView.isInitialized) storageView.text = storageSummary()
             }
             if (!isFinishing && autoRefreshEnabled) {
                 autoRefreshHandler.postDelayed(this, 15_000L)
@@ -4930,11 +4931,6 @@ class MainActivity : Activity() {
 
     private fun showBackgroundMenu() {
         val options = arrayOf("Padrão", "Azul-noite", "Verde-floresta", "Ameixa", "Cinza", "Preto OLED", "Papel")
-        val colors = intArrayOf(
-            if (uiTheme == "Claro") 0xFFF5F6FA.toInt() else if (uiTheme == "Preto OLED") 0xFF000000.toInt() else 0xFF19191D.toInt(),
-            0xFF101B2D.toInt(), 0xFF10241F.toInt(), 0xFF24172D.toInt(), 0xFF25272F.toInt(),
-            0xFF000000.toInt(), 0xFFF4F0E8.toInt()
-        )
         val selectedIndex = options.indexOf(customBackground).coerceAtLeast(0)
         AlertDialog.Builder(this)
             .setTitle(tr("Fundo do explorador"))
