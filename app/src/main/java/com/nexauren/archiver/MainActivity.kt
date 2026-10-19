@@ -1343,7 +1343,7 @@ class MainActivity : Activity() {
                 val service = restrictedStorageService ?: return@setPositiveButton
                 runRestrictedOperation(if (move) "A mover item…" else "A copiar item…", {
                     if (move) service.movePath(path, destination) else service.copyPath(path, destination)
-                }) { browseRestrictedDirectory(containingDirectory = destinationDirectory.absolutePath) }
+                }) { browseRestrictedDirectory(destinationDirectory.absolutePath) }
             }
             .show()
     }
