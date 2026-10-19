@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace 'com.nexauren.archiver'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId 'com.nexauren.archiver'
         minSdk 23
-        targetSdk 35
+        targetSdk 36
         versionCode 10
         versionName '0.8.0'
     }
