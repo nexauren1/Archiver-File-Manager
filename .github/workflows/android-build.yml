@@ -1,25 +1,30 @@
-name: Android APK CI
+name: Archiver — Single Signed APK
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish a GitHub Release from this same signed APK"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: archiver-production-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Compile and validate debug APK
+  package:
+    name: Build and verify the single signed production APK
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -37,34 +42,140 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Validate Android version metadata
+      - name: Validate version and determine whether to publish a release
+        id: meta
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          PUBLISH_RELEASE_INPUT: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(awk -F"'" '/versionName/ {print $2; exit}' app/build.gradle)"
+          APP_VERSION_CODE="$(awk '/versionCode/ {print $2; exit}' app/build.gradle)"
+          [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Invalid versionName: $APP_VERSION"; exit 1; }
+          [[ "$APP_VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid versionCode: $APP_VERSION_CODE"; exit 1; }
+
+          PUBLISH_RELEASE=false
+          if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "tag" ]]; then
+            TAG_VERSION="${REF_NAME#v}"
+            if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ || "$TAG_VERSION" != "$APP_VERSION" ]]; then
+              echo "::error::Release tag $REF_NAME must match app versionName $APP_VERSION (for example v$APP_VERSION)."
+              exit 1
+            fi
+            PUBLISH_RELEASE=true
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$PUBLISH_RELEASE_INPUT" == "true" ]]; then
+            PUBLISH_RELEASE=true
+          fi
+
+          echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$APP_VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "publish_release=$PUBLISH_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Validated Archiver $APP_VERSION (versionCode $APP_VERSION_CODE); publish_release=$PUBLISH_RELEASE"
+
+      - name: Require the permanent release signing identity
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing repository Actions secret: $name. A permanent signed APK cannot be safely produced without the same release keystore."
+              exit 1
+            fi
+          done
+
+      - name: Clean previous build outputs
+        run: gradle --no-daemon clean
+
+      - name: Load the protected release keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p app/build/keystore
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/build/keystore/release.jks
+          test -s app/build/keystore/release.jks
+          chmod 600 app/build/keystore/release.jks
+
+      - name: Build the one signed production APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: Verify signature, alignment and single-APK output
         shell: bash
         run: |
           set -euo pipefail
-          VERSION_NAME="$(awk -F"'" '/versionName/ {print $2; exit}' app/build.gradle)"
-          VERSION_CODE="$(awk '/versionCode/ {print $2; exit}' app/build.gradle)"
-          test -n "$VERSION_NAME"
-          [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]
-          echo "Valid app version: $VERSION_NAME ($VERSION_CODE)"
-      - name: Build debug APK
-        run: gradle --no-daemon clean assembleDebug
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          mapfile -t APK_FILES < <(find app/build/outputs/apk -type f -name '*.apk' -print)
+          if [[ "${#APK_FILES[@]}" -ne 1 || "${APK_FILES[0]}" != "$APK" ]]; then
+            printf '::error::Expected exactly one release APK, found %s APK files.\n' "${#APK_FILES[@]}"
+            printf '%s\n' "${APK_FILES[@]}"
+            exit 1
+          fi
 
-      - name: Check APK exists and is not empty
-        run: test -s app/build/outputs/apk/debug/app-debug.apk
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+          BUILD_TOOLS_DIR="$(find "$SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          test -x "$BUILD_TOOLS_DIR/apksigner"
+          test -x "$BUILD_TOOLS_DIR/zipalign"
+          "$BUILD_TOOLS_DIR/apksigner" verify --verbose --print-certs "$APK"
+          "$BUILD_TOOLS_DIR/zipalign" -c -v 4 "$APK"
 
-      - name: Generate SHA-256 checksum
-        shell: bash
-        run: |
-          cd app/build/outputs/apk/debug
-          sha256sum app-debug.apk > app-debug.apk.sha256
-          cat app-debug.apk.sha256
+          mkdir -p dist
+          cp "$APK" "dist/Archiver-${{ steps.meta.outputs.version }}.apk"
+          (
+            cd dist
+            sha256sum "Archiver-${{ steps.meta.outputs.version }}.apk" > "Archiver-${{ steps.meta.outputs.version }}.apk.sha256"
+            cat "Archiver-${{ steps.meta.outputs.version }}.apk.sha256"
+          )
+          echo "Only production binary prepared: dist/Archiver-${{ steps.meta.outputs.version }}.apk"
 
-      - name: Upload debug APK and checksum
+      - name: Publish the single APK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Archiver-debug-APK
+          name: Archiver-${{ steps.meta.outputs.version }}-signed
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/debug/app-debug.apk.sha256
+            dist/Archiver-${{ steps.meta.outputs.version }}.apk
+            dist/Archiver-${{ steps.meta.outputs.version }}.apk.sha256
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
+
+      - name: Publish GitHub Release using the exact same APK
+        if: steps.meta.outputs.publish_release == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: Archiver v${{ steps.meta.outputs.version }}
+          prerelease: false
+          draft: false
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            dist/Archiver-${{ steps.meta.outputs.version }}.apk
+            dist/Archiver-${{ steps.meta.outputs.version }}.apk.sha256
+          body: |
+            Archiver v${{ steps.meta.outputs.version }} — Android file manager.
+
+            - Version code: ${{ steps.meta.outputs.version_code }}
+            - One production APK, signed with the permanent release keystore.
+            - Signature and ZIP alignment verified before publishing.
+            - SHA-256 checksum is attached for integrity verification.
+            - The APK attached here is the same file produced in the workflow artifact.
+
+            Privacy policy: https://nexauren1.github.io/Archiver-File-Manager/privacy.html
+            Website: https://nexauren1.github.io/Archiver-File-Manager/
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
