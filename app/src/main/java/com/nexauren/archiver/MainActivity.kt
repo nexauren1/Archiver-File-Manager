@@ -630,12 +630,18 @@ class MainActivity : Activity() {
     }
 
     private fun directorySignature(entries: List<File>): Long {
-        return entries.sortedBy { it.name.lowercase(Locale.ROOT) }.fold(1125899906842597L) { hash, file ->
-            var value = 31L * hash + file.name.hashCode().toLong()
-            value = 31L * value + file.lastModified()
-            value = 31L * value + if (file.isFile) file.length() else 0L
-            value
+        // The signature is only used to detect changes between refreshes; its result
+        // must not depend on filesystem enumeration order. Avoid sorting the whole
+        // directory every 15 seconds, which was expensive in folders with many files.
+        var sum = 0L
+        var xor = 0L
+        entries.forEach { file ->
+            var value = 31L * file.name.hashCode().toLong() + file.lastModified()
+            if (file.isFile) value = 31L * value + file.length()
+            sum += value
+            xor = xor xor java.lang.Long.rotateLeft(value, (value and 63L).toInt())
         }
+        return sum xor java.lang.Long.rotateLeft(xor, 17) xor entries.size.toLong()
     }
 
     private fun updateStorageSummary() {
