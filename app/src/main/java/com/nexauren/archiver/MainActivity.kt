@@ -1081,19 +1081,17 @@ class MainActivity : Activity() {
                 restrictedRootPaths = roots
                 restrictedAccessIdentity = identity
                 val isRoot = identity.contains("ROOT", ignoreCase = true) || identity.contains("UID 0")
-                val labels = if (isRoot) {
-                    roots.map { root ->
-                        val rootPath = try { File(root).canonicalPath } catch (_: Exception) { root }
-                        val shortName = File(rootPath).name.ifBlank { "/" }
-                        shortName + " — " + rootPath
-                    }.toMutableList().apply { add(tr("Sobre permissões e limites")) }.toTypedArray()
-                } else {
-                    arrayOf(
-                        tr("Android/data — dados externos das aplicações"),
-                        tr("Android/obb — ficheiros de expansão"),
-                        tr("Sobre permissões e limites")
-                    )
-                }
+                val labels = roots.map { root ->
+                    val rootPath = try { File(root).canonicalPath } catch (_: Exception) { root }
+                    val primaryPath = try { Environment.getExternalStorageDirectory().canonicalPath } catch (_: Exception) { "" }
+                    when {
+                        rootPath == File("/").canonicalPath -> "Sistema — /"
+                        rootPath == primaryPath -> "Armazenamento partilhado — " + rootPath
+                        rootPath.endsWith("/Android/data") -> "Android/data — dados externos das aplicações"
+                        rootPath.endsWith("/Android/obb") -> "Android/obb — ficheiros de expansão"
+                        else -> File(rootPath).name.ifBlank { "/" } + " — " + rootPath
+                    }
+                }.toMutableList().apply { add(tr("Sobre permissões e limites")) }.toTypedArray()
                 val accessMessage = if (isRoot) {
                     "Acesso ROOT detetado (UID 0). Podes explorar diretórios do sistema, /data e o armazenamento partilhado. Operações recursivas podem causar perda de dados ou impedir o arranque do Android; confirma sempre o caminho."
                 } else {

@@ -49,7 +49,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
                 File("/product").canonicalFile
             ).map { it.absolutePath }.distinct().toTypedArray()
         }
-        return listOf(androidData, androidObb).map { it.absolutePath }.toTypedArray()
+        return listOf(primary, androidData, androidObb).map { it.absolutePath }.distinct().toTypedArray()
     }
 
     override fun getAccessIdentity(): String = when (Os.getuid()) {
