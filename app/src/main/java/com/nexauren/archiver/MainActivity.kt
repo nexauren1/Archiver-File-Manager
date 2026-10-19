@@ -1246,6 +1246,7 @@ class MainActivity : Activity() {
         actions += "Copiar para outra pasta…"
         actions += "Mover para outra pasta…"
         actions += "Informações"
+        if (!isDirectory && archiveKind(File(path)).isNotEmpty()) actions += "Extrair arquivo aqui"
         actions += "Renomear"
         actions += if (isDirectory && (restrictedAccessIdentity.contains("ROOT", ignoreCase = true) || restrictedAccessIdentity.contains("UID 0"))) "Eliminar pasta e conteúdo" else if (isDirectory) "Eliminar pasta vazia" else "Eliminar ficheiro"
         AlertDialog.Builder(this)
@@ -1259,6 +1260,7 @@ class MainActivity : Activity() {
                     "Copiar para outra pasta…" -> chooseRestrictedDestination(path, name, false)
                     "Mover para outra pasta…" -> chooseRestrictedDestination(path, name, true)
                     "Informações" -> showRestrictedFileInfo(entry)
+                    "Extrair arquivo aqui" -> confirmExtractRestrictedArchive(path, containingDirectory)
                     "Renomear" -> promptRenameRestrictedEntry(path, name, containingDirectory)
                     "Eliminar pasta vazia", "Eliminar ficheiro", "Eliminar pasta e conteúdo" ->
                         confirmDeleteRestrictedEntry(path, name, containingDirectory, isDirectory)
@@ -1452,6 +1454,49 @@ class MainActivity : Activity() {
                 }) {
                     val parent = File(source).parentFile?.absolutePath
                     if (parent != null) browseRestrictedDirectory(parent) else showRestrictedStorageRoots()
+                }
+            }
+            .show()
+    }
+
+    private fun confirmExtractRestrictedArchive(archivePath: String, destinationDirectory: String) {
+        val service = restrictedStorageService ?: return
+        val archive = File(archivePath)
+        val kind = archiveKind(archive)
+        val isRoot = restrictedAccessIdentity.contains("ROOT", ignoreCase = true) ||
+            restrictedAccessIdentity.contains("UID 0")
+        val passwordInput = EditText(this).apply {
+            hint = "Palavra-passe (se necessária)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            setText(rarPasswords[pathKey(archive)] ?: "")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Extrair arquivo aqui")
+            .setMessage(
+                "Extrair " + archive.name + " para:\n" + destinationDirectory +
+                "\n\nFicheiros existentes não serão substituídos; será criado um nome alternativo. " +
+                if (isRoot) {
+                    "ATENÇÃO: estás em modo ROOT. Extrair para pastas de aplicações ou do sistema pode inutilizar o Android."
+                } else {
+                    "O Android ou o fabricante ainda pode bloquear a gravação."
+                }
+            )
+            .setView(passwordInput)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton("Extrair") { _, _ ->
+                val password = passwordInput.text.toString()
+                if (kind == "rar" && password.isNotEmpty()) rarPasswords[pathKey(archive)] = password
+                runRestrictedOperation("A extrair " + archive.name + "…", {
+                    val response = JSONObject(
+                        service.extractArchive(archivePath, destinationDirectory, kind, password)
+                    )
+                    if (!response.optBoolean("success", false)) {
+                        throw IOException(response.optString("error", "A extração foi bloqueada."))
+                    }
+                    true
+                }) {
+                    browseRestrictedDirectory(destinationDirectory)
                 }
             }
             .show()

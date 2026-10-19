@@ -1,4 +1,4 @@
-# Archiver 0.9.1 — Store submission preparation
+# Archiver 0.9.2 — Store submission preparation
 
 This document prepares the same signed Android APK for APKPure, Uptodown, and HUAWEI AppGallery. It is a submission checklist, not confirmation that any store has approved or published the app.
 
@@ -6,8 +6,8 @@ This document prepares the same signed Android APK for APKPure, Uptodown, and HU
 
 - Display name: Archiver — File Manager
 - Package ID: `com.nexauren.archiver`
-- Version: `0.9.1`
-- Android version code: `12`
+- Version: `0.9.2`
+- Android version code: `13`
 - Minimum Android: API 23 (Android 6.0)
 - Target Android: API 35
 - Category: Tools / Utilities
@@ -32,7 +32,7 @@ Features:
 - Search from the current folder, optionally including subfolders, with filename patterns and file-type filters.
 - Copy, move, rename, delete, share, inspect, and calculate SHA-256 checksums for files.
 - Create, browse, verify, and extract ZIP, 7Z, TAR, TAR.GZ, TAR.BZ2, and TAR.XZ archives. Browse, test, and extract RAR/RAR5 (read-only).
-- Optional advanced browsing via Shizuku/Sui. ADB/Shell mode can attempt `Android/data` and `Android/obb`, create folders/files, edit UTF-8 text up to 4 MiB, and copy/move items between restricted folders and shared storage. If the user starts the service with root privileges (UID 0), the app can browse `/`, `/data`, `/system`, `/vendor`, shared storage, `Android/data` and `Android/obb`, and perform recursive operations. Root is not granted by the app itself, and destructive operations can permanently damage Android or other apps.
+- Optional advanced browsing via Shizuku/Sui. ADB/Shell mode can attempt `Android/data` and `Android/obb`, create folders/files, edit UTF-8 text up to 4 MiB, copy/move items between restricted folders and shared storage, and extract ZIP/7Z/RAR/RAR5/TAR/TAR.GZ/TAR.BZ2/TAR.XZ directly into the currently browsed advanced directory. If the user starts the service with root privileges (UID 0), the app can browse `/`, `/data`, `/system`, `/vendor`, shared storage, `Android/data` and `Android/obb`, and perform recursive operations. Root is not granted by the app itself, and destructive operations can permanently damage Android or other apps.
 - Browse archive folders and extract individual files or a selected archived folder.
 - Use ZIP password protection with ZipCrypto or AES-256, split ZIP volumes, and configurable compression levels where supported.
 - Read PDFs, view common raster images, play supported audio, edit small UTF-8 text files, and inspect GLB/GLTF metadata.
@@ -76,7 +76,7 @@ O Archiver processa os ficheiros localmente. O manifesto atual não pede acesso 
 ## Required before submission
 
 - [ ] Configure the four protected GitHub Actions secrets described in [KEYSTORE_SECRETS.md](../.github/KEYSTORE_SECRETS.md). Never commit the keystore or passwords.
-- [ ] Use the single **Archiver — Single Signed APK** workflow; for a stable release, push a matching `v0.9.1` tag (or run it manually with release publication enabled). Require the signed build, signature verification, ZIP alignment verification, and attached SHA-256 checksum.
+- [ ] Use the single **Archiver — Single Signed APK** workflow; for a stable release, push a matching `v0.9.2` tag (or run it manually with release publication enabled). Require the signed build, signature verification, ZIP alignment verification, and attached SHA-256 checksum.
 - [ ] Download the sole APK attached to the stable GitHub release and compare its checksum to the attached `.sha256` file. The current workflow does not create new debug/preview APKs.
 - [ ] Confirm that the release keystore is the intended long-term signing identity and back it up securely. A signing-key mismatch can prevent upgrades.
 - [ ] Add real screenshots captured from the release build on a supported Android device. Do not use mockups that imply unverified app behavior.
