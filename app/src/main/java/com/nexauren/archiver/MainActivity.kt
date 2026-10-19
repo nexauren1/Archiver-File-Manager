@@ -28,6 +28,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Environment
+import android.os.StatFs
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import android.util.LruCache
@@ -160,6 +161,7 @@ class MainActivity : Activity() {
     private lateinit var pathView: TextView
     private lateinit var selectionView: TextView
     private lateinit var countView: TextView
+    private lateinit var storageView: TextView
     private lateinit var breadcrumbRow: LinearLayout
     private var selectionBar: LinearLayout? = null
     private var addFab: ImageButton? = null
@@ -176,7 +178,26 @@ class MainActivity : Activity() {
     private var appLanguage = "pt"
     private var uiTheme = "Escuro"
     private var accentName = "Lavanda"
+    private var customBackground = "Padrão"
+    private var autoRefreshEnabled = true
     private val folderColors = linkedMapOf<String, String>()
+    private val folderIcons = linkedMapOf<String, String>()
+    private val autoRefreshHandler = Handler(Looper.getMainLooper())
+    private var currentDirectorySignature = ""
+    private val autoRefreshRunnable = object : Runnable {
+        override fun run() {
+            if (!isFinishing && autoRefreshEnabled && browserRendered && !settingsOpen && !editorOpen &&
+                hasStorageAccess() && ::currentDir.isInitialized
+            ) {
+                val visible = safeList(currentDir).filter { showHidden || !it.name.startsWith(".") }
+                if (directorySignature(visible) != currentDirectorySignature) refreshFiles()
+                else if (::storageView.isInitialized) storageView.text = storageSummary()
+            }
+            if (!isFinishing && autoRefreshEnabled) {
+                autoRefreshHandler.postDelayed(this, 15_000L)
+            }
+        }
+    }
 
     private val selected = linkedSetOf<String>()
     private val rowViews = linkedMapOf<String, View>()
@@ -232,6 +253,19 @@ class MainActivity : Activity() {
         if (!::prefs.isInitialized) return
         if (hasStorageAccess() && !browserRendered) renderBrowser()
         else if (!hasStorageAccess() && !browserRendered && !::page.isInitialized) showPermissionScreen()
+        if (browserRendered && !settingsOpen && !editorOpen) scheduleAutoRefresh()
+    }
+
+    override fun onPause() {
+        autoRefreshHandler.removeCallbacks(autoRefreshRunnable)
+        super.onPause()
+    }
+
+    private fun scheduleAutoRefresh() {
+        autoRefreshHandler.removeCallbacks(autoRefreshRunnable)
+        if (autoRefreshEnabled && browserRendered && !settingsOpen && !editorOpen && !isFinishing) {
+            autoRefreshHandler.postDelayed(autoRefreshRunnable, 15_000L)
+        }
     }
 
     private fun loadPreferences() {
@@ -254,10 +288,17 @@ class MainActivity : Activity() {
         appLanguage = prefs.getString("app_language", "pt") ?: "pt"
         uiTheme = prefs.getString("ui_theme", "Escuro") ?: "Escuro"
         accentName = prefs.getString("accent_color", "Lavanda") ?: "Lavanda"
+        customBackground = prefs.getString("custom_background", "Padrão") ?: "Padrão"
+        autoRefreshEnabled = prefs.getBoolean("auto_refresh", true)
         folderColors.clear()
         (prefs.getStringSet("folder_colors", emptySet()) ?: emptySet()).forEach { entry ->
             val index = entry.lastIndexOf('=')
             if (index > 0) folderColors[entry.substring(0, index)] = entry.substring(index + 1)
+        }
+        folderIcons.clear()
+        (prefs.getStringSet("folder_icons", emptySet()) ?: emptySet()).forEach { entry ->
+            val index = entry.lastIndexOf('=')
+            if (index > 0) folderIcons[entry.substring(0, index)] = entry.substring(index + 1)
         }
         favorites.clear()
         favorites.addAll(prefs.getStringSet("favorites", emptySet()) ?: emptySet())
@@ -285,7 +326,10 @@ class MainActivity : Activity() {
             .putString("app_language", appLanguage)
             .putString("ui_theme", uiTheme)
             .putString("accent_color", accentName)
+            .putString("custom_background", customBackground)
+            .putBoolean("auto_refresh", autoRefreshEnabled)
             .putStringSet("folder_colors", folderColors.map { (path, color) -> "$path=$color" }.toSet())
+            .putStringSet("folder_icons", folderIcons.map { (path, icon) -> "$path=$icon" }.toSet())
             .putStringSet("favorites", HashSet(favorites))
             .apply()
     }
@@ -407,6 +451,13 @@ class MainActivity : Activity() {
         page.addView(toolbar, LinearLayout.LayoutParams(-1, dp(58)))
         page.addView(View(this).apply { setBackgroundColor(accentColor()) },
             LinearLayout.LayoutParams(-1, dp(2)))
+        storageView = label(storageSummary(), 12, mutedTextColor(), false).apply {
+            setPadding(dp(14), dp(5), dp(14), dp(5))
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setBackgroundColor(panelBackgroundColor())
+        }
+        page.addView(storageView, LinearLayout.LayoutParams(-1, dp(30)))
 
         val breadcrumbScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -478,6 +529,7 @@ class MainActivity : Activity() {
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
         refreshFiles()
+        scheduleAutoRefresh()
     }
 
     private fun refreshFiles() {
@@ -497,6 +549,8 @@ class MainActivity : Activity() {
         }
         val files = safeList(currentDir).filter { showHidden || !it.name.startsWith(".") }.toMutableList()
         visibleFileCount = files.size
+        currentDirectorySignature = directorySignature(files)
+        if (::storageView.isInitialized) storageView.text = storageSummary()
         val comparator = when (sortBy) {
             "Tamanho" -> compareBy<File> { if (it.isDirectory) -1L else it.length() }
             "Data" -> compareBy<File> { it.lastModified() }
@@ -521,6 +575,35 @@ class MainActivity : Activity() {
         }
         files.forEach { addFileRow(it) }
         updateSelectionBar()
+    }
+
+    private fun directorySignature(files: List<File>): String {
+        // Order-independent, allocation-light fingerprint: avoid building huge strings or sorting
+        // every directory every 15 seconds on lower-memory devices.
+        var sum = 0
+        var mixed = 0
+        files.forEach { file ->
+            var itemHash = file.name.hashCode()
+            itemHash = 31 * itemHash + file.lastModified().hashCode()
+            itemHash = 31 * itemHash + (if (file.isFile) file.length().hashCode() else 0)
+            itemHash = 31 * itemHash + if (file.isDirectory) 1 else 0
+            sum += itemHash
+            mixed = mixed xor Integer.rotateLeft(itemHash, itemHash and 31)
+        }
+        return files.size.toString() + ":" + sum + ":" + mixed
+    }
+
+    private fun storageSummary(): String {
+        return try {
+            val stats = StatFs(rootDir.absolutePath)
+            val total = stats.totalBytes.coerceAtLeast(1L)
+            val free = stats.availableBytes.coerceAtLeast(0L)
+            val used = (total - free).coerceAtLeast(0L)
+            tr("Armazenamento") + ": " + formatSize(used) + " " + tr("usados") +
+                " • " + formatSize(free) + " " + tr("livres")
+        } catch (_: Exception) {
+            tr("Armazenamento indisponível")
+        }
     }
 
     private fun renderBreadcrumbs() {
@@ -725,6 +808,8 @@ class MainActivity : Activity() {
 
     private fun iconForFile(file: File): Int {
         if (file.isDirectory) {
+            val selectedIcon = folderIcons[pathKey(file)]
+            if (!selectedIcon.isNullOrBlank()) return folderIconResource(selectedIcon)
             return when (file.name.lowercase(Locale.ROOT)) {
                 "android" -> R.drawable.ic_folder_android
                 "dcim", "pictures", "picture", "collage", "myalbums" -> R.drawable.ic_folder_camera
@@ -951,14 +1036,21 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Partilhar o Archiver", "Ajudar o projeto", "Convida alguém a experimentar o Archiver") {
                     shareApplication()
                 }
-                addSettingChoice(content, "Sobre o Archiver", "0.6.0", "Gestor de ficheiros Android nativo em Kotlin") {
-                    AlertDialog.Builder(this).setTitle("Archiver 0.6.0")
+                addSettingChoice(content, "Sobre o Archiver", "0.8.0", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver 0.8.0")
                         .setMessage(tr("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso."))
                         .setPositiveButton(tr("Fechar"), null).show()
+                }
+                addSettingChoice(content, "Política de privacidade", "Privacidade e dados", "Como os ficheiros e as permissões são tratados") {
+                    openPublicPage("privacy.html")
+                }
+                addSettingChoice(content, "Termos de utilização", "Condições de utilização", "Regras e limites de utilização da aplicação") {
+                    openPublicPage("terms.html")
                 }
             }
             "Interface" -> {
                 addSettingChoice(content, "Tema da interface", tr(uiTheme), "Escolhe entre escuro, preto OLED e claro") { showThemeMenu() }
+                addSettingChoice(content, "Fundo do explorador", tr(customBackground), "Escolhe uma cor de fundo para a lista de ficheiros") { showBackgroundMenu() }
                 addSettingChoice(content, "Cor de destaque", tr(accentName), "Cor dos botões, seleção e indicadores") { showAccentMenu() }
                 addSettingSwitch(content, "Animações suaves", "Efeitos leves ao apresentar ficheiros", showAnimations) { showAnimations = it }
                 addSettingChoice(content, "Cores das pastas", "Por pasta", "Escolhe uma cor para uma pasta") {
@@ -970,6 +1062,10 @@ class MainActivity : Activity() {
                 addSettingSwitch(content, "Decrescente", "Inverte a ordem de ordenação dos arquivos", descending) { descending = it }
                 addSettingSwitch(content, "Usar item \"..\" ", "Permite subir para o diretório anterior a partir da lista", useParentEntry) { useParentEntry = it }
                 addSettingSwitch(content, "Exibir arquivos ocultos", "Mostra ficheiros e diretórios cujo nome começa por ponto", showHidden) { showHidden = it }
+                addSettingSwitch(content, "Atualização automática", "Verifica alterações na pasta atual a cada 15 segundos", autoRefreshEnabled) {
+                    autoRefreshEnabled = it
+                    if (it) scheduleAutoRefresh() else autoRefreshHandler.removeCallbacks(autoRefreshRunnable)
+                }
                 addSettingChoice(content, "Modo de exibição", tr(viewMode), "Detalhado, compacto ou grelha") { showViewModeMenu() }
                 addSettingSwitch(content, "Exibir tamanho", "Mostra o tamanho dos ficheiros na lista", showSize) { showSize = it }
                 addSettingSwitch(content, "Exibir data", "Mostra a data da última modificação", showDate) { showDate = it }
@@ -1136,10 +1232,12 @@ class MainActivity : Activity() {
         options += if (favorites.contains(pathKey(file))) "Remover dos Favoritos" else "Adicionar aos Favoritos"
         if (file.isDirectory) options += "Calcular tamanho total"
         if (file.isDirectory) options += "Cor da pasta"
+        if (file.isDirectory) options += "Ícone da pasta"
         AlertDialog.Builder(this).setTitle(file.name).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (options[which]) {
                 "Abrir pasta" -> { currentDir = file; selected.clear(); refreshFiles() }
                 "Cor da pasta" -> showFolderColorMenu(file)
+                "Ícone da pasta" -> showFolderIconMenu(file)
                 "Calcular tamanho total" -> calculateFolderSize(file)
                 "Abrir" -> openFile(file)
                 "Inspecionar modelo 3D" -> showModelInspector(file)
@@ -3780,7 +3878,24 @@ class MainActivity : Activity() {
             "Alterações por guardar" to "Unsaved changes",
             "Queres guardar as alterações antes de sair do editor?" to "Would you like to save changes before leaving the editor?",
             "Já existe uma operação em curso. Aguarda que termine." to "Another operation is running. Please wait.",
-            "A operação está em curso. Acompanha o progresso na janela ou na notificação." to "An operation is running. Follow progress in the dialog or notification."
+            "A operação está em curso. Acompanha o progresso na janela ou na notificação." to "An operation is running. Follow progress in the dialog or notification.",
+            "Armazenamento" to "Storage", "usados" to "used", "livres" to "free",
+            "Armazenamento indisponível" to "Storage unavailable",
+            "Atualização automática" to "Automatic refresh",
+            "Verifica alterações na pasta atual a cada 15 segundos" to "Checks the current folder for changes every 15 seconds",
+            "Fundo do explorador" to "Explorer background",
+            "Escolhe uma cor de fundo para a lista de ficheiros" to "Choose a background color for the file list",
+            "Padrão" to "Default", "Azul-noite" to "Midnight blue", "Verde-floresta" to "Forest green",
+            "Ameixa" to "Plum", "Cinza" to "Slate gray", "Papel" to "Warm paper",
+            "Ícone da pasta" to "Folder icon", "Clássico" to "Classic", "Fotografias" to "Photos",
+            "Transferências" to "Downloads", "Vídeos" to "Videos",
+            "Escolhe um ícone para esta pasta" to "Choose an icon for this folder",
+            "Ícone da pasta reposto." to "Folder icon reset.", "Ícone da pasta alterado." to "Folder icon updated.",
+            "Política de privacidade" to "Privacy policy", "Privacidade e dados" to "Privacy and data",
+            "Como os ficheiros e as permissões são tratados" to "How files and permissions are handled",
+            "Termos de utilização" to "Terms of use", "Condições de utilização" to "Conditions of use",
+            "Regras e limites de utilização da aplicação" to "App usage rules and limitations",
+            "Não foi possível abrir a página." to "Could not open the page."
         ) + mapOf(
             "12 idiomas" to "12 languages",
             "Pesquisa avançada" to "Advanced search",
@@ -4499,8 +4614,138 @@ class MainActivity : Activity() {
             "id" -> mapOf("Selecionar idioma" to "Pilih bahasa", "Toca diretamente no idioma que queres usar." to "Ketuk bahasa yang ingin digunakan.", "Colar aqui" to "Tempel di sini", "Criar pasta ou ficheiro" to "Buat folder atau berkas", "Mover para esta pasta — Colar" to "Pindahkan ke folder ini — Tempel", "Copiar para esta pasta — Colar" to "Salin ke folder ini — Tempel", "Escolher pasta" to "Pilih folder", "Cor da pasta reposta." to "Warna folder direset.", "Cor da pasta alterada." to "Warna folder diubah.", "Usar a cor normal" to "Gunakan warna default", "Aplicar a cor " to "Terapkan warna ", "Continuar em segundo plano" to "Lanjutkan di latar belakang", "Posição do áudio" to "Posisi audio", "O áudio continua a tocar em segundo plano. Usa a notificação para parar." to "Audio akan terus diputar di latar belakang. Gunakan notifikasi untuk menghentikannya.")
             else -> emptyMap()
         }
-        // Long-tail labels use English until their dedicated translation is added.
-        return localized[text] ?: localizedExtras[text] ?: uxTranslations[text] ?: readerTranslations[text] ?: english[text] ?: text
+        val polishTranslations = when (appLanguage) {
+            "es" -> mapOf(
+                "Armazenamento" to "Almacenamiento", "usados" to "usados", "livres" to "libres",
+                "Armazenamento indisponível" to "Almacenamiento no disponible",
+                "Atualização automática" to "Actualización automática",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "Comprueba cambios en la carpeta actual cada 15 segundos",
+                "Fundo do explorador" to "Fondo del explorador", "Escolhe uma cor de fundo para a lista de ficheiros" to "Elige un color de fondo para la lista de archivos",
+                "Padrão" to "Predeterminado", "Azul-noite" to "Azul noche", "Verde-floresta" to "Verde bosque",
+                "Ameixa" to "Ciruela", "Cinza" to "Gris pizarra", "Papel" to "Papel cálido",
+                "Ícone da pasta" to "Icono de carpeta", "Clássico" to "Clásico", "Fotografias" to "Fotos",
+                "Transferências" to "Descargas", "Vídeos" to "Vídeos", "Escolhe um ícone para esta pasta" to "Elige un icono para esta carpeta",
+                "Ícone da pasta reposto." to "Icono de carpeta restablecido.", "Ícone da pasta alterado." to "Icono de carpeta actualizado.",
+                "Política de privacidade" to "Política de privacidad", "Privacidade e dados" to "Privacidad y datos",
+                "Como os ficheiros e as permissões são tratados" to "Cómo se gestionan archivos y permisos",
+                "Termos de utilização" to "Términos de uso", "Condições de utilização" to "Condiciones de uso",
+                "Regras e limites de utilização da aplicação" to "Reglas y límites de uso de la aplicación",
+                "Não foi possível abrir a página." to "No se pudo abrir la página."
+            )
+            "fr" -> mapOf(
+                "Armazenamento" to "Stockage", "usados" to "utilisés", "livres" to "libres",
+                "Armazenamento indisponível" to "Stockage indisponible",
+                "Atualização automática" to "Actualisation automatique",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "Vérifie le dossier actuel toutes les 15 secondes",
+                "Fundo do explorador" to "Arrière-plan de l’explorateur", "Escolhe uma cor de fundo para a lista de ficheiros" to "Choisissez une couleur d’arrière-plan pour la liste",
+                "Padrão" to "Par défaut", "Azul-noite" to "Bleu nuit", "Verde-floresta" to "Vert forêt",
+                "Ameixa" to "Prune", "Cinza" to "Gris ardoise", "Papel" to "Papier chaud",
+                "Ícone da pasta" to "Icône du dossier", "Clássico" to "Classique", "Fotografias" to "Photos",
+                "Transferências" to "Téléchargements", "Vídeos" to "Vidéos", "Escolhe um ícone para esta pasta" to "Choisissez une icône pour ce dossier",
+                "Ícone da pasta reposto." to "Icône du dossier réinitialisée.", "Ícone da pasta alterado." to "Icône du dossier mise à jour.",
+                "Política de privacidade" to "Politique de confidentialité", "Privacidade e dados" to "Confidentialité et données",
+                "Como os ficheiros e as permissões são tratados" to "Gestion des fichiers et des autorisations",
+                "Termos de utilização" to "Conditions d’utilisation", "Condições de utilização" to "Conditions d’utilisation",
+                "Regras e limites de utilização da aplicação" to "Règles et limites d’utilisation de l’application",
+                "Não foi possível abrir a página." to "Impossible d’ouvrir la page."
+            )
+            "de" -> mapOf(
+                "Armazenamento" to "Speicher", "usados" to "belegt", "livres" to "frei",
+                "Armazenamento indisponível" to "Speicher nicht verfügbar",
+                "Atualização automática" to "Automatische Aktualisierung",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "Prüft den aktuellen Ordner alle 15 Sekunden auf Änderungen",
+                "Fundo do explorador" to "Explorer-Hintergrund", "Escolhe uma cor de fundo para a lista de ficheiros" to "Wähle eine Hintergrundfarbe für die Dateiliste",
+                "Padrão" to "Standard", "Azul-noite" to "Mitternachtsblau", "Verde-floresta" to "Waldgrün",
+                "Ameixa" to "Pflaume", "Cinza" to "Schiefergrau", "Papel" to "Warmweiß",
+                "Ícone da pasta" to "Ordnersymbol", "Clássico" to "Klassisch", "Fotografias" to "Fotos",
+                "Transferências" to "Downloads", "Vídeos" to "Videos", "Escolhe um ícone para esta pasta" to "Wähle ein Symbol für diesen Ordner",
+                "Ícone da pasta reposto." to "Ordnersymbol zurückgesetzt.", "Ícone da pasta alterado." to "Ordnersymbol aktualisiert.",
+                "Política de privacidade" to "Datenschutzerklärung", "Privacidade e dados" to "Datenschutz und Daten",
+                "Como os ficheiros e as permissões são tratados" to "Umgang mit Dateien und Berechtigungen",
+                "Termos de utilização" to "Nutzungsbedingungen", "Condições de utilização" to "Nutzungsbedingungen",
+                "Regras e limites de utilização da aplicação" to "Nutzungsregeln und Einschränkungen",
+                "Não foi possível abrir a página." to "Die Seite konnte nicht geöffnet werden."
+            )
+            "zh" -> mapOf(
+                "Armazenamento" to "存储空间", "usados" to "已使用", "livres" to "可用",
+                "Armazenamento indisponível" to "存储空间不可用", "Atualização automática" to "自动刷新",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "每 15 秒检查当前文件夹的更改",
+                "Fundo do explorador" to "文件列表背景", "Escolhe uma cor de fundo para a lista de ficheiros" to "选择文件列表的背景颜色",
+                "Padrão" to "默认", "Azul-noite" to "午夜蓝", "Verde-floresta" to "森林绿",
+                "Ameixa" to "梅紫色", "Cinza" to "石板灰", "Papel" to "暖纸色",
+                "Ícone da pasta" to "文件夹图标", "Clássico" to "经典", "Fotografias" to "照片",
+                "Transferências" to "下载", "Vídeos" to "视频", "Escolhe um ícone para esta pasta" to "选择此文件夹的图标",
+                "Ícone da pasta reposto." to "文件夹图标已重置。", "Ícone da pasta alterado." to "文件夹图标已更新。"
+            )
+            "hi" -> mapOf(
+                "Armazenamento" to "स्टोरेज", "usados" to "इस्तेमाल", "livres" to "खाली",
+                "Armazenamento indisponível" to "स्टोरेज उपलब्ध नहीं", "Atualização automática" to "स्वचालित रिफ़्रेश",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "हर 15 सेकंड में वर्तमान फ़ोल्डर में बदलाव जाँचें",
+                "Fundo do explorador" to "फ़ाइल सूची की पृष्ठभूमि", "Escolhe uma cor de fundo para a lista de ficheiros" to "फ़ाइल सूची के लिए पृष्ठभूमि रंग चुनें",
+                "Padrão" to "डिफ़ॉल्ट", "Azul-noite" to "मिडनाइट ब्लू", "Verde-floresta" to "वन हरा",
+                "Ameixa" to "आलूबुखारा", "Cinza" to "स्लेट ग्रे", "Papel" to "हल्का काग़ज़",
+                "Ícone da pasta" to "फ़ोल्डर आइकन", "Clássico" to "क्लासिक", "Fotografias" to "फ़ोटो",
+                "Transferências" to "डाउनलोड", "Vídeos" to "वीडियो", "Escolhe um ícone para esta pasta" to "इस फ़ोल्डर के लिए आइकन चुनें",
+                "Ícone da pasta reposto." to "फ़ोल्डर आइकन रीसेट हुआ।", "Ícone da pasta alterado." to "फ़ोल्डर आइकन अपडेट हुआ।"
+            )
+            "ar" -> mapOf(
+                "Armazenamento" to "التخزين", "usados" to "مستخدم", "livres" to "متاح",
+                "Armazenamento indisponível" to "التخزين غير متاح", "Atualização automática" to "تحديث تلقائي",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "يفحص تغييرات المجلد الحالي كل 15 ثانية",
+                "Fundo do explorador" to "خلفية المستكشف", "Escolhe uma cor de fundo para a lista de ficheiros" to "اختر لون خلفية لقائمة الملفات",
+                "Padrão" to "افتراضي", "Azul-noite" to "أزرق ليلي", "Verde-floresta" to "أخضر الغابة",
+                "Ameixa" to "برقوقي", "Cinza" to "رمادي", "Papel" to "ورقي دافئ",
+                "Ícone da pasta" to "أيقونة المجلد", "Clássico" to "كلاسيكي", "Fotografias" to "الصور",
+                "Transferências" to "التنزيلات", "Vídeos" to "الفيديو", "Escolhe um ícone para esta pasta" to "اختر أيقونة لهذا المجلد",
+                "Ícone da pasta reposto." to "تمت إعادة تعيين أيقونة المجلد.", "Ícone da pasta alterado." to "تم تحديث أيقونة المجلد."
+            )
+            "ja" -> mapOf(
+                "Armazenamento" to "ストレージ", "usados" to "使用中", "livres" to "空き",
+                "Armazenamento indisponível" to "ストレージを取得できません", "Atualização automática" to "自動更新",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "15 秒ごとに現在のフォルダーを確認します",
+                "Fundo do explorador" to "ファイル一覧の背景", "Escolhe uma cor de fundo para a lista de ficheiros" to "ファイル一覧の背景色を選択",
+                "Padrão" to "標準", "Azul-noite" to "ミッドナイトブルー", "Verde-floresta" to "フォレストグリーン",
+                "Ameixa" to "プラム", "Cinza" to "スレートグレー", "Papel" to "暖かい紙色",
+                "Ícone da pasta" to "フォルダーアイコン", "Clássico" to "クラシック", "Fotografias" to "写真",
+                "Transferências" to "ダウンロード", "Vídeos" to "動画", "Escolhe um ícone para esta pasta" to "このフォルダーのアイコンを選択",
+                "Ícone da pasta reposto." to "フォルダーアイコンをリセットしました。", "Ícone da pasta alterado." to "フォルダーアイコンを更新しました。"
+            )
+            "ru" -> mapOf(
+                "Armazenamento" to "Хранилище", "usados" to "занято", "livres" to "свободно",
+                "Armazenamento indisponível" to "Хранилище недоступно", "Atualização automática" to "Автообновление",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "Проверяет текущую папку каждые 15 секунд",
+                "Fundo do explorador" to "Фон проводника", "Escolhe uma cor de fundo para a lista de ficheiros" to "Выберите цвет фона списка файлов",
+                "Padrão" to "По умолчанию", "Azul-noite" to "Полуночно-синий", "Verde-floresta" to "Лесной зелёный",
+                "Ameixa" to "Сливовый", "Cinza" to "Серый", "Papel" to "Тёплая бумага",
+                "Ícone da pasta" to "Значок папки", "Clássico" to "Классический", "Fotografias" to "Фото",
+                "Transferências" to "Загрузки", "Vídeos" to "Видео", "Escolhe um ícone para esta pasta" to "Выберите значок для этой папки",
+                "Ícone da pasta reposto." to "Значок папки сброшен.", "Ícone da pasta alterado." to "Значок папки обновлён."
+            )
+            "bn" -> mapOf(
+                "Armazenamento" to "স্টোরেজ", "usados" to "ব্যবহৃত", "livres" to "খালি",
+                "Armazenamento indisponível" to "স্টোরেজ উপলভ্য নয়", "Atualização automática" to "স্বয়ংক্রিয় রিফ্রেশ",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "প্রতি ১৫ সেকেন্ডে বর্তমান ফোল্ডারের পরিবর্তন পরীক্ষা করুন",
+                "Fundo do explorador" to "ফাইল তালিকার পটভূমি", "Escolhe uma cor de fundo para a lista de ficheiros" to "ফাইল তালিকার পটভূমির রং বেছে নিন",
+                "Padrão" to "ডিফল্ট", "Azul-noite" to "মধ্যরাতের নীল", "Verde-floresta" to "বন সবুজ",
+                "Ameixa" to "প্লাম", "Cinza" to "স্লেট ধূসর", "Papel" to "উষ্ণ কাগজ",
+                "Ícone da pasta" to "ফোল্ডার আইকন", "Clássico" to "ক্লাসিক", "Fotografias" to "ছবি",
+                "Transferências" to "ডাউনলোড", "Vídeos" to "ভিডিও", "Escolhe um ícone para esta pasta" to "এই ফোল্ডারের জন্য আইকন বেছে নিন",
+                "Ícone da pasta reposto." to "ফোল্ডার আইকন রিসেট হয়েছে।", "Ícone da pasta alterado." to "ফোল্ডার আইকন আপডেট হয়েছে।"
+            )
+            "id" -> mapOf(
+                "Armazenamento" to "Penyimpanan", "usados" to "digunakan", "livres" to "tersedia",
+                "Armazenamento indisponível" to "Penyimpanan tidak tersedia", "Atualização automática" to "Penyegaran otomatis",
+                "Verifica alterações na pasta atual a cada 15 segundos" to "Periksa perubahan folder saat ini setiap 15 detik",
+                "Fundo do explorador" to "Latar belakang penjelajah", "Escolhe uma cor de fundo para a lista de ficheiros" to "Pilih warna latar belakang daftar berkas",
+                "Padrão" to "Default", "Azul-noite" to "Biru tengah malam", "Verde-floresta" to "Hijau hutan",
+                "Ameixa" to "Plum", "Cinza" to "Abu-abu batu", "Papel" to "Kertas hangat",
+                "Ícone da pasta" to "Ikon folder", "Clássico" to "Klasik", "Fotografias" to "Foto",
+                "Transferências" to "Unduhan", "Vídeos" to "Video", "Escolhe um ícone para esta pasta" to "Pilih ikon untuk folder ini",
+                "Ícone da pasta reposto." to "Ikon folder direset.", "Ícone da pasta alterado." to "Ikon folder diperbarui."
+            )
+            else -> emptyMap()
+        }
+        return polishTranslations[text] ?: localized[text] ?: localizedExtras[text] ?: uxTranslations[text] ?: readerTranslations[text] ?: english[text] ?: text
     }
 
     private fun accentColor(): Int = when (accentName) {
@@ -4513,11 +4758,22 @@ class MainActivity : Activity() {
         else -> 0xFFB8B5FF.toInt()
     }
 
-    private fun pageBackgroundColor(): Int = when (uiTheme) {
-        "Claro" -> 0xFFF5F6FA.toInt()
+    private fun pageBackgroundColor(): Int = when (customBackground) {
+        "Azul-noite" -> 0xFF101B2D.toInt()
+        "Verde-floresta" -> 0xFF10241F.toInt()
+        "Ameixa" -> 0xFF24172D.toInt()
+        "Cinza" -> 0xFF25272F.toInt()
         "Preto OLED" -> 0xFF000000.toInt()
-        else -> 0xFF19191D.toInt()
+        "Papel" -> 0xFFF4F0E8.toInt()
+        else -> when (uiTheme) {
+            "Claro" -> 0xFFF5F6FA.toInt()
+            "Preto OLED" -> 0xFF000000.toInt()
+            else -> 0xFF19191D.toInt()
+        }
     }
+
+    private fun isLightBackground(): Boolean =
+        customBackground == "Papel" || (customBackground == "Padrão" && uiTheme == "Claro")
 
     private fun panelBackgroundColor(): Int = when (uiTheme) {
         "Claro" -> 0xFFE7E8EF.toInt()
@@ -4543,8 +4799,8 @@ class MainActivity : Activity() {
         else -> 0xFF353348.toInt()
     }
 
-    private fun primaryTextColor(): Int = if (uiTheme == "Claro") 0xFF22232A.toInt() else 0xFFF3F3F5.toInt()
-    private fun mutedTextColor(): Int = if (uiTheme == "Claro") 0xFF676A75.toInt() else 0xFFAAAAB4.toInt()
+    private fun primaryTextColor(): Int = if (isLightBackground()) 0xFF22232A.toInt() else 0xFFF3F3F5.toInt()
+    private fun mutedTextColor(): Int = if (isLightBackground()) 0xFF676A75.toInt() else 0xFFAAAAB4.toInt()
 
     private fun resolveTextColor(requested: Int): Int = when (requested) {
         0xFFFFFFFF.toInt(), 0xFFF4F4F6.toInt(), 0xFFF3F3F5.toInt(), 0xFFF1F1F4.toInt(),
@@ -4557,7 +4813,7 @@ class MainActivity : Activity() {
 
     private fun applyPaletteToWindow() {
         window.statusBarColor = toolbarBackgroundColor()
-        window.navigationBarColor = if (uiTheme == "Preto OLED") 0xFF000000.toInt() else 0xFF101014.toInt()
+        window.navigationBarColor = if (uiTheme == "Preto OLED" || customBackground == "Preto OLED") 0xFF000000.toInt() else 0xFF101014.toInt()
         window.decorView.systemUiVisibility = if (uiTheme == "Claro") {
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         } else 0
@@ -4618,6 +4874,15 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun openPublicPage(pageName: String) {
+        val uri = Uri.parse("https://nexauren1.github.io/Archiver-File-Manager/" + pageName)
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+        } catch (_: ActivityNotFoundException) {
+            toast(tr("Não foi possível abrir a página."))
+        }
+    }
+
     private fun shareApplication() {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
@@ -4625,7 +4890,7 @@ class MainActivity : Activity() {
             putExtra(
                 Intent.EXTRA_TEXT,
                 tr("Experimenta o Archiver, um gestor de ficheiros Android independente:") +
-                    "\nhttps://github.com/nexauren1/Archiver-File-Manager"
+                    "\nhttps://nexauren1.github.io/Archiver-File-Manager/"
             )
         }
         startActivity(Intent.createChooser(intent, tr("Partilhar o Archiver")))
@@ -4705,6 +4970,23 @@ class MainActivity : Activity() {
             list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
         }
         dialog.show()
+    }
+
+    private fun showBackgroundMenu() {
+        val options = arrayOf("Padrão", "Azul-noite", "Verde-floresta", "Ameixa", "Cinza", "Preto OLED", "Papel")
+        val selectedIndex = options.indexOf(customBackground).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(tr("Fundo do explorador"))
+            .setMessage(tr("Escolhe uma cor de fundo para a lista de ficheiros"))
+            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), selectedIndex) { dialog, which ->
+                customBackground = options[which]
+                savePreferences()
+                applyPaletteToWindow()
+                dialog.dismiss()
+                if (settingsOpen) renderSettingsScreen() else renderBrowser()
+            }
+            .setNegativeButton(tr("Fechar"), null)
+            .show()
     }
 
     private fun showThemeMenu() {
@@ -4818,6 +5100,36 @@ class MainActivity : Activity() {
             .setNegativeButton(tr("Fechar"), null)
             .create()
         accentDialog?.show()
+    }
+
+    private fun showFolderIconMenu(file: File) {
+        val options = arrayOf("Padrão", "Clássico", "Fotografias", "Transferências", "Música", "Vídeos", "Documentos", "Android")
+        val keys = arrayOf("", "classic", "photos", "downloads", "music", "videos", "documents", "android")
+        val selectedIndex = keys.indexOf(folderIcons[pathKey(file)] ?: "").coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(tr("Ícone da pasta") + " — " + file.name)
+            .setMessage(tr("Escolhe um ícone para esta pasta"))
+            .setSingleChoiceItems(options.map { tr(it) }.toTypedArray(), selectedIndex) { dialog, which ->
+                val key = pathKey(file)
+                if (which == 0) folderIcons.remove(key) else folderIcons[key] = keys[which]
+                savePreferences()
+                dialog.dismiss()
+                refreshFiles()
+                toast(tr(if (which == 0) "Ícone da pasta reposto." else "Ícone da pasta alterado."))
+            }
+            .setNegativeButton(tr("Cancelar"), null)
+            .show()
+    }
+
+    private fun folderIconResource(icon: String): Int = when (icon) {
+        "classic" -> R.drawable.ic_folder
+        "photos" -> R.drawable.ic_folder_camera
+        "downloads" -> R.drawable.ic_folder_download
+        "music" -> R.drawable.ic_folder_music
+        "videos" -> R.drawable.ic_folder_video
+        "documents" -> R.drawable.ic_folder_documents
+        "android" -> R.drawable.ic_folder_android
+        else -> R.drawable.ic_folder
     }
 
     private fun showFolderColorFolderPicker() {
