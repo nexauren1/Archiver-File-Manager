@@ -75,6 +75,8 @@ import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream
+import com.github.junrar.Archive as JunrarArchive
+import com.github.junrar.rarfile.FileHeader as RarFileHeader
 import net.lingala.zip4j.ZipFile as Zip4jFile
 import net.lingala.zip4j.model.ZipParameters
 import net.lingala.zip4j.progress.ProgressMonitor
@@ -224,6 +226,7 @@ class MainActivity : Activity() {
     private var restrictedServiceBound = false
     private var restrictedRootPaths: List<String> = emptyList()
     private var restrictedAccessIdentity: String = "Shizuku"
+    private val rarPasswords = linkedMapOf<String, String>()
     private val restrictedPermissionRequestCode = 9847
 
     private val restrictedPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
@@ -1983,6 +1986,7 @@ class MainActivity : Activity() {
             options += "Testar arquivo"
             options += "Extrair aqui"
             options += "Extrair para nova pasta"
+            if (archiveKind == "rar") options += "Definir palavra-passe RAR"
         }
         if (ext in setOf("glb", "gltf")) options += "Inspecionar modelo 3D"
         options += listOf("Comprimir para ZIP", "Comprimir para 7Z", "Comprimir…")
@@ -2002,17 +2006,21 @@ class MainActivity : Activity() {
                 "Comprimir para 7Z" -> promptArchive(chosenOrSingle(file), "7z")
                 "Comprimir…" -> promptArchive(chosenOrSingle(file), if (ext == "7z") "7z" else "zip")
                 "Ver conteúdo" -> browseArchive(file)
+                "Definir palavra-passe RAR" -> promptRarPassword(file)
                 "Testar arquivo" -> when (archiveKind) {
+                    "rar" -> testRarArchive(file)
                     "7z" -> testSevenZip(file)
                     "zip" -> testZip(file)
                     else -> testTarArchive(file)
                 }
                 "Extrair aqui" -> when (archiveKind) {
+                    "rar" -> extractRarArchive(file, currentDir, false)
                     "7z" -> extractSevenZip(file, currentDir, false)
                     "zip" -> extractZip(file, currentDir, false)
                     else -> extractTarArchive(file, currentDir, false)
                 }
                 "Extrair para nova pasta" -> when (archiveKind) {
+                    "rar" -> extractRarArchive(file, currentDir, true)
                     "7z" -> extractSevenZip(file, currentDir, true)
                     "zip" -> extractZip(file, currentDir, true)
                     else -> extractTarArchive(file, currentDir, true)
@@ -3746,6 +3754,14 @@ class MainActivity : Activity() {
                         entries += ArchiveItem(index++, if (e.isDirectory && !name.endsWith("/")) "$name/" else name, e.isDirectory, e.size)
                     }
                 }
+                "rar" -> openRarArchive(archive).use { rar ->
+                    rar.fileHeaders.take(10000).forEach { header ->
+                        val name = header.fileName.replace('\\', '/').trimStart('/')
+                        val isLink = header.redirection != null
+                        val directory = header.isDirectory && !isLink
+                        entries += ArchiveItem(index++, if (directory && !name.endsWith("/")) "$name/" else name, directory, header.fullUnpackSize)
+                    }
+                }
                 "tar", "tgz", "tbz2", "txz" -> openTarInput(archive).use { tar ->
                     while (entries.size < 10000) {
                         val e = tar.nextTarEntry ?: break
@@ -3829,6 +3845,104 @@ class MainActivity : Activity() {
             extractArchiveEntry(archive, ArchiveItem(-1, prefix, true, -1L))
         }
         builder.show()
+    }
+
+    private fun openRarArchive(archive: File): JunrarArchive {
+        val password = rarPasswords[pathKey(archive)]
+        return if (password.isNullOrEmpty()) JunrarArchive(archive) else JunrarArchive(archive, password)
+    }
+
+    private fun promptRarPassword(archive: File) {
+        val input = EditText(this).apply {
+            hint = "Palavra-passe (deixa vazio para limpar)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            setText(rarPasswords[pathKey(archive)] ?: "")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Palavra-passe do RAR")
+            .setMessage("A palavra-passe é guardada apenas em memória enquanto o Archiver estiver aberto.")
+            .setView(input)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setNeutralButton("Limpar") { _, _ ->
+                rarPasswords.remove(pathKey(archive))
+                toast("Palavra-passe RAR removida.")
+            }
+            .setPositiveButton("Guardar") { _, _ ->
+                val password = input.text.toString()
+                if (password.isBlank()) rarPasswords.remove(pathKey(archive))
+                else rarPasswords[pathKey(archive)] = password
+                toast("Palavra-passe RAR guardada nesta sessão. Abre novamente o conteúdo ou tenta extrair.")
+            }
+            .show()
+    }
+
+    private fun testRarArchive(archive: File) {
+        runTask("A testar RAR/RAR5…", 0L, 1L) { meter ->
+            var count = 0
+            openRarArchive(archive).use { rar ->
+                val buffer = ByteArray(128 * 1024)
+                rar.fileHeaders.forEach { header ->
+                    val name = header.fileName.replace('\\', '/').trimStart('/')
+                    meter.show(File(archive.parentFile, name))
+                    if (header.redirection == null && !header.isDirectory) {
+                        rar.getInputStream(header).use { input ->
+                            while (true) {
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                if (n > 0) meter.bytesRead(n.toLong(), File(archive.parentFile, name))
+                            }
+                        }
+                    }
+                    count++
+                    meter.itemDone(File(archive.parentFile, name))
+                }
+            }
+            "Teste RAR/RAR5 concluído: " + count + " entradas."
+        }
+    }
+
+    private fun extractRarArchive(archive: File, destinationDir: File, makeSubfolder: Boolean) {
+        runTask("A extrair RAR/RAR5…", 0L, 1L) { meter ->
+            val destination = if (makeSubfolder) File(destinationDir, uniqueName(destinationDir, archive.nameWithoutExtension)) else destinationDir
+            if (makeSubfolder && !destination.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.")
+            var count = 0
+            openRarArchive(archive).use { rar ->
+                val headers = rar.fileHeaders
+                meter.setTotals(headers.sumOf { it.fullUnpackSize.coerceAtLeast(0L) }, headers.size.toLong().coerceAtLeast(1L))
+                headers.forEach { header ->
+                    val rawName = header.fileName.replace('\\', '/').trimStart('/')
+                    if (header.redirection != null) {
+                        count++
+                        return@forEach
+                    }
+                    val target = safeArchiveTarget(destination, rawName, header.isDirectory)
+                    meter.show(target)
+                    if (header.isDirectory) {
+                        if (!target.exists() && !target.mkdirs()) throw IOException("Não foi possível criar " + target.name)
+                    } else {
+                        target.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta de destino.") }
+                        val output = if (target.exists()) File(target.parentFile, uniqueName(target.parentFile!!, target.name)) else target
+                        rar.getInputStream(header).use { input ->
+                            BufferedOutputStream(FileOutputStream(output)).use { stream ->
+                                val buffer = ByteArray(128 * 1024)
+                                while (true) {
+                                    val n = input.read(buffer)
+                                    if (n < 0) break
+                                    if (n > 0) {
+                                        stream.write(buffer, 0, n)
+                                        meter.bytesRead(n.toLong(), output)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    meter.itemDone(target)
+                    count++
+                }
+            }
+            "Extração RAR/RAR5 concluída: " + count + " entradas (links omitidos por segurança)."
+        }
     }
 
     private fun openTarInput(archive: File): TarArchiveInputStream {
@@ -3933,6 +4047,31 @@ class MainActivity : Activity() {
                             }
                         }
                         meter.itemDone(target)
+                    }
+                    "rar" -> {
+                        val rar = openRarArchive(archive)
+                        rar.use { opened ->
+                            val header = opened.fileHeaders.getOrNull(item.index) ?: throw IOException("A entrada já não existe.")
+                            if (header.redirection != null) throw IOException("A extração de links simbólicos/hardlinks de RAR está bloqueada por segurança.")
+                            if (header.isDirectory) throw IOException("A entrada é uma pasta.")
+                            val destination = safeArchiveTarget(currentDir, item.name, false)
+                            destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IOException("Não foi possível criar a pasta.") }
+                            val target = if (destination.exists()) File(destination.parentFile, uniqueName(destination.parentFile!!, destination.name)) else destination
+                            opened.getInputStream(header).use { input ->
+                                BufferedOutputStream(FileOutputStream(target)).use { output ->
+                                    val buffer = ByteArray(128 * 1024)
+                                    while (true) {
+                                        val n = input.read(buffer)
+                                        if (n < 0) break
+                                        if (n > 0) {
+                                            output.write(buffer, 0, n)
+                                            meter.bytesRead(n.toLong(), target)
+                                        }
+                                    }
+                                }
+                            }
+                            meter.itemDone(target)
+                        }
                     }
                     "7z" -> {
                         var found = false
@@ -4049,6 +4188,21 @@ class MainActivity : Activity() {
                     val entry = iterator.nextElement()
                     val target = createTarget(entry.name, entry.isDirectory) ?: continue
                     zip.getInputStream(entry).use { input -> writeStream(input, target) }
+                }
+            }
+            "rar" -> openRarArchive(archive).use { rar ->
+                rar.fileHeaders.forEach { header ->
+                    val name = header.fileName.replace('\\', '/').trimStart('/')
+                    if (header.redirection != null) return@forEach
+                    val target = createTarget(name, header.isDirectory)
+                    val input = if (!header.isDirectory) rar.getInputStream(header) else null
+                    if (input != null) input.use { stream ->
+                        if (target != null) writeStream(stream, target)
+                        else {
+                            val skip = ByteArray(128 * 1024)
+                            while (stream.read(skip) >= 0) { }
+                        }
+                    }
                 }
             }
             "7z" -> SevenZFile(archive).use { seven ->
@@ -5851,6 +6005,7 @@ class MainActivity : Activity() {
             name.endsWith(".tar.gz") || name.endsWith(".tgz") -> "tgz"
             name.endsWith(".tar.bz2") || name.endsWith(".tbz2") || name.endsWith(".tbz") -> "tbz2"
             name.endsWith(".tar") -> "tar"
+            name.endsWith(".rar") -> "rar"
             name.endsWith(".zip") -> "zip"
             name.endsWith(".7z") -> "7z"
             else -> ""

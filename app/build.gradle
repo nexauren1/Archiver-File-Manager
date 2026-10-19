@@ -11,8 +11,8 @@ android {
         applicationId 'com.nexauren.archiver'
         minSdk 23
         targetSdk 35
-        versionCode 11
-        versionName '0.9.0'
+        versionCode 12
+        versionName '0.9.1'
     }
 
     compileOptions {
@@ -54,6 +54,8 @@ dependencies {
     // Commons Compress marks XZ as optional, but R8 needs it present for 7z support.
     implementation 'org.tukaani:xz:1.12'
     implementation 'net.lingala.zip4j:zip4j:2.11.6'
+    // Read/extract RAR and RAR5 archives; RAR creation is intentionally not implemented.
+    implementation 'com.github.junrar:junrar:8.1.2'
     // Optional, user-authorized access to restricted shared-storage folders.
     implementation 'dev.rikka.shizuku:api:12.2.0'
     implementation 'dev.rikka.shizuku:provider:12.2.0'

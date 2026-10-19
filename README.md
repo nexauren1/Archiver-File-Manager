@@ -1,11 +1,11 @@
-# Archiver 0.9.0 — Android File Manager
+# Archiver 0.9.1 — Android File Manager
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
 
-## Archiver 0.9.0
+## Archiver 0.9.1
 
 - Fix release builds by including XZ for Java explicitly, allowing R8 to resolve the optional classes used by Apache Commons Compress.
-- Version code: 11.
+- Version code: 12.
 
 ## Highlights
 
@@ -25,7 +25,7 @@ Archiver is a native Android file manager written in Kotlin. It is an independen
 
 ## Format and platform limits
 
-- Archive operations are built in for ZIP, 7Z, TAR, TAR.GZ and TAR.BZ2. RAR, ISO, CAB, ARJ and other formats may be identified by their file icons but are not yet supported for archive extraction. A file icon does not imply that the format can be decompressed.
+- Archive operations are built in for ZIP, 7Z, RAR/RAR5 extraction, TAR, TAR.GZ, TAR.BZ2 and TAR.XZ. RAR/RAR5 is read/extract only; this app does not create RAR archives. ISO, CAB, ARJ, LZH, DMG, WIM and many additional ZArchiver formats are not yet supported for extraction. RAR/RAR5 is supported for browsing, testing, and extraction, including encrypted archives when their password is entered in the archive's action menu. A file icon does not imply that the format can be decompressed.
 - ZIP supports encryption and split volumes. Password protection and split volumes are not implemented for 7Z or TAR-family archives.
 - Advanced browsing uses Shizuku/Sui after explicit authorization. ADB/Shell mode can attempt `Android/data` and `Android/obb` and transfer selected items to/from shared storage. If the service's effective UID is 0 (ROOT backend), it can browse `/`, `/data`, shared storage, `Android/data`, `Android/obb`, `/system` and additional system paths. It supports folder/file creation, metadata, text editing up to 4 MiB, cross-folder copy/move and recursive deletion in Root mode. Root is never granted by Archiver itself; Android/OEM restrictions still apply.
 - A plugin system is not implemented in this version.
