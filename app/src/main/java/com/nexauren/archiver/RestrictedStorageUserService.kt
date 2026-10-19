@@ -22,8 +22,24 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
 
     override fun destroy() { System.exit(0) }
 
-    override fun getRestrictedRootPaths(): Array<String> =
-        restrictedRoots().map { it.absolutePath }.toTypedArray()
+    override fun getRestrictedRootPaths(): Array<String> {
+        val primary = Environment.getExternalStorageDirectory().canonicalFile
+        val androidData = File(primary, "Android/data").canonicalFile
+        val androidObb = File(primary, "Android/obb").canonicalFile
+        if (Os.getuid() == 0) {
+            return listOf(
+                File("/").canonicalFile,
+                File("/data").canonicalFile,
+                primary,
+                androidData,
+                androidObb,
+                File("/system").canonicalFile,
+                File("/vendor").canonicalFile,
+                File("/product").canonicalFile
+            ).map { it.absolutePath }.distinct().toTypedArray()
+        }
+        return listOf(androidData, androidObb).map { it.absolutePath }.toTypedArray()
+    }
 
     override fun getAccessIdentity(): String = when (Os.getuid()) {
         0 -> "ROOT (UID 0)"
@@ -52,7 +68,10 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
                     .put("size", if (!link && child.isFile) child.length().coerceAtLeast(0L) else 0L)
                     .put("modified", child.lastModified())
                     .put("readable", !link && child.canRead())
-                    .put("writable", !link && child.canWrite()))
+                    .put("writable", !link && child.canWrite())
+                    .put("mode", if (link) "" else try { Integer.toOctalString(Os.lstat(child.absolutePath).st_mode) } catch (_: Exception) { "" })
+                    .put("uid", if (link) -1 else try { Os.lstat(child.absolutePath).st_uid } catch (_: Exception) { -1 })
+                    .put("gid", if (link) -1 else try { Os.lstat(child.absolutePath).st_gid } catch (_: Exception) { -1 }))
             }
             JSONObject()
                 .put("path", directory.absolutePath)
@@ -68,7 +87,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         val file = resolveAllowedPath(path, allowRoot = false)
         if (isSymbolicLink(File(path))) throw IOException("Os links simbólicos não são abertos por segurança.")
         if (!file.isFile) throw IOException("Só é possível abrir ficheiros.")
-        if (file.length() > MAX_TEXT_BYTES) throw IOException("O ficheiro excede 1 MiB; não será aberto no editor de texto.")
+        if (file.length() > MAX_TEXT_BYTES) throw IOException("O ficheiro excede 4 MiB; não será aberto no editor de texto.")
         if (file.extension.lowercase() !in TEXT_EXTENSIONS) {
             throw IOException("Este tipo de ficheiro não é reconhecido como texto editável.")
         }
@@ -138,11 +157,105 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
     override fun deletePath(path: String): Boolean {
         val file = resolveAllowedPath(path, allowRoot = false)
         if (isSymbolicLink(File(path))) throw IOException("Os links simbólicos não são eliminados por segurança.")
-        if (file.isDirectory && file.listFiles()?.isNotEmpty() != false) {
-            throw IOException("Para evitar perda acidental de dados, esta ferramenta só elimina pastas vazias.")
+        if (file.absolutePath == File("/").absolutePath) throw IOException("A raiz do sistema não pode ser eliminada.")
+        if (file.isDirectory && Os.getuid() != 0 && file.listFiles()?.isNotEmpty() != false) {
+            throw IOException("A conta ADB/Shell só elimina pastas vazias. Para apagar pastas com conteúdo, inicia Shizuku/Sui com root.")
         }
-        if (!file.delete()) throw IOException("O Android ou o fabricante bloqueou a eliminação deste item.")
+        ensureNoSymlinkTree(file)
+        deleteTree(file)
         return true
+    }
+
+    override fun copyPath(sourcePath: String, destinationPath: String): Boolean {
+        val source = resolveAllowedPath(sourcePath, allowRoot = false)
+        val destination = resolveAllowedPath(destinationPath, allowRoot = false)
+        if (isSymbolicLink(File(sourcePath)) || isSymbolicLink(File(destinationPath))) throw IOException("Links simbólicos não são copiados.")
+        if (!source.exists()) throw IOException("O item de origem não existe ou não está acessível.")
+        if (destination.exists()) throw IOException("Já existe um item com esse nome no destino.")
+        if (source.absolutePath == destination.absolutePath ||
+            destination.absolutePath.startsWith(source.absolutePath.trimEnd(File.separatorChar) + File.separator)) {
+            throw IOException("Não podes copiar uma pasta para dentro dela própria.")
+        }
+        val parent = destination.parentFile ?: throw IOException("Pasta de destino indisponível.")
+        if (!parent.isDirectory) throw IOException("A pasta de destino não existe.")
+        ensureNoSymlinkTree(source)
+        try { copyTree(source, destination) }
+        catch (e: Exception) {
+            try { if (destination.exists()) deleteTree(destination) } catch (_: Exception) {}
+            throw e
+        }
+        return true
+    }
+
+    override fun movePath(sourcePath: String, destinationPath: String): Boolean {
+        val source = resolveAllowedPath(sourcePath, allowRoot = false)
+        val destination = resolveAllowedPath(destinationPath, allowRoot = false)
+        if (isSymbolicLink(File(sourcePath)) || isSymbolicLink(File(destinationPath))) throw IOException("Links simbólicos não são movidos.")
+        if (!source.exists()) throw IOException("O item de origem não existe ou não está acessível.")
+        if (destination.exists()) throw IOException("Já existe um item com esse nome no destino.")
+        if (source.absolutePath == destination.absolutePath ||
+            destination.absolutePath.startsWith(source.absolutePath.trimEnd(File.separatorChar) + File.separator)) {
+            throw IOException("Não podes mover uma pasta para dentro dela própria.")
+        }
+        val parent = destination.parentFile ?: throw IOException("Pasta de destino indisponível.")
+        if (!parent.isDirectory) throw IOException("A pasta de destino não existe.")
+        ensureNoSymlinkTree(source)
+        if (source.renameTo(destination)) return true
+        try {
+            copyTree(source, destination)
+            deleteTree(source)
+        } catch (e: Exception) {
+            throw IOException("A transferência não terminou por completo: " + (e.message ?: "erro de armazenamento") +
+                ". Verifica origem e destino antes de repetir.")
+        }
+        return true
+    }
+
+    override fun createEmptyFile(path: String): Boolean {
+        val file = resolveAllowedPath(path, allowRoot = false)
+        if (file.exists()) throw IOException("Já existe um ficheiro ou pasta com esse nome.")
+        val parent = file.parentFile ?: throw IOException("Pasta de destino indisponível.")
+        if (!parent.isDirectory) throw IOException("A pasta de destino não existe.")
+        if (!file.createNewFile()) throw IOException("Não foi possível criar o ficheiro.")
+        return true
+    }
+
+    private fun copyTree(source: File, destination: File) {
+        if (isSymbolicLink(source)) throw IOException("A origem contém um link simbólico: " + source.name)
+        if (source.isDirectory) {
+            if (!destination.mkdir()) throw IOException("Não foi possível criar a pasta de destino: " + destination.name)
+            val children = source.listFiles() ?: throw IOException("Não foi possível ler a pasta: " + source.absolutePath)
+            children.forEach { copyTree(it, File(destination, it.name)) }
+        } else if (source.isFile) {
+            FileInputStream(source).use { input ->
+                FileOutputStream(destination).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 4)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                    }
+                    output.fd.sync()
+                }
+            }
+        } else throw IOException("Tipo de ficheiro especial não suportado: " + source.absolutePath)
+    }
+
+    private fun ensureNoSymlinkTree(file: File) {
+        if (isSymbolicLink(file)) throw IOException("A operação foi bloqueada porque o item contém links simbólicos.")
+        if (file.isDirectory) {
+            val children = file.listFiles() ?: throw IOException("Não foi possível verificar a pasta " + file.absolutePath)
+            children.forEach { ensureNoSymlinkTree(it) }
+        }
+    }
+
+    private fun deleteTree(file: File) {
+        if (isSymbolicLink(file)) throw IOException("Não é permitido seguir nem eliminar links simbólicos.")
+        if (file.isDirectory) {
+            val children = file.listFiles() ?: throw IOException("Não foi possível ler o conteúdo de " + file.absolutePath)
+            children.forEach { deleteTree(it) }
+        }
+        if (!file.delete()) throw IOException("Não foi possível eliminar " + file.absolutePath + "; a operação pode estar bloqueada.")
     }
 
     override fun renamePath(path: String, newName: String): Boolean {
@@ -169,11 +282,17 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
     private fun resolveAllowedPath(path: String, allowRoot: Boolean = true): File {
         if (path.isBlank() || path.contains('\u0000')) throw IOException("Caminho inválido.")
         val candidate = File(path).canonicalFile
-        val roots = restrictedRoots()
-        val root = roots.firstOrNull {
-            candidate.path == it.path || candidate.path.startsWith(it.path + File.separator)
-        } ?: throw SecurityException("O acesso avançado do Archiver está limitado a Android/data e Android/obb.")
-        if (!allowRoot && candidate.path == root.path) throw IOException("A raiz protegida não pode ser renomeada nem eliminada.")
+        val primary = Environment.getExternalStorageDirectory().canonicalFile
+        val protectedRoots = restrictedRoots()
+        if (Os.getuid() != 0) {
+            (protectedRoots + primary).firstOrNull {
+                candidate.path == it.path || candidate.path.startsWith(it.path.trimEnd(File.separatorChar) + File.separator)
+            } ?: throw SecurityException("O acesso avançado sem root está limitado ao armazenamento partilhado e a Android/data/Android/obb.")
+            if (!allowRoot && (protectedRoots + primary).any { candidate.path == it.path }) {
+                throw IOException("A raiz de uma área protegida não pode ser renomeada nem eliminada.")
+            }
+        }
+        if (!allowRoot && candidate.path == File("/").canonicalPath) throw IOException("A raiz do sistema não pode ser modificada como item.")
         return candidate
     }
 
@@ -190,7 +309,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
 
     companion object {
         private const val MAX_DIRECTORY_ENTRIES = 2000
-        private const val MAX_TEXT_BYTES = 1024 * 1024
+        private const val MAX_TEXT_BYTES = 4 * 1024 * 1024
         private val TEXT_EXTENSIONS = setOf(
             "txt", "xml", "json", "ini", "cfg", "conf", "properties", "log", "yml", "yaml",
             "html", "htm", "css", "js", "md", "csv", "toml", "sh", "kt", "kts", "java", "gradle",

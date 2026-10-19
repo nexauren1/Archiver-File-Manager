@@ -10,4 +10,7 @@ interface IRestrictedStorageService {
     boolean createDirectory(String path) = 6;
     boolean deletePath(String path) = 7;
     boolean renamePath(String path, String newName) = 8;
+    boolean copyPath(String sourcePath, String destinationPath) = 9;
+    boolean movePath(String sourcePath, String destinationPath) = 10;
+    boolean createEmptyFile(String path) = 11;
 }
