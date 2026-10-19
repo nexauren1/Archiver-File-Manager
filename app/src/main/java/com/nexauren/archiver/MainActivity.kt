@@ -637,6 +637,7 @@ class MainActivity : Activity() {
         var xor = 0L
         entries.forEach { file ->
             var value = 31L * file.name.hashCode().toLong() + file.lastModified()
+            value = 31L * value + if (file.isDirectory) 1L else 0L
             if (file.isFile) value = 31L * value + file.length()
             sum += value
             xor = xor xor java.lang.Long.rotateLeft(value, (value and 63L).toInt())
