@@ -1,4 +1,4 @@
-# Archiver 0.8.0 — Store submission preparation
+# Archiver 0.9.0 — Store submission preparation
 
 This document prepares the same signed Android APK for APKPure, Uptodown, and HUAWEI AppGallery. It is a submission checklist, not confirmation that any store has approved or published the app.
 
@@ -6,8 +6,8 @@ This document prepares the same signed Android APK for APKPure, Uptodown, and HU
 
 - Display name: Archiver — File Manager
 - Package ID: `com.nexauren.archiver`
-- Version: `0.8.0`
-- Android version code: `10`
+- Version: `0.9.0`
+- Android version code: `11`
 - Minimum Android: API 23 (Android 6.0)
 - Target Android: API 35
 - Category: Tools / Utilities
@@ -32,7 +32,7 @@ Features:
 - Search from the current folder, optionally including subfolders, with filename patterns and file-type filters.
 - Copy, move, rename, delete, share, inspect, and calculate SHA-256 checksums for files.
 - Create, browse, verify, and extract ZIP, 7Z, TAR, TAR.GZ, and TAR.BZ2 archives.
-- Optional, user-authorized advanced browsing for `Android/data` and `Android/obb` via Shizuku/Sui on compatible devices. It supports folder browsing, directory creation, renaming, deleting individual files or empty folders, and editing small UTF-8 text files. Access varies by Android version and manufacturer and does not include other apps' private `/data/data` directories.
+- Optional advanced browsing via Shizuku/Sui. ADB/Shell mode can attempt `Android/data` and `Android/obb`, create folders/files, edit UTF-8 text up to 4 MiB, and copy/move items between restricted folders and shared storage. If the user starts the service with root privileges (UID 0), the app can browse `/`, `/data`, `/system`, `/vendor`, shared storage, `Android/data` and `Android/obb`, and perform recursive operations. Root is not granted by the app itself, and destructive operations can permanently damage Android or other apps.
 - Browse archive folders and extract individual files or a selected archived folder.
 - Use ZIP password protection with ZipCrypto or AES-256, split ZIP volumes, and configurable compression levels where supported.
 - Read PDFs, view common raster images, play supported audio, edit small UTF-8 text files, and inspect GLB/GLTF metadata.
@@ -57,7 +57,7 @@ Funcionalidades:
 - Pesquisar a partir da pasta atual, com opção de incluir subpastas, padrões de nomes e filtros por tipo.
 - Copiar, mover, renomear, eliminar, partilhar, consultar informações e calcular SHA-256 de ficheiros.
 - Criar, navegar, verificar e extrair arquivos ZIP, 7Z, TAR, TAR.GZ e TAR.BZ2.
-- Navegação avançada opcional e autorizada pelo utilizador em `Android/data` e `Android/obb` via Shizuku/Sui, em dispositivos compatíveis. Inclui navegação, criação de pastas, renomeação, eliminação de ficheiros individuais ou pastas vazias e edição de pequenos ficheiros de texto UTF-8. O acesso varia com a versão do Android e o fabricante e não inclui as pastas privadas `/data/data` de outras aplicações.
+- Navegação avançada opcional via Shizuku/Sui. O modo ADB/Shell tenta `Android/data` e `Android/obb`, cria pastas/ficheiros, edita texto UTF-8 até 4 MiB e copia/move itens entre pastas restritas e o armazenamento partilhado. Se o serviço for iniciado com root (UID 0), o explorador pode navegar em `/`, `/data`, `/system`, `/vendor`, armazenamento partilhado, `Android/data` e `Android/obb` e executar operações recursivas. A aplicação não concede root por si; operações destrutivas podem danificar Android ou outras aplicações.
 - Navegar pelas pastas dentro de arquivos e extrair ficheiros individuais ou uma pasta selecionada.
 - Proteger ZIP com palavra-passe usando ZipCrypto ou AES-256, criar volumes ZIP divididos e ajustar a compressão quando suportado.
 - Ler PDF, visualizar imagens comuns, reproduzir áudio suportado, editar pequenos ficheiros de texto UTF-8 e consultar metadados GLB/GLTF.
@@ -76,7 +76,7 @@ O Archiver processa os ficheiros localmente. O manifesto atual não pede acesso 
 ## Required before submission
 
 - [ ] Configure the four protected GitHub Actions secrets described in [KEYSTORE_SECRETS.md](../.github/KEYSTORE_SECRETS.md). Never commit the keystore or passwords.
-- [ ] Use the single **Archiver — Single Signed APK** workflow; for a stable release, push a matching `v0.8.0` tag (or run it manually with release publication enabled). Require the signed build, signature verification, ZIP alignment verification, and attached SHA-256 checksum.
+- [ ] Use the single **Archiver — Single Signed APK** workflow; for a stable release, push a matching `v0.9.0` tag (or run it manually with release publication enabled). Require the signed build, signature verification, ZIP alignment verification, and attached SHA-256 checksum.
 - [ ] Download the sole APK attached to the stable GitHub release and compare its checksum to the attached `.sha256` file. The current workflow does not create new debug/preview APKs.
 - [ ] Confirm that the release keystore is the intended long-term signing identity and back it up securely. A signing-key mismatch can prevent upgrades.
 - [ ] Add real screenshots captured from the release build on a supported Android device. Do not use mockups that imply unverified app behavior.
@@ -84,7 +84,7 @@ O Archiver processa os ficheiros localmente. O manifesto atual não pede acesso 
 - [ ] Add the publisher's legal/display name and a monitored support contact to the website privacy/terms pages. The current legal pages explicitly note this outstanding commercial-distribution step.
 - [ ] Complete each store's developer verification, content rating, privacy declarations, country/region availability, and permission disclosures.
 - [ ] Test a clean install and upgrade path on physical devices, including storage permission denial/grant, archive extraction, password-protected ZIP files, copy/move/delete, PDF/audio readers, and Arabic RTL layout.
-- [ ] Test the optional Shizuku/Sui mode when the service is absent, denied, started, and stopped; confirm standard browsing still works and Android/data/obb access failures are explained rather than treated as app crashes.
+- [ ] Test Shizuku/Sui in ADB/Shell mode and (on a rooted test device) with UID 0. Test copy/move between Downloads and Android/data/obb, choosing another advanced destination, recursive operations only on disposable folders, symbolic-link refusal, permission denial and service shutdown.
 - [ ] Check the public APK's package ID, version name/code, certificate, and SHA-256 before uploading the same artifact to each store.
 
 ## Store-specific path

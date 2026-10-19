@@ -1,11 +1,11 @@
-# Archiver 0.8.0 — Android File Manager
+# Archiver 0.9.0 — Android File Manager
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
 
-## Archiver 0.8.0
+## Archiver 0.9.0
 
 - Fix release builds by including XZ for Java explicitly, allowing R8 to resolve the optional classes used by Apache Commons Compress.
-- Version code: 10.
+- Version code: 11.
 
 ## Highlights
 
@@ -27,7 +27,7 @@ Archiver is a native Android file manager written in Kotlin. It is an independen
 
 - Archive operations are built in for ZIP, 7Z, TAR, TAR.GZ and TAR.BZ2. RAR, ISO, CAB, ARJ and other formats may be identified by their file icons but are not yet supported for archive extraction. A file icon does not imply that the format can be decompressed.
 - ZIP supports encryption and split volumes. Password protection and split volumes are not implemented for 7Z or TAR-family archives.
-- Optional advanced browsing can attempt to open `Android/data` and `Android/obb` through Shizuku/Sui after the user installs/starts and explicitly authorizes it. Availability is Android/OEM-dependent; this mode does not access other apps' private `/data/data` directories, and it does not grant root on its own.
+- Advanced browsing uses Shizuku/Sui after explicit authorization. ADB/Shell mode can attempt `Android/data` and `Android/obb` and transfer selected items to/from shared storage. If the service's effective UID is 0 (ROOT backend), it can browse `/`, `/data`, shared storage, `Android/data`, `Android/obb`, `/system` and additional system paths. It supports folder/file creation, metadata, text editing up to 4 MiB, cross-folder copy/move and recursive deletion in Root mode. Root is never granted by Archiver itself; Android/OEM restrictions still apply.
 - A plugin system is not implemented in this version.
 - PDF rendering uses Android's `PdfRenderer`; audio playback depends on the codecs supported by the Android device. SVG, Office documents and unsupported image/audio/video formats can be opened through a compatible installed app.
 - Android may restrict access to private app directories such as `Android/data`, even when broad shared-storage access is granted. All-files permission does not grant root and does not bypass other apps' private storage protections.
@@ -42,7 +42,7 @@ https://nexauren1.github.io/Archiver-File-Manager/
 
 - JDK 17, Gradle 8.13, Android Gradle Plugin 8.13.2, and Kotlin.
 - The single GitHub Actions workflow is **Archiver — Single Signed APK**. Every push to `main` builds one signed production APK. A matching version tag (for example `v0.8.0`) builds that same release variant and attaches the APK and its SHA-256 checksum to the GitHub Release.
-- The workflow runs `assembleRelease`, checks that exactly one APK exists, verifies its signature with `apksigner`, and checks ZIP alignment with `zipalign`. No debug APK is built, uploaded, or published by the current workflow.
+- The workflow runs `assembleRelease`, checks that exactly one APK exists, verifies its signature with `apksigner`, and checks ZIP alignment with `zipalign`. No debug APK is built, uploaded, or published by the current workflow. Resource shrinking and R8 code shrinking are disabled in the release variant to keep all app code/resources in the production package.
 - The downloadable workflow artifact contains one APK plus its checksum file; the GitHub Release attaches that exact APK and checksum. The checksum is a text file, not a second application.
 - A permanent signing identity is mandatory. If any required signing secret is missing, the workflow fails rather than publishing an unsigned or debug build. Configure the four protected secrets described in [`.github/KEYSTORE_SECRETS.md`](.github/KEYSTORE_SECRETS.md).
 
@@ -52,7 +52,7 @@ The release keystore and passwords must never be committed to the repository. Gi
 
 ## Storage and privacy
 
-The user must grant Android's special all-files-access permission when requested. This does not grant root and does not bypass OS restrictions on other apps' private storage. The optional Shizuku/Sui view of `Android/data` and `Android/obb` requires separate user authorization and remains subject to system and manufacturer restrictions. Files are processed locally by the app.
+The user must grant Android's special all-files-access permission when requested. This does not grant root and does not bypass OS restrictions on other apps' private storage. The Shizuku/Sui advanced view requires separate authorization. Full filesystem browsing and recursive operations require a root-backed service running as UID 0. Treat recursive deletion inside system/app directories as a destructive operation. Files are processed locally by the app.
 
 Archiver is an independent project and is not affiliated with ZArchiver.
 
