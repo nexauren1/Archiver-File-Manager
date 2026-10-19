@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#11131a">
+<meta name="description" content="Transferir o Archiver para Android.">
+<title>Archiver — Transferências</title>
+<style>
+:root{color-scheme:dark;--bg:#101118;--panel:#191b25;--ink:#f6f4ff;--muted:#b8bbca;--line:#343748;--accent:#c5c0ff;--warm:#ffbd68}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 75% -15%,#49416a 0,transparent 34%),var(--bg);color:var(--ink);font:16px/1.7 system-ui,-apple-system,"Segoe UI",sans-serif}.wrap{width:min(760px,calc(100% - 32px));margin:0 auto;padding:30px 0 64px}a{color:var(--accent);text-underline-offset:4px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:42px}.brand{font-size:18px;font-weight:850;color:var(--ink);text-decoration:none}.lang{background:#ffffff08;border:1px solid var(--line);border-radius:999px;color:var(--ink);padding:8px 14px;font:inherit;cursor:pointer}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:800}h1{font-size:clamp(36px,6vw,56px);line-height:1.08;letter-spacing:-.05em;margin:13px 0}.muted{color:var(--muted)}.card{border:1px solid #c5c0ff3b;border-radius:24px;background:linear-gradient(145deg,#28253d,#191b25 78%);padding:26px;margin:28px 0}.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:13px 18px;border-radius:13px;background:var(--accent);color:#171522;font-weight:850;text-decoration:none;margin-top:10px}.btn:hover{text-decoration:none;filter:brightness(1.06)}.meta{font-size:13px;color:var(--muted);margin-top:12px}.warn{border-left:3px solid var(--warm);padding:7px 0 7px 14px;color:#e5d6be;font-size:14px}.foot{margin-top:42px;padding-top:22px;border-top:1px solid var(--line);display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body><main class="wrap">
+<div class="top"><a class="brand" href="index.html">← Archiver</a><button class="lang" id="lang" type="button">EN</button></div>
+<div class="eyebrow" data-pt="Transferência oficial" data-en="Official download">Transferência oficial</div>
+<h1 data-pt="Obter o Archiver" data-en="Get Archiver">Obter o Archiver</h1>
+<p class="muted" data-pt="A versão indicada para lançamento é a 0.8.0. Verifica sempre o número da versão e as notas antes de instalar um APK." data-en="The release candidate is version 0.8.0. Always verify the version number and release notes before installing an APK.">A versão indicada para lançamento é a 0.8.0. Verifica sempre o número da versão e as notas antes de instalar um APK.</p>
+<section class="card">
+<h2 data-pt="Archiver 0.8.0" data-en="Archiver 0.8.0">Archiver 0.8.0</h2>
+<p class="muted" data-pt="Gestor de ficheiros Android nativo, com personalização de pastas, fundos, indicador de armazenamento e atualização automática da pasta atual." data-en="Native Android file manager with folder customization, backgrounds, a storage indicator and automatic refresh of the current folder.">Gestor de ficheiros Android nativo, com personalização de pastas, fundos, indicador de armazenamento e atualização automática da pasta atual.</p>
+<a class="btn" href="https://github.com/nexauren1/Archiver-File-Manager/releases/latest/download/app-release.apk" data-pt="Transferir APK estável ↓" data-en="Download stable APK ↓">Transferir APK estável ↓</a>
+<p class="meta" data-pt="Formato: APK · Android 6.0 ou superior · Requer permissão de armazenamento para gerir ficheiros partilhados" data-en="Format: APK · Android 6.0 or later · Storage permission required to manage shared files">Formato: APK · Android 6.0 ou superior · Requer permissão de armazenamento para gerir ficheiros partilhados</p>
+</section>
+<p class="warn" data-pt="Instala apenas APKs de fontes em que confias. O Android pode pedir que autorizes a instalação a partir do navegador. A instalação de um APK manual não é equivalente à instalação através de uma loja de aplicações." data-en="Install APKs only from sources you trust. Android may ask you to allow installation from the browser. Sideloading an APK is not the same as installing through an app store.">Instala apenas APKs de fontes em que confias. O Android pode pedir que autorizes a instalação a partir do navegador. A instalação de um APK manual não é equivalente à instalação através de uma loja de aplicações.</p>
+<div class="foot"><a href="index.html" data-pt="Página inicial" data-en="Home">Página inicial</a><a href="privacy.html" data-pt="Privacidade" data-en="Privacy">Privacidade</a><a href="terms.html" data-pt="Termos de utilização" data-en="Terms of use">Termos de utilização</a></div>
+</main>
+<script>
+let lang='pt';document.getElementById('lang').addEventListener('click',()=>{lang=lang==='pt'?'en':'pt';document.documentElement.lang=lang;document.querySelectorAll('[data-pt][data-en]').forEach(e=>{e.innerHTML=e.dataset[lang]});document.getElementById('lang').textContent=lang==='pt'?'EN':'PT';});
+</script></body></html>
