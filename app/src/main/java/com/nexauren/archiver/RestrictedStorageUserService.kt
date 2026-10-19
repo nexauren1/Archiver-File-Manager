@@ -20,6 +20,8 @@ import java.nio.charset.StandardCharsets
  */
 class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
 
+    override fun destroy() { System.exit(0) }
+
     override fun getRestrictedRootPaths(): Array<String> =
         restrictedRoots().map { it.absolutePath }.toTypedArray()
 
