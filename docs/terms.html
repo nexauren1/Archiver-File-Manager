@@ -2,8 +2,8 @@
 <html lang="pt">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#11131a">
-<meta name="description" content="Termos de utilização do Archiver para Android.">
-<title>Archiver — Termos de utilização</title>
+<meta name="description" content="Termos de utilização do Archiver para Android." data-meta-pt="Termos de utilização do Archiver para Android." data-meta-en="Archiver for Android terms of use.">
+<title data-pt="Archiver — Termos de utilização" data-en="Archiver — Terms of use">Archiver — Termos de utilização</title>
 <style>
 :root{color-scheme:dark;--bg:#101118;--panel:#191b25;--ink:#f6f4ff;--muted:#b8bbca;--line:#343748;--accent:#c5c0ff}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 75% -15%,#49416a 0,transparent 34%),var(--bg);color:var(--ink);font:16px/1.75 system-ui,-apple-system,"Segoe UI",sans-serif}.wrap{width:min(800px,calc(100% - 32px));margin:0 auto;padding:28px 0 68px}a{color:var(--accent);text-underline-offset:4px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px}.brand{font-size:18px;font-weight:850;color:var(--ink);text-decoration:none}.lang{background:#ffffff08;border:1px solid var(--line);border-radius:999px;color:var(--ink);padding:8px 14px;font:inherit;cursor:pointer}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:800}h1{font-size:clamp(35px,6vw,52px);line-height:1.08;letter-spacing:-.045em;margin:13px 0 12px}h2{font-size:22px;letter-spacing:-.02em;margin:34px 0 8px}p,li{color:var(--muted)}.updated{font-size:13px;color:#9599ab}.box{padding:20px 22px;border:1px solid #c5c0ff30;border-radius:18px;background:linear-gradient(140deg,#252338,#191b25);margin:24px 0}.foot{margin-top:38px;padding-top:22px;border-top:1px solid var(--line);display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
@@ -34,5 +34,5 @@
 <div class="foot"><a href="index.html" data-pt="Página inicial" data-en="Home">Página inicial</a><a href="privacy.html" data-pt="Política de privacidade" data-en="Privacy policy">Política de privacidade</a><a href="downloads.html" data-pt="Transferências" data-en="Downloads">Transferências</a></div>
 </main>
 <script>
-let lang='pt';document.getElementById('lang').addEventListener('click',()=>{lang=lang==='pt'?'en':'pt';document.documentElement.lang=lang;document.querySelectorAll('[data-pt][data-en]').forEach(e=>{e.innerHTML=e.dataset[lang]});document.getElementById('lang').textContent=lang==='pt'?'EN':'PT';});
+let lang='pt';document.getElementById('lang').addEventListener('click',()=>{lang=lang==='pt'?'en':'pt';document.documentElement.lang=lang;document.querySelectorAll('[data-pt][data-en]').forEach(e=>{e.innerHTML=e.dataset[lang]});document.querySelectorAll('[data-meta-pt][data-meta-en]').forEach(e=>e.setAttribute('content',lang==='pt'?e.dataset.metaPt:e.dataset.metaEn));document.getElementById('lang').textContent=lang==='pt'?'EN':'PT';});
 </script></body></html>
