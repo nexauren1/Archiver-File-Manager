@@ -50,7 +50,7 @@ https://nexauren1.github.io/Archiver-File-Manager/
 
 - JDK 17, Gradle 8.13, Android Gradle Plugin 8.13.2, and Kotlin.
 - The single GitHub Actions workflow is **Archiver — Single Signed APK**. Every push to `main` builds one signed production APK. A matching version tag (for example `v0.9.3`) builds that same release variant and attaches the APK and its SHA-256 checksum to the GitHub Release.
-- The workflow runs `assembleRelease`, checks that exactly one APK exists, verifies its signature with `apksigner`, and checks ZIP alignment with `zipalign`. No debug APK is built, uploaded, or published by the current workflow. Resource shrinking and R8 code shrinking are disabled in the release variant to keep all app code/resources in the production package.
+- The production workflow runs `assembleRelease`, checks that exactly one APK exists, verifies its signature with `apksigner`, and checks ZIP alignment with `zipalign`. A separate pull-request compile check builds a temporary debug APK solely to detect source/build errors; it does not upload or publish that APK. Resource shrinking and R8 code shrinking are disabled in the release variant to keep all app code/resources in the production package.
 - The downloadable workflow artifact contains one APK plus its checksum file; the GitHub Release attaches that exact APK and checksum. The checksum is a text file, not a second application.
 - A permanent signing identity is mandatory. If any required signing secret is missing, the workflow fails rather than publishing an unsigned or debug build. Configure the four protected secrets described in [`.github/KEYSTORE_SECRETS.md`](.github/KEYSTORE_SECRETS.md).
 
