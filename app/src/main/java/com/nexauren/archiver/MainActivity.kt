@@ -73,6 +73,8 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream
 import net.lingala.zip4j.ZipFile as Zip4jFile
 import net.lingala.zip4j.model.ZipParameters
 import net.lingala.zip4j.progress.ProgressMonitor
@@ -895,7 +897,7 @@ class MainActivity : Activity() {
     private fun fileGlyph(file: File): String {
         if (file.isDirectory) return "📁"
         return when (extension(file.name)) {
-            "zip", "7z", "rar", "tar", "gz", "bz2", "tgz", "tbz", "tbz2" -> "🗜"
+            "zip", "7z", "rar", "tar", "gz", "bz2", "xz", "tgz", "tbz", "tbz2", "txz" -> "🗜"
             "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> "🖼"
             "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus" -> "♫"
             "mp4", "mkv", "webm", "avi", "mov", "3gp" -> "▶"
@@ -2944,7 +2946,7 @@ class MainActivity : Activity() {
             "image" -> ext in setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "heic", "avif")
             "video" -> ext in setOf("mp4", "mkv", "mov", "webm", "avi", "3gp", "m4v")
             "audio" -> ext in setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "opus", "wma")
-            "archive" -> ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "tgz", "tbz", "tbz2")
+            "archive" -> ext in setOf("zip", "7z", "rar", "tar", "gz", "bz2", "xz", "zst", "tgz", "tbz", "tbz2", "txz")
             "app" -> ext in setOf("apk", "apks", "xapk", "aab")
             else -> true
         }
@@ -3053,8 +3055,8 @@ class MainActivity : Activity() {
     private fun promptArchive(files: List<File>, initialFormat: String) {
         if (files.isEmpty()) { toast("Seleciona pelo menos um ficheiro ou pasta."); return }
 
-        val formatNames = arrayOf("ZIP", "7Z", "TAR", "TAR.GZ", "TAR.BZ2")
-        val initialIndex = when (initialFormat) { "7z" -> 1; "tar" -> 2; "tgz" -> 3; "tbz2" -> 4; else -> 0 }
+        val formatNames = arrayOf("ZIP", "7Z", "TAR", "TAR.GZ", "TAR.BZ2", "TAR.XZ")
+        val initialIndex = when (initialFormat) { "7z" -> 1; "tar" -> 2; "tgz" -> 3; "tbz2" -> 4; "txz" -> 5; else -> 0 }
         val formatPicker = makeSpinner(formatNames, initialIndex)
         val levelNames = arrayOf("Sem compressão", "Rápida", "Normal", "Ultra")
         val levelPicker = makeSpinner(levelNames, compressionLevel.coerceIn(0, 3))
@@ -3146,6 +3148,7 @@ class MainActivity : Activity() {
                             2 -> "tar"
                             3 -> "tgz"
                             4 -> "tbz2"
+                            5 -> "txz"
                             else -> "zip"
                         }
                         val chosenSuffix = archiveSuffix(archiveFormat)
@@ -3463,7 +3466,7 @@ class MainActivity : Activity() {
     ) {
         when (format) {
             "7z" -> createSevenZip(sources, destination, meter)
-            "tar", "tgz", "tbz2" -> createTarArchive(sources, destination, meter, format)
+            "tar", "tgz", "tbz2", "txz" -> createTarArchive(sources, destination, meter, format)
             else -> createZip(sources, destination, meter, password, encryption, splitBytes)
         }
     }
@@ -3473,6 +3476,7 @@ class MainActivity : Activity() {
         val wrapped: OutputStream = when (format) {
             "tgz" -> GzipCompressorOutputStream(raw)
             "tbz2" -> BZip2CompressorOutputStream(raw)
+            "txz" -> XZCompressorOutputStream(raw)
             else -> raw
         }
         TarArchiveOutputStream(wrapped).use { tar ->
@@ -3742,7 +3746,7 @@ class MainActivity : Activity() {
                         entries += ArchiveItem(index++, if (e.isDirectory && !name.endsWith("/")) "$name/" else name, e.isDirectory, e.size)
                     }
                 }
-                "tar", "tgz", "tbz2" -> openTarInput(archive).use { tar ->
+                "tar", "tgz", "tbz2", "txz" -> openTarInput(archive).use { tar ->
                     while (entries.size < 10000) {
                         val e = tar.nextTarEntry ?: break
                         val name = e.name.replace('\\', '/').trimStart('/')
@@ -3832,6 +3836,7 @@ class MainActivity : Activity() {
         val input: InputStream = when (archiveKind(archive)) {
             "tgz" -> GzipCompressorInputStream(raw)
             "tbz2" -> BZip2CompressorInputStream(raw)
+            "txz" -> XZCompressorInputStream(raw)
             else -> raw
         }
         return TarArchiveInputStream(input)
@@ -3964,7 +3969,7 @@ class MainActivity : Activity() {
                         }
                         if (!found) throw IOException("A entrada já não existe.")
                     }
-                    "tar", "tgz", "tbz2" -> {
+                    "tar", "tgz", "tbz2", "txz" -> {
                         var found = false
                         openTarInput(archive).use { tar ->
                             val buffer = ByteArray(128 * 1024)
@@ -4067,7 +4072,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            "tar", "tgz", "tbz2" -> openTarInput(archive).use { tar ->
+            "tar", "tgz", "tbz2", "txz" -> openTarInput(archive).use { tar ->
                 while (true) {
                     val entry = tar.nextTarEntry ?: break
                     val target = createTarget(entry.name, entry.isDirectory)
@@ -5840,6 +5845,7 @@ class MainActivity : Activity() {
     private fun archiveKind(file: File): String {
         val name = file.name.lowercase(Locale.ROOT)
         return when {
+            name.endsWith(".tar.xz") || name.endsWith(".txz") -> "txz"
             name.endsWith(".tar.gz") || name.endsWith(".tgz") -> "tgz"
             name.endsWith(".tar.bz2") || name.endsWith(".tbz2") || name.endsWith(".tbz") -> "tbz2"
             name.endsWith(".tar") -> "tar"
@@ -5854,12 +5860,13 @@ class MainActivity : Activity() {
         "tar" -> ".tar"
         "tgz" -> ".tar.gz"
         "tbz2" -> ".tar.bz2"
+        "txz" -> ".tar.xz"
         else -> ".zip"
     }
 
     private fun stripArchiveSuffix(name: String): String {
         val lower = name.lowercase(Locale.ROOT)
-        val suffix = listOf(".tar.bz2", ".tar.gz", ".tbz2", ".tgz", ".tar", ".zip", ".7z")
+        val suffix = listOf(".tar.xz", ".txz", ".tar.bz2", ".tar.gz", ".tbz2", ".tgz", ".tar", ".zip", ".7z")
             .firstOrNull { lower.endsWith(it) }
         return if (suffix != null) name.dropLast(suffix.length) else name.substringBeforeLast('.', name)
     }
