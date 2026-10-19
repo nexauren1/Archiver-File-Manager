@@ -99,7 +99,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
                 val count = input.read(buffer)
                 if (count < 0) break
                 total += count
-                if (total > MAX_TEXT_BYTES) throw IOException("O ficheiro excede 1 MiB.")
+                if (total > MAX_TEXT_BYTES) throw IOException("O ficheiro excede 4 MiB.")
                 out.write(buffer, 0, count)
             }
             out.toByteArray()
@@ -157,7 +157,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
     override fun deletePath(path: String): Boolean {
         val file = resolveAllowedPath(path, allowRoot = false)
         if (isSymbolicLink(File(path))) throw IOException("Os links simbólicos não são eliminados por segurança.")
-        if (file.absolutePath == File("/").absolutePath) throw IOException("A raiz do sistema não pode ser eliminada.")
+        ensureNotCriticalSystemRoot(file, "eliminar")
         if (file.isDirectory && Os.getuid() != 0 && file.listFiles()?.isNotEmpty() != false) {
             throw IOException("A conta ADB/Shell só elimina pastas vazias. Para apagar pastas com conteúdo, inicia Shizuku/Sui com root.")
         }
@@ -170,6 +170,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         val source = resolveAllowedPath(sourcePath, allowRoot = false)
         val destination = resolveAllowedPath(destinationPath, allowRoot = false)
         if (isSymbolicLink(File(sourcePath)) || isSymbolicLink(File(destinationPath))) throw IOException("Links simbólicos não são copiados.")
+        ensureNotCriticalSystemRoot(source, "copiar")
         if (!source.exists()) throw IOException("O item de origem não existe ou não está acessível.")
         if (destination.exists()) throw IOException("Já existe um item com esse nome no destino.")
         if (source.absolutePath == destination.absolutePath ||
@@ -191,6 +192,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         val source = resolveAllowedPath(sourcePath, allowRoot = false)
         val destination = resolveAllowedPath(destinationPath, allowRoot = false)
         if (isSymbolicLink(File(sourcePath)) || isSymbolicLink(File(destinationPath))) throw IOException("Links simbólicos não são movidos.")
+        ensureNotCriticalSystemRoot(source, "mover")
         if (!source.exists()) throw IOException("O item de origem não existe ou não está acessível.")
         if (destination.exists()) throw IOException("Já existe um item com esse nome no destino.")
         if (source.absolutePath == destination.absolutePath ||
@@ -260,6 +262,7 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
 
     override fun renamePath(path: String, newName: String): Boolean {
         val source = resolveAllowedPath(path, allowRoot = false)
+        ensureNotCriticalSystemRoot(source, "renomear")
         if (isSymbolicLink(File(path))) throw IOException("Os links simbólicos não são renomeados por segurança.")
         val name = newName.trim()
         if (name.isEmpty() || name == "." || name == ".." || name.contains('/') ||
@@ -272,6 +275,16 @@ class RestrictedStorageUserService : IRestrictedStorageService.Stub() {
         if (destination.exists()) throw IOException("Já existe um item com esse nome.")
         if (!source.renameTo(destination)) throw IOException("O Android ou o fabricante bloqueou a renomeação.")
         return true
+    }
+
+    private fun ensureNotCriticalSystemRoot(file: File, action: String) {
+        val critical = setOf(
+            "/", "/data", "/system", "/system/vendor", "/system/product",
+            "/vendor", "/product", "/apex", "/proc", "/sys", "/dev"
+        )
+        if (file.canonicalPath in critical) {
+            throw IOException("A ação '" + action + "' está bloqueada para uma raiz crítica do Android: " + file.absolutePath)
+        }
     }
 
     private fun restrictedRoots(): List<File> {
