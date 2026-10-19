@@ -578,11 +578,19 @@ class MainActivity : Activity() {
     }
 
     private fun directorySignature(files: List<File>): String {
-        val value = files.asSequence()
-            .map { file -> file.name + "|" + file.lastModified() + "|" + (if (file.isFile) file.length() else -1L) + "|" + file.isDirectory }
-            .sorted()
-            .joinToString("\n")
-        return files.size.toString() + ":" + value.hashCode().toString()
+        // Order-independent, allocation-light fingerprint: avoid building huge strings or sorting
+        // every directory every 15 seconds on lower-memory devices.
+        var sum = 0
+        var mixed = 0
+        files.forEach { file ->
+            var itemHash = file.name.hashCode()
+            itemHash = 31 * itemHash + file.lastModified().hashCode()
+            itemHash = 31 * itemHash + (if (file.isFile) file.length().hashCode() else 0)
+            itemHash = 31 * itemHash + if (file.isDirectory) 1 else 0
+            sum += itemHash
+            mixed = mixed xor Integer.rotateLeft(itemHash, itemHash and 31)
+        }
+        return files.size.toString() + ":" + sum + ":" + mixed
     }
 
     private fun storageSummary(): String {
@@ -1032,6 +1040,12 @@ class MainActivity : Activity() {
                     AlertDialog.Builder(this).setTitle("Archiver 0.8.0")
                         .setMessage(tr("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso."))
                         .setPositiveButton(tr("Fechar"), null).show()
+                }
+                addSettingChoice(content, "Política de privacidade", "Privacidade e dados", "Como os ficheiros e as permissões são tratados") {
+                    openPublicPage("privacy.html")
+                }
+                addSettingChoice(content, "Termos de utilização", "Condições de utilização", "Regras e limites de utilização da aplicação") {
+                    openPublicPage("terms.html")
                 }
             }
             "Interface" -> {
@@ -3876,7 +3890,12 @@ class MainActivity : Activity() {
             "Ícone da pasta" to "Folder icon", "Clássico" to "Classic", "Fotografias" to "Photos",
             "Transferências" to "Downloads", "Vídeos" to "Videos",
             "Escolhe um ícone para esta pasta" to "Choose an icon for this folder",
-            "Ícone da pasta reposto." to "Folder icon reset.", "Ícone da pasta alterado." to "Folder icon updated."
+            "Ícone da pasta reposto." to "Folder icon reset.", "Ícone da pasta alterado." to "Folder icon updated.",
+            "Política de privacidade" to "Privacy policy", "Privacidade e dados" to "Privacy and data",
+            "Como os ficheiros e as permissões são tratados" to "How files and permissions are handled",
+            "Termos de utilização" to "Terms of use", "Condições de utilização" to "Conditions of use",
+            "Regras e limites de utilização da aplicação" to "App usage rules and limitations",
+            "Não foi possível abrir a página." to "Could not open the page."
         ) + mapOf(
             "12 idiomas" to "12 languages",
             "Pesquisa avançada" to "Advanced search",
@@ -4606,7 +4625,12 @@ class MainActivity : Activity() {
                 "Ameixa" to "Ciruela", "Cinza" to "Gris pizarra", "Papel" to "Papel cálido",
                 "Ícone da pasta" to "Icono de carpeta", "Clássico" to "Clásico", "Fotografias" to "Fotos",
                 "Transferências" to "Descargas", "Vídeos" to "Vídeos", "Escolhe um ícone para esta pasta" to "Elige un icono para esta carpeta",
-                "Ícone da pasta reposto." to "Icono de carpeta restablecido.", "Ícone da pasta alterado." to "Icono de carpeta actualizado."
+                "Ícone da pasta reposto." to "Icono de carpeta restablecido.", "Ícone da pasta alterado." to "Icono de carpeta actualizado.",
+                "Política de privacidade" to "Política de privacidad", "Privacidade e dados" to "Privacidad y datos",
+                "Como os ficheiros e as permissões são tratados" to "Cómo se gestionan archivos y permisos",
+                "Termos de utilização" to "Términos de uso", "Condições de utilização" to "Condiciones de uso",
+                "Regras e limites de utilização da aplicação" to "Reglas y límites de uso de la aplicación",
+                "Não foi possível abrir a página." to "No se pudo abrir la página."
             )
             "fr" -> mapOf(
                 "Armazenamento" to "Stockage", "usados" to "utilisés", "livres" to "libres",
@@ -4618,7 +4642,12 @@ class MainActivity : Activity() {
                 "Ameixa" to "Prune", "Cinza" to "Gris ardoise", "Papel" to "Papier chaud",
                 "Ícone da pasta" to "Icône du dossier", "Clássico" to "Classique", "Fotografias" to "Photos",
                 "Transferências" to "Téléchargements", "Vídeos" to "Vidéos", "Escolhe um ícone para esta pasta" to "Choisissez une icône pour ce dossier",
-                "Ícone da pasta reposto." to "Icône du dossier réinitialisée.", "Ícone da pasta alterado." to "Icône du dossier mise à jour."
+                "Ícone da pasta reposto." to "Icône du dossier réinitialisée.", "Ícone da pasta alterado." to "Icône du dossier mise à jour.",
+                "Política de privacidade" to "Politique de confidentialité", "Privacidade e dados" to "Confidentialité et données",
+                "Como os ficheiros e as permissões são tratados" to "Gestion des fichiers et des autorisations",
+                "Termos de utilização" to "Conditions d’utilisation", "Condições de utilização" to "Conditions d’utilisation",
+                "Regras e limites de utilização da aplicação" to "Règles et limites d’utilisation de l’application",
+                "Não foi possível abrir a página." to "Impossible d’ouvrir la page."
             )
             "de" -> mapOf(
                 "Armazenamento" to "Speicher", "usados" to "belegt", "livres" to "frei",
@@ -4630,7 +4659,12 @@ class MainActivity : Activity() {
                 "Ameixa" to "Pflaume", "Cinza" to "Schiefergrau", "Papel" to "Warmweiß",
                 "Ícone da pasta" to "Ordnersymbol", "Clássico" to "Klassisch", "Fotografias" to "Fotos",
                 "Transferências" to "Downloads", "Vídeos" to "Videos", "Escolhe um ícone para esta pasta" to "Wähle ein Symbol für diesen Ordner",
-                "Ícone da pasta reposto." to "Ordnersymbol zurückgesetzt.", "Ícone da pasta alterado." to "Ordnersymbol aktualisiert."
+                "Ícone da pasta reposto." to "Ordnersymbol zurückgesetzt.", "Ícone da pasta alterado." to "Ordnersymbol aktualisiert.",
+                "Política de privacidade" to "Datenschutzerklärung", "Privacidade e dados" to "Datenschutz und Daten",
+                "Como os ficheiros e as permissões são tratados" to "Umgang mit Dateien und Berechtigungen",
+                "Termos de utilização" to "Nutzungsbedingungen", "Condições de utilização" to "Nutzungsbedingungen",
+                "Regras e limites de utilização da aplicação" to "Nutzungsregeln und Einschränkungen",
+                "Não foi possível abrir a página." to "Die Seite konnte nicht geöffnet werden."
             )
             "zh" -> mapOf(
                 "Armazenamento" to "存储空间", "usados" to "已使用", "livres" to "可用",
@@ -4837,6 +4871,15 @@ class MainActivity : Activity() {
                     .show()
             }
             "SHA-256: " + hash
+        }
+    }
+
+    private fun openPublicPage(pageName: String) {
+        val uri = Uri.parse("https://nexauren1.github.io/Archiver-File-Manager/" + pageName)
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+        } catch (_: ActivityNotFoundException) {
+            toast(tr("Não foi possível abrir a página."))
         }
     }
 
