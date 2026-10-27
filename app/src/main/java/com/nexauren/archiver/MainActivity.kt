@@ -1731,7 +1731,7 @@ class MainActivity : Activity() {
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
             "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisa avançada", "Favoritos",
             "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar o Archiver",
-            "Pastas avançadas (Shizuku/Sui + Root)"
+            "Pastas avançadas (Shizuku/Sui + Root)", "Analisar armazenamento"
         )
         AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
@@ -1755,6 +1755,7 @@ class MainActivity : Activity() {
                 13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
                 14 -> shareApplication()
                 15 -> openRestrictedFoldersFeature()
+                16 -> showStorageAnalyzer()
             }
         }.show()
     }
@@ -1768,12 +1769,261 @@ class MainActivity : Activity() {
                 when (which) {
                     0 -> promptArchive(items, "zip")
                     1 -> promptArchive(items, "7z")
-                    2 -> if (items.size == 1) promptRename(items[0]) else toast("Para renomear, seleciona apenas um item.")
+                    2 -> if (items.size == 1) promptRename(items[0]) else promptBatchRename(items)
                     3 -> if (items.size == 1) showInfo(items[0]) else toast("Seleciona apenas um item para ver as informações.")
                     4 -> { selected.clear(); refreshFiles() }
                 }
             }
             .show()
+    }
+
+    /**
+     * Rename several selected items with deterministic numbered names.
+     * All destinations are validated before the first change; collisions are rejected.
+     */
+    private fun promptBatchRename(items: List<File>) {
+        val candidates = items.distinctBy { pathKey(it) }
+        if (candidates.size < 2) {
+            toast("Seleciona pelo menos dois itens para renomear em lote.")
+            return
+        }
+        val baseInput = EditText(this).apply {
+            hint = tr("Nome base (por exemplo, Foto)")
+            setSingleLine(true)
+            textSize = 16f
+        }
+        val numberInput = EditText(this).apply {
+            hint = tr("Primeiro número")
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setSingleLine(true)
+            setText("1")
+            textSize = 16f
+        }
+        val explanation = label(
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada.",
+            12, mutedTextColor(), false
+        ).apply { setPadding(0, dp(4), 0, dp(10)) }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(6))
+            addView(explanation, LinearLayout.LayoutParams(-1, -2))
+            addView(baseInput, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(numberInput, LinearLayout.LayoutParams(-1, dp(52)))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Renomear em lote") + " · " + candidates.size)
+            .setView(body)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(tr("Renomear"), null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val baseName = baseInput.text.toString().trim()
+                if (!validName(baseName)) {
+                    baseInput.error = tr("Escreve um nome base válido.")
+                    return@setOnClickListener
+                }
+                val firstNumber = numberInput.text.toString().trim().toIntOrNull()
+                if (firstNumber == null || firstNumber < 0 ||
+                    firstNumber.toLong() + candidates.size - 1L > 999999999L) {
+                    numberInput.error = tr("Indica um número inicial válido.")
+                    return@setOnClickListener
+                }
+                val width = maxOf(2, (firstNumber + candidates.size - 1).toString().length)
+                val destinations = candidates.mapIndexed { index, source ->
+                    val dot = source.name.lastIndexOf('.')
+                    val suffix = if (source.isFile && dot > 0) source.name.substring(dot) else ""
+                    val number = (firstNumber + index).toString().padStart(width, '0')
+                    source to File(source.parentFile ?: currentDir, "${baseName}_$number$suffix")
+                }
+                val names = HashSet<String>()
+                val collision = destinations.any { (source, target) ->
+                    !validName(target.name) ||
+                        !names.add(target.name.lowercase(Locale.ROOT)) ||
+                        (target.exists() && pathKey(target) != pathKey(source))
+                }
+                if (collision) {
+                    AlertDialog.Builder(this)
+                        .setMessage(tr("Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base."))
+                        .setPositiveButton(tr("Fechar"), null)
+                        .show()
+                    return@setOnShowListener
+                }
+                dialog.dismiss()
+                runTask("A renomear em lote…", 0L, destinations.size.toLong()) { meter ->
+                    val renamed = mutableListOf<Pair<File, File>>()
+                    try {
+                        destinations.forEach { (source, target) ->
+                            if (!source.renameTo(target)) {
+                                throw IOException("Não foi possível renomear ${source.name}.")
+                            }
+                            renamed.add(source to target)
+                            meter.itemDone(target)
+                        }
+                    } catch (error: Exception) {
+                        renamed.asReversed().forEach { (original, current) ->
+                            if (current.exists()) current.renameTo(original)
+                        }
+                        throw IOException(
+                            (error.message ?: "Erro ao renomear") +
+                                " " + tr("Os nomes anteriores foram restaurados quando possível."),
+                            error
+                        )
+                    }
+                    meter.finish(tr("Renomeação concluída") + " · " + renamed.size)
+                    "Renomeados ${renamed.size} itens."
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    /**
+     * Bounded storage scan: never follows symbolic links, limits depth and work,
+     * and only reports large files. It never deletes or modifies user data.
+     */
+    private fun showStorageAnalyzer() {
+        if (!hasStorageAccess()) {
+            showPermissionScreen()
+            return
+        }
+        val scanRoot = try { rootDir.canonicalFile } catch (_: Exception) { rootDir }
+        runTask("A analisar armazenamento…", 0L, 200L) { meter ->
+            val pending = java.util.ArrayDeque<Pair<File, Int>>()
+            val visited = HashSet<String>()
+            val candidates = mutableListOf<Pair<File, Long>>()
+            pending.addLast(scanRoot to 0)
+            var scanned = 0
+            while (pending.isNotEmpty() && scanned < 20000) {
+                val (file, depth) = pending.removeLast()
+                val key = pathKey(file)
+                if (!visited.add(key)) continue
+                scanned++
+                try {
+                    if (!isSymbolicLink(file)) {
+                        when {
+                            file.isFile -> candidates.add(file to file.length().coerceAtLeast(0L))
+                            file.isDirectory && depth < 80 -> {
+                                safeList(file).forEach { child ->
+                                    if (!isSymbolicLink(child)) pending.addLast(child to (depth + 1))
+                                }
+                            }
+                        }
+                    }
+                } catch (_: SecurityException) {
+                    // Keep scanning the entries that remain accessible.
+                }
+                if (scanned % 100 == 0) {
+                    meter.itemDone(file)
+                }
+            }
+            val limited = pending.isNotEmpty()
+            val largest = candidates.sortedByDescending { it.second }.take(100).map { it.first }
+            meter.finish(tr("Análise concluída") + " · " + scanned)
+            runOnUiThread { showLargestFiles(largest, scanned, limited) }
+            if (limited) {
+                "Análise concluída: ${largest.size} ficheiros apresentados; limite de 20 000 entradas."
+            } else {
+                "Análise concluída: ${largest.size} ficheiros apresentados."
+            }
+        }
+    }
+
+    private fun showLargestFiles(files: List<File>, scanned: Int, limited: Boolean) {
+        if (isFinishing) return
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+        }
+        val summaryText = if (files.isEmpty()) {
+            tr("Não foram encontrados ficheiros.")
+        } else {
+            "${files.size} · " + tr("Ficheiros grandes") + " · " +
+                tr("Ficheiros verificados") + ": " + scanned
+        }
+        content.addView(label(summaryText, 12, mutedTextColor(), false)
+            .apply { setPadding(dp(5), dp(5), dp(5), dp(10)) },
+            LinearLayout.LayoutParams(-1, -2))
+        if (limited) {
+            content.addView(label(
+                "A análise foi limitada a 20 000 entradas para manter a aplicação responsiva.",
+                12, mutedTextColor(), false
+            ).apply { setPadding(dp(6), dp(2), dp(6), dp(10)) },
+                LinearLayout.LayoutParams(-1, -2))
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            clipToPadding = false
+        }
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        var resultsDialog: AlertDialog? = null
+        files.forEach { found ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(8), dp(4), dp(8))
+                background = interactiveBackground(rowSurfaceColor(), 12)
+                isClickable = true
+                isFocusable = true
+            }
+            row.addView(ImageView(this).apply {
+                setImageResource(iconForFile(found))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = tr("Ficheiro")
+            }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { rightMargin = dp(9) })
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            details.addView(label(found.name, 14, primaryTextColor(), true).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            })
+            details.addView(label(found.parentFile?.absolutePath ?: scanRoot.absolutePath,
+                10, mutedTextColor(), false).apply {
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                setPadding(0, dp(3), 0, 0)
+            })
+            details.addView(label(formatSize(found.length()), 12, accentColor(), true)
+                .apply { setPadding(0, dp(3), 0, 0) })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(TextView(this).apply {
+                text = "⋮"
+                textSize = 25f
+                gravity = Gravity.CENTER
+                setTextColor(accentColor())
+                contentDescription = tr("Mais ações")
+                setPadding(dp(8), 0, dp(8), 0)
+                setOnClickListener {
+                    resultsDialog?.dismiss()
+                    currentDir = found.parentFile ?: rootDir
+                    selected.clear()
+                    refreshFiles()
+                    page.post { showFileActions(found) }
+                }
+            }, LinearLayout.LayoutParams(dp(38), dp(46)))
+            row.setOnClickListener {
+                resultsDialog?.dismiss()
+                currentDir = found.parentFile ?: rootDir
+                selected.clear()
+                refreshFiles()
+                page.post { showFileActions(found) }
+            }
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(5)
+            })
+        }
+        scroll.addView(list)
+        content.addView(scroll, LinearLayout.LayoutParams(-1, dp(440)))
+        resultsDialog = AlertDialog.Builder(this)
+            .setTitle(tr("Análise de armazenamento"))
+            .setView(content)
+            .setPositiveButton(tr("Fechar"), null)
+            .create()
+        resultsDialog?.show()
     }
 
     private fun showSortMenu() {
@@ -1858,8 +2108,12 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Partilhar o Archiver", "Ajudar o projeto", "Convida alguém a experimentar o Archiver") {
                     shareApplication()
                 }
-                addSettingChoice(content, "Sobre o Archiver", "0.7.2", "Gestor de ficheiros Android nativo em Kotlin") {
-                    AlertDialog.Builder(this).setTitle("Archiver 0.7.2")
+                @Suppress("DEPRECATION")
+                val appVersion = runCatching {
+                    packageManager.getPackageInfo(packageName, 0).versionName ?: "0.10.0"
+                }.getOrDefault("0.10.0")
+                addSettingChoice(content, "Sobre o Archiver", "v$appVersion", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver $appVersion")
                         .setMessage(tr("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso."))
                         .setPositiveButton(tr("Fechar"), null).show()
                 }
@@ -4781,6 +5035,24 @@ class MainActivity : Activity() {
         if (appLanguage == "pt") return text
         val english = mapOf(
             "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
+            "Analisar armazenamento" to "Analyze storage",
+            "Análise de armazenamento" to "Storage analysis",
+            "A analisar armazenamento…" to "Analyzing storage…",
+            "Ficheiros grandes" to "Largest files",
+            "Ficheiros verificados" to "Entries scanned",
+            "Análise concluída" to "Analysis complete",
+            "Renomear em lote" to "Batch rename",
+            "Nome base (por exemplo, Foto)" to "Base name (for example, Photo)",
+            "Primeiro número" to "Starting number",
+            "Seleciona pelo menos dois itens para renomear em lote." to "Select at least two items to batch rename.",
+            "Escreve um nome base válido." to "Enter a valid base name.",
+            "Indica um número inicial válido." to "Enter a valid starting number.",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "A name is duplicated or already exists in this folder. Choose another base name.",
+            "Os nomes anteriores foram restaurados quando possível." to "Original names were restored where possible.",
+            "Não foram encontrados ficheiros." to "No files were found.",
+            "A análise foi limitada a 20 000 entradas para manter a aplicação responsiva." to "The scan was limited to 20,000 entries to keep the app responsive.",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Generate names such as Photo_01.jpg and Photo_02.jpg. Each file extension is preserved.",
+            "Renomeação concluída" to "Rename complete",
             "Configurações" to "Settings", "Geral" to "General", "Interface" to "Interface",
             "Compressão" to "Compression", "2 idiomas" to "2 languages",
             "Idioma, notificações e informações" to "Language, notifications and app information",
