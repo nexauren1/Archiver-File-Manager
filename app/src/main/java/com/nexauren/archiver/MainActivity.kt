@@ -1731,7 +1731,7 @@ class MainActivity : Activity() {
             "Selecionar tudo", "Limpar seleção", "Copiar seleção", "Recortar seleção", "Colar",
             "Criar novo…", "Comprimir em ZIP", "Comprimir em 7Z", "Pesquisa avançada", "Favoritos",
             "Ordenar", "Definições do explorador", "Atualizar", "Pasta de início", "Partilhar o Archiver",
-            "Pastas avançadas (Shizuku/Sui + Root)"
+            "Pastas avançadas (Shizuku/Sui + Root)", "Analisar armazenamento"
         )
         AlertDialog.Builder(this).setTitle(tr("Opções")).setItems(options.map { tr(it) }.toTypedArray()) { _, which ->
             when (which) {
@@ -1755,6 +1755,7 @@ class MainActivity : Activity() {
                 13 -> { currentDir = rootDir; selected.clear(); refreshFiles() }
                 14 -> shareApplication()
                 15 -> openRestrictedFoldersFeature()
+                16 -> showStorageAnalyzer()
             }
         }.show()
     }
@@ -1768,12 +1769,276 @@ class MainActivity : Activity() {
                 when (which) {
                     0 -> promptArchive(items, "zip")
                     1 -> promptArchive(items, "7z")
-                    2 -> if (items.size == 1) promptRename(items[0]) else toast("Para renomear, seleciona apenas um item.")
+                    2 -> if (items.size == 1) promptRename(items[0]) else promptBatchRename(items)
                     3 -> if (items.size == 1) showInfo(items[0]) else toast("Seleciona apenas um item para ver as informações.")
                     4 -> { selected.clear(); refreshFiles() }
                 }
             }
             .show()
+    }
+
+    /**
+     * Rename several selected items with deterministic numbered names.
+     * All destinations are validated before the first change; collisions are rejected.
+     */
+    private fun promptBatchRename(items: List<File>) {
+        val candidates = items.distinctBy { pathKey(it) }
+        if (candidates.size < 2) {
+            toast("Seleciona pelo menos dois itens para renomear em lote.")
+            return
+        }
+        val baseInput = EditText(this).apply {
+            hint = tr("Nome base (por exemplo, Foto)")
+            setSingleLine(true)
+            textSize = 16f
+        }
+        val numberInput = EditText(this).apply {
+            hint = tr("Primeiro número")
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setSingleLine(true)
+            setText("1")
+            textSize = 16f
+        }
+        val explanation = label(
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada.",
+            12, mutedTextColor(), false
+        ).apply { setPadding(0, dp(4), 0, dp(10)) }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(6))
+            addView(explanation, LinearLayout.LayoutParams(-1, -2))
+            addView(baseInput, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(numberInput, LinearLayout.LayoutParams(-1, dp(52)))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Renomear em lote") + " · " + candidates.size)
+            .setView(body)
+            .setNegativeButton(tr("Cancelar"), null)
+            .setPositiveButton(tr("Renomear"), null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val baseName = baseInput.text.toString().trim()
+                if (!validName(baseName)) {
+                    baseInput.error = tr("Escreve um nome base válido.")
+                    return@setOnClickListener
+                }
+                val firstNumber = numberInput.text.toString().trim().toIntOrNull()
+                if (firstNumber == null || firstNumber < 0 ||
+                    firstNumber.toLong() + candidates.size - 1L > 999999999L) {
+                    numberInput.error = tr("Indica um número inicial válido.")
+                    return@setOnClickListener
+                }
+                val width = maxOf(2, (firstNumber + candidates.size - 1).toString().length)
+                val destinations = candidates.mapIndexed { index, source ->
+                    val lowerName = source.name.lowercase(Locale.ROOT)
+                    val compoundSuffix = listOf(".tar.gz", ".tar.bz2", ".tar.xz")
+                        .firstOrNull { lowerName.endsWith(it) }
+                    val dot = source.name.lastIndexOf('.')
+                    val suffix = if (!source.isFile) "" else compoundSuffix
+                        ?: if (dot > 0) source.name.substring(dot) else ""
+                    val number = (firstNumber + index).toString().padStart(width, '0')
+                    source to File(source.parentFile ?: currentDir, "${baseName}_$number$suffix")
+                }
+                val names = HashSet<String>()
+                val collision = destinations.any { (source, target) ->
+                    !validName(target.name) ||
+                        !names.add(target.name.lowercase(Locale.ROOT)) ||
+                        (target.exists() && pathKey(target) != pathKey(source))
+                }
+                if (collision) {
+                    AlertDialog.Builder(this)
+                        .setMessage(tr("Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base."))
+                        .setPositiveButton(tr("Fechar"), null)
+                        .show()
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                runTask("A renomear em lote…", 0L, destinations.size.toLong()) { meter ->
+                    val renamed = mutableListOf<Pair<File, File>>()
+                    try {
+                        destinations.forEach { (source, target) ->
+                            if (!source.renameTo(target)) {
+                                throw IOException("Não foi possível renomear ${source.name}.")
+                            }
+                            renamed.add(source to target)
+                            meter.itemDone(target)
+                        }
+                    } catch (error: Exception) {
+                        renamed.asReversed().forEach { (original, current) ->
+                            if (current.exists()) current.renameTo(original)
+                        }
+                        throw IOException(
+                            (error.message ?: "Erro ao renomear") +
+                                " " + tr("Os nomes anteriores foram restaurados quando possível."),
+                            error
+                        )
+                    }
+                    meter.finish(tr("Renomeação concluída") + " · " + renamed.size)
+                    tr("Renomeados") + " " + renamed.size + " " + tr("itens") + "."
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    /**
+     * Bounded storage scan: never follows symbolic links, limits depth and work,
+     * and only reports large files. It never deletes or modifies user data.
+     */
+    private fun showStorageAnalyzer() {
+        if (!hasStorageAccess()) {
+            showPermissionScreen()
+            return
+        }
+        val scanRoot = try { rootDir.canonicalFile } catch (_: Exception) { rootDir }
+        runTask("A analisar armazenamento…", 0L, 200L) { meter ->
+            val pending = java.util.ArrayDeque<Pair<File, Int>>()
+            val visited = HashSet<String>()
+            val candidates = mutableListOf<Pair<File, Long>>()
+            pending.addLast(scanRoot to 0)
+            var scanned = 0
+            var depthLimited = false
+            while (pending.isNotEmpty() && scanned < 20000) {
+                val (file, depth) = pending.removeLast()
+                val key = pathKey(file)
+                if (!visited.add(key)) continue
+                scanned++
+                try {
+                    if (!isSymbolicLink(file)) {
+                        when {
+                            file.isFile -> candidates.add(file to file.length().coerceAtLeast(0L))
+                            file.isDirectory -> {
+                                if (depth >= 80) {
+                                    if (safeList(file).isNotEmpty()) depthLimited = true
+                                } else {
+                                    for (child in safeList(file).asReversed()) {
+                                        if (scanned + pending.size >= 20000) {
+                                            depthLimited = true
+                                            break
+                                        }
+                                        if (!isSymbolicLink(child)) pending.addLast(child to (depth + 1))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_: SecurityException) {
+                    // Keep scanning the entries that remain accessible.
+                }
+                if (scanned % 100 == 0) {
+                    meter.itemDone(file)
+                }
+            }
+            val limited = pending.isNotEmpty() || depthLimited
+            val largest = candidates.sortedByDescending { it.second }.take(100).map { it.first }
+            meter.finish(tr("Análise concluída") + " · " + scanned)
+            runOnUiThread { showLargestFiles(largest, scanned, limited) }
+            tr("Análise concluída") + ": " + largest.size + " " + tr("ficheiros apresentados") +
+                if (limited) " · " + tr("limite de segurança atingido") else ""
+        }
+    }
+
+    private fun showLargestFiles(files: List<File>, scanned: Int, limited: Boolean) {
+        if (isFinishing) return
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+        }
+        val summaryText = if (files.isEmpty()) {
+            tr("Não foram encontrados ficheiros.")
+        } else {
+            "${files.size} · " + tr("Ficheiros grandes") + " · " +
+                tr("Ficheiros verificados") + ": " + scanned
+        }
+        content.addView(label(summaryText, 12, mutedTextColor(), false)
+            .apply { setPadding(dp(5), dp(5), dp(5), dp(4)) },
+            LinearLayout.LayoutParams(-1, -2))
+        content.addView(label(
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal.",
+            11, mutedTextColor(), false
+        ).apply { setPadding(dp(5), 0, dp(5), dp(8)) },
+            LinearLayout.LayoutParams(-1, -2))
+        if (limited) {
+            content.addView(label(
+                "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas).",
+                12, mutedTextColor(), false
+            ).apply { setPadding(dp(6), dp(2), dp(6), dp(10)) },
+                LinearLayout.LayoutParams(-1, -2))
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            clipToPadding = false
+        }
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        var resultsDialog: AlertDialog? = null
+        files.forEach { found ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(8), dp(4), dp(8))
+                background = interactiveBackground(rowSurfaceColor(), 12)
+                isClickable = true
+                isFocusable = true
+            }
+            row.addView(ImageView(this).apply {
+                setImageResource(iconForFile(found))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = tr("Ficheiro")
+            }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { rightMargin = dp(9) })
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            details.addView(label(found.name, 14, primaryTextColor(), true).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            })
+            details.addView(label(found.parentFile?.absolutePath ?: rootDir.absolutePath,
+                10, mutedTextColor(), false).apply {
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                setPadding(0, dp(3), 0, 0)
+            })
+            details.addView(label(formatSize(found.length()), 12, accentColor(), true)
+                .apply { setPadding(0, dp(3), 0, 0) })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(TextView(this).apply {
+                text = "⋮"
+                textSize = 25f
+                gravity = Gravity.CENTER
+                setTextColor(accentColor())
+                contentDescription = tr("Mais ações")
+                setPadding(dp(8), 0, dp(8), 0)
+                setOnClickListener {
+                    resultsDialog?.dismiss()
+                    currentDir = found.parentFile ?: rootDir
+                    selected.clear()
+                    refreshFiles()
+                    page.post { showFileActions(found) }
+                }
+            }, LinearLayout.LayoutParams(dp(38), dp(46)))
+            row.setOnClickListener {
+                resultsDialog?.dismiss()
+                currentDir = found.parentFile ?: rootDir
+                selected.clear()
+                refreshFiles()
+                page.post { showFileActions(found) }
+            }
+            list.addView(row, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(5)
+            })
+        }
+        scroll.addView(list)
+        content.addView(scroll, LinearLayout.LayoutParams(-1, dp(440)))
+        resultsDialog = AlertDialog.Builder(this)
+            .setTitle(tr("Análise de armazenamento"))
+            .setView(content)
+            .setPositiveButton(tr("Fechar"), null)
+            .create()
+        resultsDialog?.show()
     }
 
     private fun showSortMenu() {
@@ -1858,8 +2123,12 @@ class MainActivity : Activity() {
                 addSettingChoice(content, "Partilhar o Archiver", "Ajudar o projeto", "Convida alguém a experimentar o Archiver") {
                     shareApplication()
                 }
-                addSettingChoice(content, "Sobre o Archiver", "0.7.2", "Gestor de ficheiros Android nativo em Kotlin") {
-                    AlertDialog.Builder(this).setTitle("Archiver 0.7.2")
+                @Suppress("DEPRECATION")
+                val appVersion = runCatching {
+                    packageManager.getPackageInfo(packageName, 0).versionName ?: "0.10.0"
+                }.getOrDefault("0.10.0")
+                addSettingChoice(content, "Sobre o Archiver", "v$appVersion", "Gestor de ficheiros Android nativo em Kotlin") {
+                    AlertDialog.Builder(this).setTitle("Archiver $appVersion")
                         .setMessage(tr("Gestor de ficheiros Android independente, inspirado em exploradores clássicos. ZIP/7Z, editor de texto, miniaturas e operações com progresso."))
                         .setPositiveButton(tr("Fechar"), null).show()
                 }
@@ -4781,6 +5050,31 @@ class MainActivity : Activity() {
         if (appLanguage == "pt") return text
         val english = mapOf(
             "Explorador" to "Explorer", "Gestor de ficheiros para Android" to "Android file manager",
+            "Analisar armazenamento" to "Analyze storage",
+            "Análise de armazenamento" to "Storage analysis",
+            "A analisar armazenamento…" to "Analyzing storage…",
+            "A renomear em lote…" to "Batch renaming…",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "The scan includes only files accessible in primary shared storage.",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "The scan was limited for safety (20,000 entries or 80 folder levels).",
+            "Ficheiros grandes" to "Largest files",
+            "Ficheiros verificados" to "Entries scanned",
+            "Análise concluída" to "Analysis complete",
+            "ficheiros apresentados" to "files shown",
+            "limite de segurança atingido" to "safety limit reached",
+            "Renomeados" to "Renamed",
+            "itens" to "items",
+            "Renomear em lote" to "Batch rename",
+            "Nome base (por exemplo, Foto)" to "Base name (for example, Photo)",
+            "Primeiro número" to "Starting number",
+            "Seleciona pelo menos dois itens para renomear em lote." to "Select at least two items to batch rename.",
+            "Escreve um nome base válido." to "Enter a valid base name.",
+            "Indica um número inicial válido." to "Enter a valid starting number.",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "A name is duplicated or already exists in this folder. Choose another base name.",
+            "Os nomes anteriores foram restaurados quando possível." to "Original names were restored where possible.",
+            "Não foram encontrados ficheiros." to "No files were found.",
+            "A análise foi limitada a 20 000 entradas para manter a aplicação responsiva." to "The scan was limited to 20,000 entries to keep the app responsive.",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Generate names such as Photo_01.jpg and Photo_02.jpg. Each file extension is preserved.",
+            "Renomeação concluída" to "Rename complete",
             "Configurações" to "Settings", "Geral" to "General", "Interface" to "Interface",
             "Compressão" to "Compression", "2 idiomas" to "2 languages",
             "Idioma, notificações e informações" to "Language, notifications and app information",
@@ -4972,6 +5266,30 @@ class MainActivity : Activity() {
         if (appLanguage == "en") return english[text] ?: text
         val localized = when (appLanguage) {
             "es" -> mapOf(
+            "Analisar armazenamento" to "Analizar almacenamiento",
+            "Análise de armazenamento" to "Análisis de almacenamiento",
+            "A analisar armazenamento…" to "Analizando almacenamiento…",
+            "A renomear em lote…" to "Renombrando por lotes…",
+            "Ficheiros grandes" to "Archivos grandes",
+            "Ficheiros verificados" to "Elementos examinados",
+            "Análise concluída" to "Análisis completado",
+            "ficheiros apresentados" to "archivos mostrados",
+            "limite de segurança atingido" to "límite de seguridad alcanzado",
+            "Renomeados" to "Renombrados",
+            "itens" to "elementos",
+            "Renomear em lote" to "Renombrado por lotes",
+            "Nome base (por exemplo, Foto)" to "Nombre base (por ejemplo, Foto)",
+            "Primeiro número" to "Número inicial",
+            "Seleciona pelo menos dois itens para renomear em lote." to "Selecciona al menos dos elementos para renombrar por lotes.",
+            "Escreve um nome base válido." to "Escribe un nombre base válido.",
+            "Indica um número inicial válido." to "Introduce un número inicial válido.",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "Hay un nombre duplicado o ya existente en esta carpeta. Elige otro nombre base.",
+            "Os nomes anteriores foram restaurados quando possível." to "Se restauraron los nombres anteriores cuando fue posible.",
+            "Não foram encontrados ficheiros." to "No se encontraron archivos.",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "El análisis se limitó por seguridad (20 000 elementos o 80 niveles de carpetas).",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "El análisis solo incluye archivos accesibles del almacenamiento compartido principal.",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Genera nombres como Foto_01.jpg y Foto_02.jpg. Se conserva la extensión de cada archivo.",
+            "Renomeação concluída" to "Renombrado completado",
             "Explorador" to "Explorador",
             "Gestor de ficheiros para Android" to "Gestor de archivos para Android",
             "Configurações" to "Ajustes",
@@ -5044,6 +5362,30 @@ class MainActivity : Activity() {
             "12 idiomas" to "12 idiomas"
             )
             "fr" -> mapOf(
+            "Analisar armazenamento" to "Analyser le stockage",
+            "Análise de armazenamento" to "Analyse du stockage",
+            "A analisar armazenamento…" to "Analyse du stockage…",
+            "A renomear em lote…" to "Renommage par lot…",
+            "Ficheiros grandes" to "Fichiers volumineux",
+            "Ficheiros verificados" to "Éléments analysés",
+            "Análise concluída" to "Analyse terminée",
+            "ficheiros apresentados" to "fichiers affichés",
+            "limite de segurança atingido" to "limite de sécurité atteint",
+            "Renomeados" to "Renommés",
+            "itens" to "éléments",
+            "Renomear em lote" to "Renommer par lot",
+            "Nome base (por exemplo, Foto)" to "Nom de base (par exemple, Photo)",
+            "Primeiro número" to "Premier numéro",
+            "Seleciona pelo menos dois itens para renomear em lote." to "Sélectionne au moins deux éléments à renommer par lot.",
+            "Escreve um nome base válido." to "Saisis un nom de base valide.",
+            "Indica um número inicial válido." to "Indique un numéro de départ valide.",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "Un nom est en double ou existe déjà dans ce dossier. Choisis un autre nom de base.",
+            "Os nomes anteriores foram restaurados quando possível." to "Les noms précédents ont été restaurés lorsque cela était possible.",
+            "Não foram encontrados ficheiros." to "Aucun fichier trouvé.",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "L’analyse a été limitée pour des raisons de sécurité (20 000 éléments ou 80 niveaux).",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "L’analyse couvre uniquement les fichiers accessibles du stockage partagé principal.",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Génère des noms comme Photo_01.jpg et Photo_02.jpg. L’extension de chaque fichier est conservée.",
+            "Renomeação concluída" to "Renommage terminé",
             "Explorador" to "Explorateur",
             "Gestor de ficheiros para Android" to "Gestionnaire de fichiers Android",
             "Configurações" to "Paramètres",
@@ -5116,6 +5458,30 @@ class MainActivity : Activity() {
             "12 idiomas" to "12 langues"
             )
             "de" -> mapOf(
+            "Analisar armazenamento" to "Speicher analysieren",
+            "Análise de armazenamento" to "Speicheranalyse",
+            "A analisar armazenamento…" to "Speicher wird analysiert…",
+            "A renomear em lote…" to "Stapelumbenennung…",
+            "Ficheiros grandes" to "Größte Dateien",
+            "Ficheiros verificados" to "Geprüfte Einträge",
+            "Análise concluída" to "Analyse abgeschlossen",
+            "ficheiros apresentados" to "Dateien angezeigt",
+            "limite de segurança atingido" to "Sicherheitslimit erreicht",
+            "Renomeados" to "Umbenannt:",
+            "itens" to "Elemente",
+            "Renomear em lote" to "Stapelumbenennung",
+            "Nome base (por exemplo, Foto)" to "Basisname (z. B. Foto)",
+            "Primeiro número" to "Startnummer",
+            "Seleciona pelo menos dois itens para renomear em lote." to "Wähle mindestens zwei Elemente für die Stapelumbenennung aus.",
+            "Escreve um nome base válido." to "Gib einen gültigen Basisnamen ein.",
+            "Indica um número inicial válido." to "Gib eine gültige Startnummer ein.",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "Ein Name ist doppelt oder existiert bereits in diesem Ordner. Wähle einen anderen Basisnamen.",
+            "Os nomes anteriores foram restaurados quando possível." to "Die ursprünglichen Namen wurden, soweit möglich, wiederhergestellt.",
+            "Não foram encontrados ficheiros." to "Keine Dateien gefunden.",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "Die Analyse wurde aus Sicherheitsgründen begrenzt (20.000 Einträge oder 80 Ordnerebenen).",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "Die Analyse umfasst nur zugängliche Dateien im primären gemeinsamen Speicher.",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Erzeuge Namen wie Foto_01.jpg und Foto_02.jpg. Dateiendungen bleiben erhalten.",
+            "Renomeação concluída" to "Umbenennung abgeschlossen",
             "Explorador" to "Dateimanager",
             "Gestor de ficheiros para Android" to "Android-Dateimanager",
             "Configurações" to "Einstellungen",
@@ -5188,6 +5554,30 @@ class MainActivity : Activity() {
             "12 idiomas" to "12 Sprachen"
             )
             "zh" -> mapOf(
+            "Analisar armazenamento" to "分析存储",
+            "Análise de armazenamento" to "存储分析",
+            "A analisar armazenamento…" to "正在分析存储…",
+            "A renomear em lote…" to "正在批量重命名…",
+            "Ficheiros grandes" to "大文件",
+            "Ficheiros verificados" to "已扫描条目",
+            "Análise concluída" to "分析完成",
+            "ficheiros apresentados" to "个文件已显示",
+            "limite de segurança atingido" to "已达到安全扫描上限",
+            "Renomeados" to "已重命名",
+            "itens" to "个项目",
+            "Renomear em lote" to "批量重命名",
+            "Nome base (por exemplo, Foto)" to "基础名称（例如 Photo）",
+            "Primeiro número" to "起始编号",
+            "Seleciona pelo menos dois itens para renomear em lote." to "至少选择两个项目进行批量重命名。",
+            "Escreve um nome base válido." to "请输入有效的基础名称。",
+            "Indica um número inicial válido." to "请输入有效的起始编号。",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "名称重复或文件夹中已存在该名称，请选择其他基础名称。",
+            "Os nomes anteriores foram restaurados quando possível." to "已尽可能恢复原始名称。",
+            "Não foram encontrados ficheiros." to "未找到文件。",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "为确保安全，扫描限制为 20,000 个条目或 80 层文件夹。",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "分析范围仅限主共享存储中可访问的文件。",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "生成 Photo_01.jpg、Photo_02.jpg 这样的名称，并保留文件扩展名。",
+            "Renomeação concluída" to "重命名完成",
             "Explorador" to "文件管理器",
             "Gestor de ficheiros para Android" to "Android 文件管理器",
             "Configurações" to "设置",
@@ -5260,6 +5650,30 @@ class MainActivity : Activity() {
             "12 idiomas" to "12 种语言"
             )
             "hi" -> mapOf(
+            "Analisar armazenamento" to "स्टोरेज का विश्लेषण",
+            "Análise de armazenamento" to "स्टोरेज विश्लेषण",
+            "A analisar armazenamento…" to "स्टोरेज का विश्लेषण हो रहा है…",
+            "A renomear em lote…" to "बैच में नाम बदले जा रहे हैं…",
+            "Ficheiros grandes" to "सबसे बड़ी फ़ाइलें",
+            "Ficheiros verificados" to "स्कैन की गई प्रविष्टियाँ",
+            "Análise concluída" to "विश्लेषण पूरा हुआ",
+            "ficheiros apresentados" to "फ़ाइलें दिखाई गईं",
+            "limite de segurança atingido" to "सुरक्षा सीमा पहुँच गई",
+            "Renomeados" to "नाम बदले गए",
+            "itens" to "आइटम",
+            "Renomear em lote" to "बैच में नाम बदलें",
+            "Nome base (por exemplo, Foto)" to "आधार नाम (उदाहरण: Foto)",
+            "Primeiro número" to "पहला नंबर",
+            "Seleciona pelo menos dois itens para renomear em lote." to "बैच में नाम बदलने के लिए कम से कम दो आइटम चुनें।",
+            "Escreve um nome base válido." to "मान्य आधार नाम लिखें।",
+            "Indica um número inicial válido." to "मान्य शुरुआती नंबर दें।",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "यह नाम दोहराया गया है या फ़ोल्डर में पहले से मौजूद है। दूसरा आधार नाम चुनें।",
+            "Os nomes anteriores foram restaurados quando possível." to "जहाँ संभव हुआ, पुराने नाम वापस कर दिए गए।",
+            "Não foram encontrados ficheiros." to "कोई फ़ाइल नहीं मिली।",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "सुरक्षा के लिए स्कैन 20,000 प्रविष्टियों या 80 फ़ोल्डर स्तरों तक सीमित है।",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "स्कैन में केवल मुख्य साझा स्टोरेज की सुलभ फ़ाइलें शामिल हैं।",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Foto_01.jpg और Foto_02.jpg जैसे नाम बनाएँ। फ़ाइल एक्सटेंशन सुरक्षित रहता है।",
+            "Renomeação concluída" to "नाम बदलना पूरा हुआ",
             "Explorador" to "फ़ाइल प्रबंधक",
             "Gestor de ficheiros para Android" to "Android फ़ाइल प्रबंधक",
             "Configurações" to "सेटिंग",
@@ -5332,6 +5746,30 @@ class MainActivity : Activity() {
             "12 idiomas" to "12 भाषाएँ"
             )
             "ar" -> mapOf(
+            "Analisar armazenamento" to "تحليل التخزين",
+            "Análise de armazenamento" to "تحليل التخزين",
+            "A analisar armazenamento…" to "جارٍ تحليل التخزين…",
+            "A renomear em lote…" to "جارٍ إعادة التسمية الجماعية…",
+            "Ficheiros grandes" to "أكبر الملفات",
+            "Ficheiros verificados" to "العناصر التي تم فحصها",
+            "Análise concluída" to "اكتمل التحليل",
+            "ficheiros apresentados" to "ملفات معروضة",
+            "limite de segurança atingido" to "تم بلوغ حد الأمان",
+            "Renomeados" to "تمت إعادة تسمية",
+            "itens" to "عناصر",
+            "Renomear em lote" to "إعادة تسمية جماعية",
+            "Nome base (por exemplo, Foto)" to "الاسم الأساسي (مثل Foto)",
+            "Primeiro número" to "رقم البداية",
+            "Seleciona pelo menos dois itens para renomear em lote." to "حدد عنصرين على الأقل لإعادة التسمية الجماعية.",
+            "Escreve um nome base válido." to "أدخل اسمًا أساسيًا صالحًا.",
+            "Indica um número inicial válido." to "أدخل رقم بداية صالحًا.",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "يوجد اسم مكرر أو مستخدم بالفعل في هذا المجلد. اختر اسمًا أساسيًا آخر.",
+            "Os nomes anteriores foram restaurados quando possível." to "تمت استعادة الأسماء السابقة حيثما أمكن.",
+            "Não foram encontrados ficheiros." to "لم يتم العثور على ملفات.",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "تم تقييد الفحص لأسباب أمنية (20,000 عنصر أو 80 مستوى من المجلدات).",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "يشمل الفحص الملفات التي يمكن الوصول إليها في وحدة التخزين المشتركة الرئيسية فقط.",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "أنشئ أسماء مثل Foto_01.jpg وFoto_02.jpg مع الحفاظ على امتداد كل ملف.",
+            "Renomeação concluída" to "اكتملت إعادة التسمية",
             "Explorador" to "مدير الملفات",
             "Gestor de ficheiros para Android" to "مدير ملفات أندرويد",
             "Configurações" to "الإعدادات",
@@ -5404,6 +5842,30 @@ class MainActivity : Activity() {
             "12 idiomas" to "12 لغات"
             )
             "ja" -> mapOf(
+            "Analisar armazenamento" to "ストレージを分析",
+            "Análise de armazenamento" to "ストレージ分析",
+            "A analisar armazenamento…" to "ストレージを分析中…",
+            "A renomear em lote…" to "一括名前変更中…",
+            "Ficheiros grandes" to "大きなファイル",
+            "Ficheiros verificados" to "スキャンした項目",
+            "Análise concluída" to "分析完了",
+            "ficheiros apresentados" to "件のファイルを表示",
+            "limite de segurança atingido" to "安全上の上限に到達",
+            "Renomeados" to "名前を変更しました:",
+            "itens" to "件",
+            "Renomear em lote" to "一括名前変更",
+            "Nome base (por exemplo, Foto)" to "ベース名（例: Photo）",
+            "Primeiro número" to "開始番号",
+            "Seleciona pelo menos dois itens para renomear em lote." to "一括名前変更する項目を2つ以上選択してください。",
+            "Escreve um nome base válido." to "有効なベース名を入力してください。",
+            "Indica um número inicial válido." to "有効な開始番号を入力してください。",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "名前が重複しているか、このフォルダーですでに使用されています。別のベース名を選んでください。",
+            "Os nomes anteriores foram restaurados quando possível." to "可能な範囲で元の名前を復元しました。",
+            "Não foram encontrados ficheiros." to "ファイルが見つかりません。",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "安全のため、スキャンは20,000項目またはフォルダー80階層までに制限されました。",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "メイン共有ストレージでアクセス可能なファイルのみをスキャンします。",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Photo_01.jpg、Photo_02.jpg のような名前を生成し、拡張子を保持します。",
+            "Renomeação concluída" to "名前変更が完了しました",
             "Explorador" to "ファイル管理",
             "Gestor de ficheiros para Android" to "Android ファイルマネージャー",
             "Configurações" to "設定",
@@ -5476,6 +5938,30 @@ class MainActivity : Activity() {
             "12 idiomas" to "12言語"
             )
             "ru" -> mapOf(
+            "Analisar armazenamento" to "Анализ хранилища",
+            "Análise de armazenamento" to "Анализ хранилища",
+            "A analisar armazenamento…" to "Анализ хранилища…",
+            "A renomear em lote…" to "Пакетное переименование…",
+            "Ficheiros grandes" to "Самые большие файлы",
+            "Ficheiros verificados" to "Проверено элементов",
+            "Análise concluída" to "Анализ завершён",
+            "ficheiros apresentados" to "файлов показано",
+            "limite de segurança atingido" to "достигнут предел безопасности",
+            "Renomeados" to "Переименовано",
+            "itens" to "элементов",
+            "Renomear em lote" to "Пакетное переименование",
+            "Nome base (por exemplo, Foto)" to "Базовое имя (например, Фото)",
+            "Primeiro número" to "Начальный номер",
+            "Seleciona pelo menos dois itens para renomear em lote." to "Выберите не менее двух элементов для пакетного переименования.",
+            "Escreve um nome base válido." to "Введите допустимое базовое имя.",
+            "Indica um número inicial válido." to "Укажите допустимый начальный номер.",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "Имя повторяется или уже используется в этой папке. Выберите другое базовое имя.",
+            "Os nomes anteriores foram restaurados quando possível." to "Исходные имена восстановлены, где это было возможно.",
+            "Não foram encontrados ficheiros." to "Файлы не найдены.",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "В целях безопасности сканирование ограничено 20 000 элементами или 80 уровнями папок.",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "Сканируются только доступные файлы в основном общем хранилище.",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Создаёт имена вида Фото_01.jpg и Фото_02.jpg, сохраняя расширение каждого файла.",
+            "Renomeação concluída" to "Переименование завершено",
                 "Explorador" to "Файловый менеджер", "Gestor de ficheiros para Android" to "Файловый менеджер Android",
                 "Configurações" to "Настройки", "Geral" to "Общие", "Interface" to "Интерфейс",
                 "Compressão" to "Сжатие", "Idioma" to "Язык", "Tema da interface" to "Тема интерфейса",
@@ -5509,6 +5995,30 @@ class MainActivity : Activity() {
                 "12 idiomas" to "12 языков"
             )
             "bn" -> mapOf(
+            "Analisar armazenamento" to "স্টোরেজ বিশ্লেষণ করুন",
+            "Análise de armazenamento" to "স্টোরেজ বিশ্লেষণ",
+            "A analisar armazenamento…" to "স্টোরেজ বিশ্লেষণ হচ্ছে…",
+            "A renomear em lote…" to "একসঙ্গে নাম পরিবর্তন হচ্ছে…",
+            "Ficheiros grandes" to "সবচেয়ে বড় ফাইল",
+            "Ficheiros verificados" to "স্ক্যান করা এন্ট্রি",
+            "Análise concluída" to "বিশ্লেষণ সম্পন্ন",
+            "ficheiros apresentados" to "টি ফাইল দেখানো হয়েছে",
+            "limite de segurança atingido" to "নিরাপত্তা সীমায় পৌঁছেছে",
+            "Renomeados" to "নাম পরিবর্তন হয়েছে",
+            "itens" to "টি আইটেম",
+            "Renomear em lote" to "একসঙ্গে নাম পরিবর্তন",
+            "Nome base (por exemplo, Foto)" to "ভিত্তি নাম (যেমন Foto)",
+            "Primeiro número" to "প্রথম নম্বর",
+            "Seleciona pelo menos dois itens para renomear em lote." to "একসঙ্গে নাম বদলাতে অন্তত দুটি আইটেম বেছে নিন।",
+            "Escreve um nome base válido." to "একটি বৈধ ভিত্তি নাম লিখুন।",
+            "Indica um número inicial válido." to "একটি বৈধ প্রাথমিক নম্বর দিন।",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "এই নামটি পুনরাবৃত্তি হয়েছে বা ফোল্ডারে আগে থেকেই আছে। অন্য ভিত্তি নাম বেছে নিন।",
+            "Os nomes anteriores foram restaurados quando possível." to "সম্ভব হলে আগের নামগুলো পুনরুদ্ধার করা হয়েছে।",
+            "Não foram encontrados ficheiros." to "কোনো ফাইল পাওয়া যায়নি।",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "নিরাপত্তার জন্য স্ক্যান ২০,০০০ এন্ট্রি বা ৮০টি ফোল্ডার স্তরে সীমিত।",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "স্ক্যানে কেবল প্রধান শেয়ার্ড স্টোরেজের অ্যাক্সেসযোগ্য ফাইল অন্তর্ভুক্ত।",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Foto_01.jpg ও Foto_02.jpg-এর মতো নাম তৈরি করে এবং এক্সটেনশন অক্ষত রাখে।",
+            "Renomeação concluída" to "নাম পরিবর্তন সম্পন্ন",
                 "Explorador" to "ফাইল ম্যানেজার", "Gestor de ficheiros para Android" to "অ্যান্ড্রয়েড ফাইল ম্যানেজার",
                 "Configurações" to "সেটিংস", "Geral" to "সাধারণ", "Interface" to "ইন্টারফেস",
                 "Compressão" to "কমপ্রেশন", "Idioma" to "ভাষা", "Tema da interface" to "ইন্টারফেস থিম",
@@ -5540,6 +6050,30 @@ class MainActivity : Activity() {
                 "Claro (boa visibilidade à luz do dia)" to "হালকা থিম", "12 idiomas" to "12টি ভাষা"
             )
             "id" -> mapOf(
+            "Analisar armazenamento" to "Analisis penyimpanan",
+            "Análise de armazenamento" to "Analisis penyimpanan",
+            "A analisar armazenamento…" to "Menganalisis penyimpanan…",
+            "A renomear em lote…" to "Mengganti nama sekaligus…",
+            "Ficheiros grandes" to "Berkas terbesar",
+            "Ficheiros verificados" to "Entri dipindai",
+            "Análise concluída" to "Analisis selesai",
+            "ficheiros apresentados" to "berkas ditampilkan",
+            "limite de segurança atingido" to "batas keamanan tercapai",
+            "Renomeados" to "Berhasil mengganti nama",
+            "itens" to "item",
+            "Renomear em lote" to "Ganti nama sekaligus",
+            "Nome base (por exemplo, Foto)" to "Nama dasar (misalnya Foto)",
+            "Primeiro número" to "Nomor awal",
+            "Seleciona pelo menos dois itens para renomear em lote." to "Pilih setidaknya dua item untuk mengganti nama sekaligus.",
+            "Escreve um nome base válido." to "Masukkan nama dasar yang valid.",
+            "Indica um número inicial válido." to "Masukkan nomor awal yang valid.",
+            "Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base." to "Nama duplikat atau sudah digunakan di folder ini. Pilih nama dasar lain.",
+            "Os nomes anteriores foram restaurados quando possível." to "Nama sebelumnya dipulihkan jika memungkinkan.",
+            "Não foram encontrados ficheiros." to "Berkas tidak ditemukan.",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "Pemindaian dibatasi demi keamanan (20.000 entri atau 80 tingkat folder).",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "Pemindaian hanya mencakup berkas yang dapat diakses di penyimpanan bersama utama.",
+            "Gera nomes como Foto_01.jpg e Foto_02.jpg. A extensão de cada ficheiro é preservada." to "Buat nama seperti Foto_01.jpg dan Foto_02.jpg, dengan ekstensi setiap berkas tetap dipertahankan.",
+            "Renomeação concluída" to "Penggantian nama selesai",
                 "Explorador" to "Pengelola berkas", "Gestor de ficheiros para Android" to "Pengelola berkas Android",
                 "Configurações" to "Pengaturan", "Geral" to "Umum", "Interface" to "Antarmuka",
                 "Compressão" to "Kompresi", "Idioma" to "Bahasa", "Tema da interface" to "Tema antarmuka",

@@ -30,6 +30,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
@@ -49,6 +50,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
           PUBLISH_RELEASE_INPUT: ${{ inputs.publish_release }}
         run: |
           set -euo pipefail
@@ -67,6 +69,17 @@ jobs:
             PUBLISH_RELEASE=true
           elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$PUBLISH_RELEASE_INPUT" == "true" ]]; then
             PUBLISH_RELEASE=true
+          elif [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "branch" && "$REF_NAME" == "main" ]]; then
+            # Automatically publish a release only when the application version changes on main.
+            # The checked-out history contains the pre-push commit so this comparison is deterministic.
+            PREVIOUS_VERSION=""
+            if [[ "$EVENT_BEFORE" =~ ^[0-9a-f]{40}$ && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+              PREVIOUS_VERSION="$(git show "${EVENT_BEFORE}:app/build.gradle" 2>/dev/null | awk -F"'" '/versionName/ {print $2; exit}' || true)"
+            fi
+            if [[ -n "$PREVIOUS_VERSION" && "$APP_VERSION" != "$PREVIOUS_VERSION" ]]; then
+              PUBLISH_RELEASE=true
+              echo "App version changed from $PREVIOUS_VERSION to $APP_VERSION; publishing signed release."
+            fi
           fi
 
           echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
