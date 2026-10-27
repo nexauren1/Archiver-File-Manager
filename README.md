@@ -1,6 +1,13 @@
-# Archiver 0.9.3 — Android File Manager
+# Archiver 0.10.0 — Android File Manager
 
 Archiver is a native Android file manager written in Kotlin. It is an independent project inspired by classic archive managers such as ZArchiver; it is not a website wrapped in an app.
+
+## Archiver 0.10.0
+
+- Add a bounded Storage Analyzer that lists the 100 largest accessible files without deleting or changing any data. It skips symbolic links, limits traversal to 20,000 entries and 80 directory levels, and reports when the safety limit is reached.
+- Add batch rename for multiple selected files and folders, with numbered names, preserved file extensions, destination-collision checks, and best-effort rollback if a rename fails.
+- Fix the About screen so it displays the installed app version instead of the stale 0.7.2 label.
+- Version code: 15.
 
 ## Archiver 0.9.3
 
@@ -18,6 +25,7 @@ Archiver is a native Android file manager written in Kotlin. It is an independen
 ## Highlights
 
 - Shared-storage browsing with breadcrumb navigation, favorites, sorting, hidden files, multi-selection and detailed, compact or grid views.
+- Storage analysis for the largest accessible files, with bounded scanning that skips symbolic links; batch rename for multiple selected files and folders.
 - Fast in-place selection: selecting an item does not redraw the entire visible file list.
 - Scoped, bounded search starts in the current folder and never searches outside it. Searching subfolders is optional. Results include the file name, parent path and size; wildcard patterns such as `*.zip` are supported. Recursive scans stop after 10,000 visited entries or 100 matches to keep the interface responsive.
 - File actions include create, open/share, rename, copy, move, delete, information, copy path, favorites, folder colours and SHA-256 checksums.
