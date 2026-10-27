@@ -1831,8 +1831,12 @@ class MainActivity : Activity() {
                 }
                 val width = maxOf(2, (firstNumber + candidates.size - 1).toString().length)
                 val destinations = candidates.mapIndexed { index, source ->
+                    val lowerName = source.name.lowercase(Locale.ROOT)
+                    val compoundSuffix = listOf(".tar.gz", ".tar.bz2", ".tar.xz")
+                        .firstOrNull { lowerName.endsWith(it) }
                     val dot = source.name.lastIndexOf('.')
-                    val suffix = if (source.isFile && dot > 0) source.name.substring(dot) else ""
+                    val suffix = if (!source.isFile) "" else compoundSuffix
+                        ?: if (dot > 0) source.name.substring(dot) else ""
                     val number = (firstNumber + index).toString().padStart(width, '0')
                     source to File(source.parentFile ?: currentDir, "${baseName}_$number$suffix")
                 }
@@ -1871,7 +1875,8 @@ class MainActivity : Activity() {
                         )
                     }
                     meter.finish(tr("Renomeação concluída") + " · " + renamed.size)
-                    "Renomeados ${renamed.size} itens."
+                    if (appLanguage == "en") "Renamed ${renamed.size} items."
+                    else "Renomeados ${renamed.size} itens."
                 }
             }
         }
@@ -1894,6 +1899,7 @@ class MainActivity : Activity() {
             val candidates = mutableListOf<Pair<File, Long>>()
             pending.addLast(scanRoot to 0)
             var scanned = 0
+            var depthLimited = false
             while (pending.isNotEmpty() && scanned < 20000) {
                 val (file, depth) = pending.removeLast()
                 val key = pathKey(file)
@@ -1903,9 +1909,17 @@ class MainActivity : Activity() {
                     if (!isSymbolicLink(file)) {
                         when {
                             file.isFile -> candidates.add(file to file.length().coerceAtLeast(0L))
-                            file.isDirectory && depth < 80 -> {
-                                safeList(file).forEach { child ->
-                                    if (!isSymbolicLink(child)) pending.addLast(child to (depth + 1))
+                            file.isDirectory -> {
+                                if (depth >= 80) {
+                                    if (safeList(file).isNotEmpty()) depthLimited = true
+                                } else {
+                                    for (child in safeList(file).asReversed()) {
+                                        if (scanned + pending.size >= 20000) {
+                                            depthLimited = true
+                                            break
+                                        }
+                                        if (!isSymbolicLink(child)) pending.addLast(child to (depth + 1))
+                                    }
                                 }
                             }
                         }
@@ -1917,14 +1931,16 @@ class MainActivity : Activity() {
                     meter.itemDone(file)
                 }
             }
-            val limited = pending.isNotEmpty()
+            val limited = pending.isNotEmpty() || depthLimited
             val largest = candidates.sortedByDescending { it.second }.take(100).map { it.first }
             meter.finish(tr("Análise concluída") + " · " + scanned)
             runOnUiThread { showLargestFiles(largest, scanned, limited) }
-            if (limited) {
-                "Análise concluída: ${largest.size} ficheiros apresentados; limite de 20 000 entradas."
+            if (appLanguage == "en") {
+                if (limited) "Analysis complete: ${largest.size} files shown; the safety scan limit was reached."
+                else "Analysis complete: ${largest.size} files shown."
             } else {
-                "Análise concluída: ${largest.size} ficheiros apresentados."
+                if (limited) "Análise concluída: ${largest.size} ficheiros apresentados; foi atingido o limite de segurança."
+                else "Análise concluída: ${largest.size} ficheiros apresentados."
             }
         }
     }
@@ -1942,11 +1958,16 @@ class MainActivity : Activity() {
                 tr("Ficheiros verificados") + ": " + scanned
         }
         content.addView(label(summaryText, 12, mutedTextColor(), false)
-            .apply { setPadding(dp(5), dp(5), dp(5), dp(10)) },
+            .apply { setPadding(dp(5), dp(5), dp(5), dp(4)) },
+            LinearLayout.LayoutParams(-1, -2))
+        content.addView(label(
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal.",
+            11, mutedTextColor(), false
+        ).apply { setPadding(dp(5), 0, dp(5), dp(8)) },
             LinearLayout.LayoutParams(-1, -2))
         if (limited) {
             content.addView(label(
-                "A análise foi limitada a 20 000 entradas para manter a aplicação responsiva.",
+                "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas).",
                 12, mutedTextColor(), false
             ).apply { setPadding(dp(6), dp(2), dp(6), dp(10)) },
                 LinearLayout.LayoutParams(-1, -2))
@@ -5038,6 +5059,9 @@ class MainActivity : Activity() {
             "Analisar armazenamento" to "Analyze storage",
             "Análise de armazenamento" to "Storage analysis",
             "A analisar armazenamento…" to "Analyzing storage…",
+            "A renomear em lote…" to "Batch renaming…",
+            "A análise inclui apenas ficheiros acessíveis no armazenamento partilhado principal." to "The scan includes only files accessible in primary shared storage.",
+            "A análise foi limitada por segurança (20 000 entradas ou 80 níveis de pastas)." to "The scan was limited for safety (20,000 entries or 80 folder levels).",
             "Ficheiros grandes" to "Largest files",
             "Ficheiros verificados" to "Entries scanned",
             "Análise concluída" to "Analysis complete",
