@@ -1847,7 +1847,7 @@ class MainActivity : Activity() {
                         .setMessage(tr("Existe um nome repetido ou já utilizado na pasta. Escolhe outro nome base."))
                         .setPositiveButton(tr("Fechar"), null)
                         .show()
-                    return@setOnShowListener
+                    return@setOnClickListener
                 }
                 dialog.dismiss()
                 runTask("A renomear em lote…", 0L, destinations.size.toLong()) { meter ->
