@@ -2002,7 +2002,7 @@ class MainActivity : Activity() {
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
             })
-            details.addView(label(found.parentFile?.absolutePath ?: scanRoot.absolutePath,
+            details.addView(label(found.parentFile?.absolutePath ?: rootDir.absolutePath,
                 10, mutedTextColor(), false).apply {
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
